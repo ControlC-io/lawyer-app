@@ -49,7 +49,8 @@ docker-compose up -d
 
 3. **Access the application**
 - Frontend: http://localhost:3000
-- Backend API: http://localhost:3001
+- Backend health: http://localhost:3001/health
+- Backend API (base path `/api`): http://localhost:3001/api
 - MinIO Console: http://localhost:9001 (minioadmin/minioadmin)
 
 ### First-Time Setup
@@ -76,10 +77,12 @@ Floowly/
 ├── backend/          # Express.js API server
 │   ├── src/
 │   │   ├── controllers/   # Request handlers
-│   │   ├── routes/        # API routes
+│   │   ├── routes/        # API routes (workflow definitions at /api/companies/:companyId/workflows)
 │   │   ├── services/      # Business logic
-│   │   ├── middleware/    # Auth, validation, errors
-│   │   └── index.ts       # App entry point
+│   │   ├── middleware/    # Auth, validation, errors, logging
+│   │   ├── lib/           # Shared utilities (e.g. Prisma client)
+│   │   ├── app.ts         # Express app, /health, /api mount
+│   │   └── index.ts       # Server entry point
 │   ├── prisma/
 │   │   ├── schema.prisma  # Database schema
 │   │   └── migrations/    # Database migrations
@@ -89,28 +92,17 @@ Floowly/
 │   └── Dockerfile
 ├── shared/           # Shared TypeScript types
 ├── infrastructure/   # Nginx, MinIO configs
-├── database/         # SQL scripts and seeds
+├── scripts/          # Helper scripts (e.g. setup.sh)
 ├── docs/             # Documentation
-│   ├── api-migration-guide.md
-│   ├── trigger-setup.md
-│   └── deployment.md
+│   ├── architecture.md
+│   ├── deployment.md
+│   ├── openapi.yaml
+│   ├── testing-strategy.md
+│   └── trigger-setup.md
 └── docker-compose.yml
 ```
 
 ## API Documentation
-
-See [api-migration-guide.md](./docs/api-migration-guide.md) for complete API reference.
-
-### Key Endpoints
-
-```
-POST   /api/workflows/:workflowId/trigger          # Trigger workflow
-GET    /api/workflows/executions/:id               # Get execution data
-POST   /api/workflows/executions/:id/steps/:id/decision  # Make decision
-POST   /api/files/upload                           # Upload file
-POST   /api/companies/:id/invitations              # Invite user
-POST   /api/public/feedback                        # Send feedback
-```
 
 ### Authentication
 
@@ -162,10 +154,10 @@ npm install
 # Start development servers
 docker-compose up
 
-# Run migrations
-npm run migrate:dev -w backend
+# Migrations run automatically when starting the backend (dev script runs migrate:deploy first).
+# For a new migration: npm run migrate:dev -w backend
 
-# Generate Prisma client
+# Generate Prisma client / build
 npm run build -w backend
 ```
 
@@ -174,7 +166,7 @@ npm run build -w backend
 1. Create controller in `backend/src/controllers/`
 2. Create route in `backend/src/routes/`
 3. Register route in `backend/src/routes/index.ts`
-4. Update API documentation
+4. Update [docs/openapi.yaml](docs/openapi.yaml)
 
 ### Database Changes
 
@@ -191,9 +183,7 @@ npx prisma migrate reset
 
 ## Migration from Supabase
 
-This project was migrated from Supabase. All 27 edge functions have been converted to Express.js endpoints with identical functionality.
-
-See [api-migration-guide.md](./docs/api-migration-guide.md) for endpoint mappings.
+This project was migrated from Supabase. Edge functions were converted to Express.js endpoints. See project history and [architecture.md](./docs/architecture.md) for context.
 
 ## Testing
 
@@ -204,6 +194,12 @@ npm test
 # Run specific test
 npm test -- workflow.test.ts
 ```
+
+## See also
+
+- [Architecture](docs/architecture.md) — Project structure and getting started
+- [Testing strategy](docs/testing-strategy.md) — How to run and write tests
+- [OpenAPI spec](docs/openapi.yaml) — API reference
 
 ## Deployment
 

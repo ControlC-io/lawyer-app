@@ -68,6 +68,32 @@ paths:
         401:
           description: Invalid credentials
 
+  /auth/change-password:
+    post:
+      summary: Change password
+      tags: [Auth]
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [currentPassword, newPassword]
+              properties:
+                currentPassword:
+                  type: string
+                  format: password
+                newPassword:
+                  type: string
+                  format: password
+      responses:
+        200:
+          description: Password changed successfully
+        401:
+          description: Unauthorized or current password invalid
+
   # Public Endpoints
   /public/feedback:
     post:
@@ -122,6 +148,23 @@ paths:
           description: Internal error
 
   # External Endpoints
+  /external/steps/{token}:
+    get:
+      summary: Get step config by token
+      description: Get step config and workflow data_structure by external token (no auth).
+      tags: [External]
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        200:
+          description: Step config and workflow data retrieved
+        404:
+          description: Invalid or expired token
+
   /external/steps/{token}/submit:
     post:
       summary: Submit external step
@@ -360,6 +403,41 @@ paths:
         200:
           description: Log entry added successfully
 
+  /workflows/executions/{executionId}/steps/{stepId}:
+    patch:
+      summary: Update execution step
+      description: Update an execution step (e.g. reassign).
+      tags: [Workflows]
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: executionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: stepId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                assignee_id:
+                  type: string
+                  format: uuid
+      responses:
+        200:
+          description: Step updated successfully
+        404:
+          description: Execution or step not found
+
   /workflows/executions/{executionId}/steps/{stepId}/process:
     post:
       summary: Process an automatic step
@@ -367,6 +445,7 @@ paths:
       tags: [Workflows]
       security:
         - ApiKeyAuth: []
+        - InternalApiKey: []
       parameters:
         - name: executionId
           in: path
@@ -455,6 +534,33 @@ paths:
           description: Decision recorded
 
   # File Endpoints
+  /files/documents/upload:
+    post:
+      summary: Upload a document
+      description: Upload a file to the documents bucket (multipart). JWT required.
+      tags: [Files]
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                path:
+                  type: string
+                  description: Path within the bucket
+      responses:
+        200:
+          description: Document uploaded successfully
+        401:
+          description: Unauthorized
+
   /files/workflows/executions/{executionId}/files:
     post:
       summary: Upload a file for an execution
@@ -552,6 +658,7 @@ paths:
       tags: [Files]
       security:
         - ApiKeyAuth: []
+        - InternalApiKey: []
       parameters:
         - name: executionId
           in: path
@@ -580,11 +687,292 @@ paths:
         200:
           description: File step processed
 
-  # User/Company Endpoints
+  # User / Me Endpoints
+  /me:
+    get:
+      summary: Get current user profile
+      description: Get current user, companies, and super_admin flag. JWT required.
+      tags: [Users]
+      security:
+        - BearerAuth: []
+      responses:
+        200:
+          description: User profile retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user:
+                    $ref: '#/components/schemas/User'
+                  companies:
+                    type: array
+                    items:
+                      type: object
+                  super_admin:
+                    type: boolean
+        401:
+          description: Unauthorized
+    patch:
+      summary: Update current user profile
+      description: Update full_name, notifications_enabled. JWT required.
+      tags: [Users]
+      security:
+        - BearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                full_name:
+                  type: string
+                notifications_enabled:
+                  type: boolean
+      responses:
+        200:
+          description: Profile updated
+        401:
+          description: Unauthorized
+
+  # Invitations
+  /invitations/check-email:
+    get:
+      summary: Check if email exists
+      description: For sign up vs sign in on accept page. No auth.
+      tags: [Users]
+      parameters:
+        - name: email
+          in: query
+          required: true
+          schema:
+            type: string
+            format: email
+      responses:
+        200:
+          description: Check result (e.g. exists boolean)
+
+  /invitations/{token}:
+    get:
+      summary: Get invitation by token
+      description: Get invitation details for accept page. No auth.
+      tags: [Users]
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        200:
+          description: Invitation details
+        404:
+          description: Invalid or expired token
+
+  /invitations/{token}/accept:
+    post:
+      summary: Accept an invitation
+      tags: [Users]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        200:
+          description: Invitation accepted
+
+  /invitations/{id}:
+    delete:
+      summary: Cancel an invitation
+      description: Cancel a pending invitation. JWT, company admin.
+      tags: [Users]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        200:
+          description: Invitation cancelled
+        401:
+          description: Unauthorized
+        403:
+          description: Not company admin
+
+  # Companies
+  /companies:
+    get:
+      summary: List companies
+      description: List user's companies (or all if super_admin). JWT required.
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      responses:
+        200:
+          description: List of companies
+
+  /companies/{companyId}:
+    get:
+      summary: Get company
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        200:
+          description: Company details
+        404:
+          description: Company not found
+    patch:
+      summary: Update company
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+      responses:
+        200:
+          description: Company updated
+
+  /companies/{companyId}/executions:
+    get:
+      summary: List executions
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        200:
+          description: List of executions
+  /companies/{companyId}/execution-steps:
+    get:
+      summary: List execution steps
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        200:
+          description: List of execution steps
+  /companies/{companyId}/executions/{executionId}:
+    delete:
+      summary: Delete execution
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: executionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        200:
+          description: Execution deleted
+
+  /companies/{companyId}/users:
+    get:
+      summary: List company users
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        200:
+          description: List of company users
+  /companies/{companyId}/users/{userId}:
+    delete:
+      summary: Remove user from company
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        200:
+          description: User removed
+
   /companies/{companyId}/invitations:
+    get:
+      summary: List company invitations
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        200:
+          description: List of invitations
     post:
       summary: Invite a user to a company
-      tags: [Users]
+      tags: [Companies]
       security:
         - BearerAuth: []
       parameters:
@@ -607,26 +995,1571 @@ paths:
                   format: email
                 role:
                   type: string
-                  description: Role to assign to the user (e.g., company_admin, user)
+                  description: Role to assign (e.g. company_admin, user)
       responses:
         200:
           description: Invitation sent
 
-  /invitations/{token}/accept:
-    post:
-      summary: Accept an invitation
-      tags: [Users]
+  /companies/{companyId}/workflow-categories:
+    get:
+      summary: List workflow categories
+      tags: [Companies]
       security:
         - BearerAuth: []
       parameters:
-        - name: token
+        - name: companyId
           in: path
           required: true
           schema:
             type: string
+            format: uuid
       responses:
         200:
-          description: Invitation accepted
+          description: List of workflow categories
+    post:
+      summary: Create workflow category
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+      responses:
+        201:
+          description: Category created
+  /companies/{companyId}/workflow-categories/{categoryId}:
+    patch:
+      summary: Update workflow category
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: categoryId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+      responses:
+        200:
+          description: Category updated
+    delete:
+      summary: Delete workflow category
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: categoryId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        200:
+          description: Category deleted
+
+  /companies/{companyId}/groups:
+    get:
+      summary: List groups
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        200:
+          description: List of groups
+    post:
+      summary: Create group
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        201:
+          description: Group created
+  /companies/{companyId}/groups/{groupId}:
+    patch:
+      summary: Update group
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: groupId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        200:
+          description: Group updated
+    delete:
+      summary: Delete group
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: groupId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        200:
+          description: Group deleted
+  /companies/{companyId}/my-group-ids:
+    get:
+      summary: Get current user group IDs
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        200:
+          description: List of group IDs
+  /companies/{companyId}/group-members:
+    get:
+      summary: List all group members in company
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        200:
+          description: List of group members
+  /companies/{companyId}/groups/{groupId}/members:
+    get:
+      summary: List group members
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: groupId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        200:
+          description: List of members
+    post:
+      summary: Add member to group
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: groupId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        201:
+          description: Member added
+  /companies/{companyId}/groups/{groupId}/members/by-profile/{profileId}:
+    delete:
+      summary: Remove group member by profile
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: groupId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: profileId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        200:
+          description: Member removed
+  /companies/{companyId}/groups/{groupId}/members/{memberId}:
+    delete:
+      summary: Remove group member
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: groupId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: memberId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        200:
+          description: Member removed
+
+  /companies/{companyId}/api-configurations:
+    get:
+      summary: List API configurations
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        200:
+          description: List of API configurations
+    post:
+      summary: Create API configuration
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        201:
+          description: API configuration created
+  /companies/{companyId}/api-configurations/{configId}:
+    patch:
+      summary: Update API configuration
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: configId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        200:
+          description: API configuration updated
+    delete:
+      summary: Delete API configuration
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: configId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        200:
+          description: API configuration deleted
+
+  /companies/{companyId}/global-variables:
+    get:
+      summary: List global variables
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        200:
+          description: List of global variables
+    post:
+      summary: Create global variable
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        201:
+          description: Global variable created
+  /companies/{companyId}/global-variables/{variableId}:
+    patch:
+      summary: Update global variable
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: variableId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        200:
+          description: Global variable updated
+    delete:
+      summary: Delete global variable
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: variableId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        200:
+          description: Global variable deleted
+
+  /companies/{companyId}/folders:
+    get:
+      summary: List folders
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        200:
+          description: List of folders
+    post:
+      summary: Create folder
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        201:
+          description: Folder created
+  /companies/{companyId}/folders/{folderId}:
+    get:
+      summary: Get folder
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: folderId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        200:
+          description: Folder details
+    patch:
+      summary: Update folder
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: folderId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        200:
+          description: Folder updated
+    delete:
+      summary: Delete folder
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: folderId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        200:
+          description: Folder deleted
+  /companies/{companyId}/folders/{folderId}/upload:
+    post:
+      summary: Upload document to folder
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: folderId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        200:
+          description: Document uploaded
+
+  /companies/{companyId}/files:
+    get:
+      summary: List company files
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        200:
+          description: List of files
+    post:
+      summary: Create file record
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        201:
+          description: File record created
+  /companies/{companyId}/files/by-metadata:
+    get:
+      summary: Get file IDs by metadata
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        200:
+          description: List of file IDs
+  /companies/{companyId}/files/{fileId}/metadata:
+    put:
+      summary: Update file metadata
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: fileId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        200:
+          description: Metadata updated
+  /companies/{companyId}/files/{fileId}:
+    delete:
+      summary: Delete company file
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: fileId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        200:
+          description: File deleted
+
+  /companies/{companyId}/agent-permissions:
+    get:
+      summary: List agent permissions
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        200:
+          description: List of agent permissions
+    post:
+      summary: Add agent permission
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        201:
+          description: Permission added
+  /companies/{companyId}/agent-permissions/{permissionId}:
+    patch:
+      summary: Update agent permission
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: permissionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        200:
+          description: Permission updated
+    delete:
+      summary: Delete agent permission
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: permissionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        200:
+          description: Permission deleted
+
+  /companies/{companyId}/data-tables:
+    get:
+      summary: List data tables
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        200:
+          description: List of data tables
+    post:
+      summary: Create data table
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        201:
+          description: Data table created
+  /companies/{companyId}/data-tables/{tableId}:
+    patch:
+      summary: Update data table
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: tableId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        200:
+          description: Data table updated
+    delete:
+      summary: Delete data table
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: tableId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        200:
+          description: Data table deleted
+  /companies/{companyId}/data-tables/{tableId}/copy:
+    post:
+      summary: Copy data table
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: tableId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        201:
+          description: Data table copied
+  /companies/{companyId}/data-tables/{tableId}/fields:
+    get:
+      summary: List data table fields
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: tableId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        200:
+          description: List of fields
+    post:
+      summary: Create data table field
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: tableId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        201:
+          description: Field created
+  /companies/{companyId}/data-tables/{tableId}/fields/{fieldId}:
+    patch:
+      summary: Update data table field
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: tableId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: fieldId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        200:
+          description: Field updated
+    delete:
+      summary: Delete data table field
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: tableId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: fieldId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        200:
+          description: Field deleted
+  /companies/{companyId}/data-tables/{tableId}/records:
+    get:
+      summary: List data table records
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: tableId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        200:
+          description: List of records
+    post:
+      summary: Create data table record
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: tableId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        201:
+          description: Record created
+  /companies/{companyId}/data-tables/{tableId}/records/{recordId}:
+    patch:
+      summary: Update data table record
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: tableId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: recordId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        200:
+          description: Record updated
+    delete:
+      summary: Delete data table record
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: tableId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: recordId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        200:
+          description: Record deleted
+
+  /companies/{companyId}/files-metadata-keys:
+    get:
+      summary: List files metadata keys
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        200:
+          description: List of metadata keys
+    post:
+      summary: Create files metadata key
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        201:
+          description: Metadata key created
+  /companies/{companyId}/files-metadata-keys/{keyId}:
+    patch:
+      summary: Update files metadata key
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: keyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        200:
+          description: Metadata key updated
+    delete:
+      summary: Delete files metadata key
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: keyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        200:
+          description: Metadata key deleted
+
+  # Workflow definitions (under companies)
+  /companies/{companyId}/workflows:
+    get:
+      summary: List workflows
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        200:
+          description: List of workflows
+    post:
+      summary: Create workflow
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        201:
+          description: Workflow created
+  /companies/{companyId}/workflows/{workflowId}:
+    get:
+      summary: Get workflow
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: workflowId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        200:
+          description: Workflow details
+    patch:
+      summary: Update workflow
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: workflowId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        200:
+          description: Workflow updated
+    delete:
+      summary: Delete workflow
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: workflowId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        200:
+          description: Workflow deleted
+  /companies/{companyId}/workflows/{workflowId}/steps:
+    put:
+      summary: Put workflow steps
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: workflowId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                type: object
+      responses:
+        200:
+          description: Steps updated
+  /companies/{companyId}/workflows/{workflowId}/connections:
+    put:
+      summary: Put workflow connections
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: workflowId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                type: object
+      responses:
+        200:
+          description: Connections updated
+  /companies/{companyId}/workflows/{workflowId}/statuses:
+    get:
+      summary: List workflow statuses
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: workflowId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        200:
+          description: List of statuses
+    post:
+      summary: Create workflow status
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: workflowId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        201:
+          description: Status created
+  /companies/{companyId}/workflows/{workflowId}/statuses/{statusId}:
+    patch:
+      summary: Update workflow status
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: workflowId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: statusId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        200:
+          description: Status updated
+    delete:
+      summary: Delete workflow status
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: workflowId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: statusId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        200:
+          description: Status deleted
+  /companies/{companyId}/workflows/{workflowId}/permissions:
+    get:
+      summary: List workflow permissions
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: workflowId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        200:
+          description: List of permissions
+    post:
+      summary: Add workflow permission
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: workflowId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        201:
+          description: Permission added
+  /companies/{companyId}/workflows/{workflowId}/permissions/{permissionId}:
+    delete:
+      summary: Delete workflow permission
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: workflowId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: permissionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        200:
+          description: Permission deleted
 
   /users/{userId}:
     get:
@@ -660,6 +2593,130 @@ paths:
                       user_company: { type: array, items: { type: object } }
 
   # Agent Endpoints
+  /agents/categories:
+    get:
+      summary: List agent categories
+      tags: [Agents]
+      security:
+        - BearerAuth: []
+      responses:
+        200:
+          description: List of agent categories
+    post:
+      summary: Create agent category
+      tags: [Agents]
+      security:
+        - BearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+      responses:
+        201:
+          description: Category created
+  /agents/categories/{categoryId}:
+    patch:
+      summary: Update agent category
+      tags: [Agents]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: categoryId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+      responses:
+        200:
+          description: Category updated
+    delete:
+      summary: Delete agent category
+      tags: [Agents]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: categoryId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        200:
+          description: Category deleted
+
+  /agents/configurations:
+    get:
+      summary: List agent configurations
+      tags: [Agents]
+      security:
+        - BearerAuth: []
+      responses:
+        200:
+          description: List of agent configurations
+    post:
+      summary: Create agent configuration
+      tags: [Agents]
+      security:
+        - BearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        201:
+          description: Configuration created
+  /agents/configurations/{configId}:
+    patch:
+      summary: Update agent configuration
+      tags: [Agents]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: configId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        200:
+          description: Configuration updated
+    delete:
+      summary: Delete agent configuration
+      tags: [Agents]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: configId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        200:
+          description: Configuration deleted
+
   /agents/{agentId}:
     get:
       summary: Get agent configuration
@@ -756,6 +2813,44 @@ paths:
                     type: string
 
   # Notification Endpoints
+  /notifications:
+    get:
+      summary: List notifications
+      description: List notifications for the current user. JWT required.
+      tags: [Notifications]
+      security:
+        - BearerAuth: []
+      responses:
+        200:
+          description: List of notifications
+
+  /notifications/mark-all-read:
+    post:
+      summary: Mark all notifications as read
+      tags: [Notifications]
+      security:
+        - BearerAuth: []
+      responses:
+        200:
+          description: All marked as read
+
+  /notifications/{id}/read:
+    patch:
+      summary: Mark one notification as read
+      tags: [Notifications]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        200:
+          description: Notification marked as read
+
   /notifications/assignment:
     post:
       summary: Send assignment notification
@@ -787,6 +2882,11 @@ components:
       type: apiKey
       in: header
       name: x-api-key
+    InternalApiKey:
+      type: apiKey
+      in: header
+      name: x-internal-api-key
+      description: Used by database triggers and internal services
 
   schemas:
     User:
