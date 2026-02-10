@@ -181,10 +181,6 @@ npx prisma migrate deploy
 npx prisma migrate reset
 ```
 
-## Migration from Supabase
-
-This project was migrated from Supabase. Edge functions were converted to Express.js endpoints. See project history and [architecture.md](./docs/architecture.md) for context.
-
 ## Testing
 
 ```bash
@@ -204,11 +200,3 @@ npm test -- workflow.test.ts
 ## Deployment
 
 See [deployment.md](./docs/deployment.md) for detailed deployment instructions.
-
-## License
-
-[Your License Here]
-
-## Support
-
-For issues or questions, please contact: [your-contact]
