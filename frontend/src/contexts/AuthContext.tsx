@@ -1,0 +1,171 @@
+import { createContext, useContext, useEffect, useState, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
+import { api, setToken, clearToken } from "@/lib/api";
+
+const SELECTED_COMPANY_KEY = "floowly_selected_company";
+
+interface Profile {
+  id: string;
+  email: string;
+  full_name: string | null;
+  notifications_enabled?: boolean;
+  is_super_admin?: boolean;
+}
+
+interface UserCompany {
+  company_id: string;
+  role: "company_admin" | "user";
+}
+
+/** Minimal user shape for compatibility (replaces Supabase User) */
+interface User {
+  id: string;
+  email?: string;
+}
+
+/** Minimal session shape (replaces Supabase Session) */
+interface Session {
+  user: User;
+}
+
+interface AuthContextType {
+  user: User | null;
+  session: Session | null;
+  profile: Profile | null;
+  userCompanies: UserCompany[];
+  loading: boolean;
+  selectedCompanyId: string | null;
+  setSelectedCompanyId: (id: string | null) => void;
+  isCompanyAdmin: boolean;
+  isSuperAdmin: boolean;
+  signOut: () => Promise<void>;
+  refreshUserData: () => Promise<void>;
+}
+
+const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const [user, setUser] = useState<User | null>(null);
+  const [session, setSession] = useState<Session | null>(null);
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const [userCompanies, setUserCompanies] = useState<UserCompany[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedCompanyId, setSelectedCompanyIdState] = useState<string | null>(null);
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  const navigate = useNavigate();
+
+  const setSelectedCompanyId = useCallback((id: string | null) => {
+    setSelectedCompanyIdState(id);
+    if (id) {
+      localStorage.setItem(SELECTED_COMPANY_KEY, id);
+    } else {
+      localStorage.removeItem(SELECTED_COMPANY_KEY);
+    }
+  }, []);
+
+  const isCompanyAdmin = selectedCompanyId
+    ? userCompanies.some((uc) => uc.company_id === selectedCompanyId && uc.role === "company_admin")
+    : false;
+
+  const fetchUserData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await api.get<{
+        profile: { id: string; email: string; full_name: string | null; notifications_enabled?: boolean };
+        user_companies: { company_id: string; role: string }[];
+        super_admin: boolean;
+      }>("/api/me");
+
+      setProfile({
+        id: data.profile.id,
+        email: data.profile.email,
+        full_name: data.profile.full_name,
+        notifications_enabled: data.profile.notifications_enabled,
+      });
+
+      const companies = (data.user_companies || []).map((uc) => ({
+        company_id: uc.company_id,
+        role: uc.role as "company_admin" | "user",
+      }));
+      setUserCompanies(companies);
+      setIsSuperAdmin(data.super_admin ?? false);
+
+      const u: User = { id: data.profile.id, email: data.profile.email };
+      setUser(u);
+      setSession({ user: u });
+
+      if (companies.length > 0) {
+        const storedCompanyId = localStorage.getItem(SELECTED_COMPANY_KEY);
+        const isStoredCompanyValid = storedCompanyId && companies.some((uc) => uc.company_id === storedCompanyId);
+        if (isStoredCompanyValid) {
+          setSelectedCompanyIdState(storedCompanyId);
+        } else {
+          setSelectedCompanyId(companies[0].company_id);
+        }
+      }
+    } catch (err) {
+      clearToken();
+      setUser(null);
+      setSession(null);
+      setProfile(null);
+      setUserCompanies([]);
+      setSelectedCompanyIdState(null);
+      setIsSuperAdmin(false);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const token = localStorage.getItem("floowly_token");
+    if (token) {
+      fetchUserData();
+    } else {
+      setLoading(false);
+    }
+  }, [fetchUserData]);
+
+  const signOut = async () => {
+    clearToken();
+    setUser(null);
+    setSession(null);
+    setProfile(null);
+    setUserCompanies([]);
+    setSelectedCompanyIdState(null);
+    navigate("/auth");
+  };
+
+  const refreshUserData = async () => {
+    if (localStorage.getItem("floowly_token")) {
+      await fetchUserData();
+    }
+  };
+
+  return (
+    <AuthContext.Provider
+      value={{
+        user,
+        session,
+        profile,
+        userCompanies,
+        loading,
+        selectedCompanyId,
+        setSelectedCompanyId,
+        isCompanyAdmin,
+        isSuperAdmin,
+        signOut,
+        refreshUserData,
+      }}
+    >
+      {children}
+    </AuthContext.Provider>
+  );
+}
+
+export function useAuth() {
+  const context = useContext(AuthContext);
+  if (context === undefined) {
+    throw new Error("useAuth must be used within an AuthProvider");
+  }
+  return context;
+}

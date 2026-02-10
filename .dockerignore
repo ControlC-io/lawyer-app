@@ -1,0 +1,25 @@
+# Dependencies – install fresh in container so platform binaries and workspace layout are correct
+node_modules
+**/node_modules
+
+# Build outputs
+dist
+**/dist
+frontend/dist
+backend/dist
+shared/dist
+backend/coverage
+
+# Env and logs
+.env
+.env.*
+*.log
+
+# Git and IDE
+.git
+.gitignore
+.dockerignore
+.DS_Store
+.cursor
+*.md
+!README.md

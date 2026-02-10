@@ -1,0 +1,1414 @@
+import { Response } from 'express';
+import { AuthRequest } from '../middleware/auth';
+import { prisma } from '../lib/prisma';
+
+/**
+ * Ensure the authenticated user has access to the company (member of company).
+ * Optionally require company_admin role.
+ */
+async function ensureCompanyAccess(req: AuthRequest, companyId: string, requireAdmin = false) {
+  const userId = req.user?.id;
+  if (!userId) {
+    return { error: { status: 401, body: { error: 'Unauthorized', details: 'Authentication required' } } };
+  }
+
+  const userCompany = await prisma.userCompany.findFirst({
+    where: { user_id: userId, company_id: companyId },
+  });
+
+  if (!userCompany) {
+    return { error: { status: 403, body: { error: 'Forbidden', details: 'You do not have access to this company' } } };
+  }
+
+  if (requireAdmin && userCompany.role !== 'company_admin') {
+    return { error: { status: 403, body: { error: 'Forbidden', details: 'Company admin role required' } } };
+  }
+
+  return { userCompany };
+}
+
+export const companiesController = {
+  /**
+   * GET /api/companies
+   * List companies (user's companies, or all if super_admin)
+   */
+  async listCompanies(req: AuthRequest, res: Response) {
+    try {
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+      const superAdmin = await prisma.profileAdminRole.findUnique({ where: { profile_id: userId }, select: { super_admin: true } }).then((r) => r?.super_admin ?? false);
+      if (superAdmin) {
+        const all = await prisma.company.findMany({ select: { id: true, name: true }, orderBy: { name: 'asc' } });
+        return res.json(all);
+      }
+      const memberships = await prisma.userCompany.findMany({ where: { user_id: userId }, include: { company: { select: { id: true, name: true } } } });
+      return res.json(memberships.map((m) => ({ id: m.company.id, name: m.company.name })));
+    } catch (error) {
+      console.error('listCompanies error:', error);
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
+  /**
+   * GET /api/companies/:companyId
+   * Get company details (JWT, user must belong to company)
+   */
+  async getCompany(req: AuthRequest, res: Response) {
+    try {
+      const { companyId } = req.params;
+      if (!companyId) {
+        return res.status(400).json({ error: 'Missing company ID', details: 'companyId is required' });
+      }
+
+      const access = await ensureCompanyAccess(req, companyId);
+      if (access.error) {
+        return res.status(access.error.status).json(access.error.body);
+      }
+
+      const company = await prisma.company.findUnique({
+        where: { id: companyId },
+        select: {
+          id: true,
+          name: true,
+          created_at: true,
+          api_key: true,
+          is_active: true,
+        },
+      });
+
+      if (!company) {
+        return res.status(404).json({ error: 'Company not found', details: 'Company not found' });
+      }
+
+      // Return full api_key so dashboard can call execution endpoints with x-api-key
+      return res.json({
+        ...company,
+        has_api_key: !!company.api_key,
+      });
+    } catch (error) {
+      console.error('getCompany error:', error);
+      return res.status(500).json({
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  },
+
+  /**
+   * PATCH /api/companies/:companyId
+   * Update company (JWT, company admin only)
+   */
+  async updateCompany(req: AuthRequest, res: Response) {
+    try {
+      const { companyId } = req.params;
+      const { name, is_active, regenerate_api_key } = req.body;
+
+      if (!companyId) {
+        return res.status(400).json({ error: 'Missing company ID', details: 'companyId is required' });
+      }
+
+      const access = await ensureCompanyAccess(req, companyId, true);
+      if (access.error) {
+        return res.status(access.error.status).json(access.error.body);
+      }
+
+      const updateData: { name?: string; is_active?: boolean; api_key?: string } = {};
+      if (typeof name === 'string') updateData.name = name.trim();
+      if (typeof is_active === 'boolean') updateData.is_active = is_active;
+      if (regenerate_api_key === true) {
+        const crypto = await import('crypto');
+        updateData.api_key = crypto.randomBytes(32).toString('hex');
+      }
+
+      const company = await prisma.company.update({
+        where: { id: companyId },
+        data: updateData,
+        select: { id: true, name: true, created_at: true, is_active: true, api_key: true },
+      });
+
+      return res.json(company);
+    } catch (error) {
+      console.error('updateCompany error:', error);
+      return res.status(500).json({
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  },
+
+  /**
+   * GET /api/companies/:companyId/files-metadata-keys
+   * List files metadata keys for organization settings
+   */
+  async listFilesMetadataKeys(req: AuthRequest, res: Response) {
+    try {
+      const { companyId } = req.params;
+      if (!companyId) {
+        return res.status(400).json({ error: 'Missing company ID', details: 'companyId is required' });
+      }
+
+      const access = await ensureCompanyAccess(req, companyId);
+      if (access.error) {
+        return res.status(access.error.status).json(access.error.body);
+      }
+
+      const keys = await prisma.filesMetadataKey.findMany({
+        where: { company_id: companyId },
+        orderBy: { name: 'asc' },
+      });
+
+      return res.json(keys);
+    } catch (error) {
+      console.error('listFilesMetadataKeys error:', error);
+      return res.status(500).json({
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  },
+
+  /**
+   * POST /api/companies/:companyId/files-metadata-keys
+   * Create a files metadata key
+   */
+  async createFilesMetadataKey(req: AuthRequest, res: Response) {
+    try {
+      const { companyId } = req.params;
+      const { name } = req.body;
+
+      if (!companyId) {
+        return res.status(400).json({ error: 'Missing company ID', details: 'companyId is required' });
+      }
+
+      const access = await ensureCompanyAccess(req, companyId, true);
+      if (access.error) {
+        return res.status(access.error.status).json(access.error.body);
+      }
+
+      const key = await prisma.filesMetadataKey.create({
+        data: {
+          company_id: companyId,
+          name: typeof name === 'string' ? name.trim() || null : null,
+        },
+      });
+
+      return res.status(201).json(key);
+    } catch (error) {
+      console.error('createFilesMetadataKey error:', error);
+      return res.status(500).json({
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  },
+
+  /**
+   * PATCH /api/companies/:companyId/files-metadata-keys/:keyId
+   * Update a files metadata key
+   */
+  async updateFilesMetadataKey(req: AuthRequest, res: Response) {
+    try {
+      const { companyId, keyId } = req.params;
+      const { name } = req.body;
+
+      if (!companyId || !keyId) {
+        return res.status(400).json({ error: 'Missing company ID or key ID', details: 'companyId and keyId are required' });
+      }
+
+      const access = await ensureCompanyAccess(req, companyId, true);
+      if (access.error) {
+        return res.status(access.error.status).json(access.error.body);
+      }
+
+      const key = await prisma.filesMetadataKey.updateMany({
+        where: { id: keyId, company_id: companyId },
+        data: { name: typeof name === 'string' ? name.trim() || null : undefined },
+      });
+
+      if (key.count === 0) {
+        return res.status(404).json({ error: 'Metadata key not found', details: 'Key not found or access denied' });
+      }
+
+      const updated = await prisma.filesMetadataKey.findUnique({
+        where: { id: keyId },
+      });
+      return res.json(updated);
+    } catch (error) {
+      console.error('updateFilesMetadataKey error:', error);
+      return res.status(500).json({
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  },
+
+  /**
+   * DELETE /api/companies/:companyId/files-metadata-keys/:keyId
+   * Delete a files metadata key
+   */
+  async deleteFilesMetadataKey(req: AuthRequest, res: Response) {
+    try {
+      const { companyId, keyId } = req.params;
+
+      if (!companyId || !keyId) {
+        return res.status(400).json({ error: 'Missing company ID or key ID', details: 'companyId and keyId are required' });
+      }
+
+      const access = await ensureCompanyAccess(req, companyId, true);
+      if (access.error) {
+        return res.status(access.error.status).json(access.error.body);
+      }
+
+      const result = await prisma.filesMetadataKey.deleteMany({
+        where: { id: keyId, company_id: companyId },
+      });
+
+      if (result.count === 0) {
+        return res.status(404).json({ error: 'Metadata key not found', details: 'Key not found or access denied' });
+      }
+
+      return res.status(204).send();
+    } catch (error) {
+      console.error('deleteFilesMetadataKey error:', error);
+      return res.status(500).json({
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  },
+
+  /**
+   * PUT /api/companies/:companyId/files/:fileId/metadata
+   * Replace all metadata key-value entries for a file (key = metadata key name)
+   */
+  async updateFileMetadata(req: AuthRequest, res: Response) {
+    try {
+      const { companyId, fileId } = req.params;
+      const { entries } = (req.body || {}) as { entries?: Array<{ key: string; value: string }> };
+      if (!companyId || !fileId) return res.status(400).json({ error: 'Missing company ID or file ID' });
+      const access = await ensureCompanyAccess(req, companyId, true);
+      if (access.error) return res.status(access.error.status).json(access.error.body);
+
+      const file = await prisma.file.findFirst({ where: { id: fileId, company_id: companyId } });
+      if (!file) return res.status(404).json({ error: 'File not found' });
+
+      const list = Array.isArray(entries) ? entries.filter((e) => e && typeof e.key === 'string' && e.key.trim() !== '') : [];
+      const keyMap = new Map<string, string>();
+      const keys = await prisma.filesMetadataKey.findMany({ where: { company_id: companyId }, select: { id: true, name: true } });
+      keys.forEach((k) => { if (k.name) keyMap.set(k.name, k.id); });
+
+      await prisma.filesMetadataValue.deleteMany({ where: { files_id: fileId, company_id: companyId } });
+
+      for (const entry of list) {
+        let keyId = keyMap.get(entry.key.trim());
+        if (!keyId) {
+          const created = await prisma.filesMetadataKey.create({
+            data: { company_id: companyId, name: entry.key.trim() },
+            select: { id: true, name: true },
+          });
+          keyId = created.id;
+          if (created.name) keyMap.set(created.name, created.id);
+        }
+        await prisma.filesMetadataValue.create({
+          data: {
+            files_id: fileId,
+            metadata_id: keyId,
+            value: typeof entry.value === 'string' ? entry.value : String(entry.value),
+            company_id: companyId,
+          },
+        });
+      }
+
+      return res.status(200).json({ ok: true });
+    } catch (error) {
+      console.error('updateFileMetadata error:', error);
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
+  /**
+   * GET /api/companies/:companyId/executions
+   * List workflow executions for the company (JWT, user must belong to company)
+   */
+  async listExecutions(req: AuthRequest, res: Response) {
+    try {
+      const { companyId } = req.params;
+      const workflowId = req.query.workflowId as string | undefined;
+      const status = req.query.status as string | undefined;
+      const categoryId = req.query.categoryId as string | undefined;
+      const includeData = req.query.includeData === 'true';
+
+      if (!companyId) {
+        return res.status(400).json({ error: 'Missing company ID', details: 'companyId is required' });
+      }
+
+      const access = await ensureCompanyAccess(req, companyId);
+      if (access.error) {
+        return res.status(access.error.status).json(access.error.body);
+      }
+
+      const where: { company_id: string; workflow_id?: string; status?: string; workflow?: { category_id: string | null } } = {
+        company_id: companyId,
+      };
+      if (workflowId) where.workflow_id = workflowId;
+      if (status) where.status = status as any;
+      if (categoryId !== undefined) {
+        where.workflow = { category_id: categoryId || null };
+      }
+
+      const executions = await prisma.workflowExecution.findMany({
+        where,
+        orderBy: { created_at: 'desc' },
+        include: {
+          workflow: {
+            select: { id: true, name: true, category_id: true, icon: true },
+          },
+          current_step: { select: { name: true } },
+          ...(includeData ? { execution_data_records: true } : {}),
+        },
+      });
+
+      return res.json(executions.map((e) => ({
+        ...e,
+        current_step_name: e.current_step?.name ?? null,
+      })));
+    } catch (error) {
+      console.error('listExecutions error:', error);
+      return res.status(500).json({
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  },
+
+  /**
+   * GET /api/companies/:companyId/execution-steps
+   * List execution steps (e.g. status=running) for "My Tasks" (JWT)
+   */
+  async listExecutionSteps(req: AuthRequest, res: Response) {
+    try {
+      const { companyId } = req.params;
+      const status = (req.query.status as string) || 'running';
+      if (!companyId) return res.status(400).json({ error: 'Missing company ID' });
+      const access = await ensureCompanyAccess(req, companyId);
+      if (access.error) return res.status(access.error.status).json(access.error.body);
+
+      const steps = await prisma.workflowExecutionStep.findMany({
+        where: { company_id: companyId, status: status as any },
+        select: {
+          execution_id: true,
+          assigned_to_user_id: true,
+          assigned_to_group_id: true,
+          step: { select: { name: true, step_type: true, action_type: true, config: true } },
+        },
+      });
+      return res.json(steps.map((s) => ({
+        execution_id: s.execution_id,
+        assigned_to_user_id: s.assigned_to_user_id,
+        assigned_to_group_id: s.assigned_to_group_id,
+        workflow_steps: s.step,
+      })));
+    } catch (error) {
+      console.error('listExecutionSteps error:', error);
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
+  /**
+   * DELETE /api/companies/:companyId/executions/:executionId
+   */
+  async deleteExecution(req: AuthRequest, res: Response) {
+    try {
+      const { companyId, executionId } = req.params;
+      if (!companyId || !executionId) return res.status(400).json({ error: 'Missing company ID or execution ID' });
+      const access = await ensureCompanyAccess(req, companyId);
+      if (access.error) return res.status(access.error.status).json(access.error.body);
+
+      const execution = await prisma.workflowExecution.findFirst({
+        where: { id: executionId, company_id: companyId },
+        select: { id: true },
+      });
+      if (!execution) return res.status(404).json({ error: 'Execution not found' });
+
+      await prisma.workflowExecution.delete({ where: { id: executionId } });
+      return res.status(204).send();
+    } catch (error) {
+      console.error('deleteExecution error:', error);
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
+  /**
+   * DELETE /api/companies/:companyId/users/:userId
+   * Remove a user from the company (company admin): remove from groups, user_company, cancel invitations
+   */
+  async removeUserFromCompany(req: AuthRequest, res: Response) {
+    try {
+      const { companyId, userId: targetUserId } = req.params;
+      if (!companyId || !targetUserId) return res.status(400).json({ error: 'Missing company ID or user ID' });
+      const access = await ensureCompanyAccess(req, companyId, true);
+      if (access.error) return res.status(access.error.status).json(access.error.body);
+      const groups = await prisma.profileGroup.findMany({ where: { company_id: companyId }, select: { id: true } });
+      const groupIds = groups.map((g) => g.id);
+      if (groupIds.length > 0) {
+        await prisma.profileGroupMember.deleteMany({
+          where: { profile_id: targetUserId, group_id: { in: groupIds } },
+        });
+      }
+      await prisma.userCompany.deleteMany({
+        where: { user_id: targetUserId, company_id: companyId },
+      });
+      const profile = await prisma.profile.findUnique({ where: { id: targetUserId }, select: { email: true } });
+      if (profile?.email) {
+        await prisma.invitation.deleteMany({
+          where: { company_id: companyId, email: profile.email },
+        });
+      }
+      return res.status(204).send();
+    } catch (error) {
+      console.error('removeUserFromCompany error:', error);
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
+  // --- Profile groups ---
+  async getMyGroupIds(req: AuthRequest, res: Response) {
+    try {
+      const { companyId } = req.params;
+      const userId = req.user?.id;
+      if (!companyId || !userId) return res.status(400).json({ error: 'Missing company ID or not authenticated' });
+      const access = await ensureCompanyAccess(req, companyId);
+      if (access.error) return res.status(access.error.status).json(access.error.body);
+      const memberships = await prisma.profileGroupMember.findMany({
+        where: {
+          profile_id: userId,
+          group: { company_id: companyId },
+        },
+        select: { group_id: true },
+      });
+      return res.json({ group_ids: memberships.map((m) => m.group_id) });
+    } catch (error) {
+      console.error('getMyGroupIds error:', error);
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
+  async listGroups(req: AuthRequest, res: Response) {
+    try {
+      const { companyId } = req.params;
+      if (!companyId) return res.status(400).json({ error: 'Missing company ID' });
+      const access = await ensureCompanyAccess(req, companyId);
+      if (access.error) return res.status(access.error.status).json(access.error.body);
+      const groups = await prisma.profileGroup.findMany({
+        where: { company_id: companyId },
+        orderBy: { name: 'asc' },
+      });
+      return res.json(groups);
+    } catch (error) {
+      console.error('listGroups error:', error);
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
+  async createGroup(req: AuthRequest, res: Response) {
+    try {
+      const { companyId } = req.params;
+      const { name, description } = req.body || {};
+      if (!companyId) return res.status(400).json({ error: 'Missing company ID' });
+      const access = await ensureCompanyAccess(req, companyId, true);
+      if (access.error) return res.status(access.error.status).json(access.error.body);
+      const group = await prisma.profileGroup.create({
+        data: {
+          company_id: companyId,
+          created_by: req.user?.id,
+          name: typeof name === 'string' ? name.trim() : 'New Group',
+          description: typeof description === 'string' ? description : null,
+        },
+      });
+      return res.status(201).json(group);
+    } catch (error) {
+      console.error('createGroup error:', error);
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
+  async updateGroup(req: AuthRequest, res: Response) {
+    try {
+      const { companyId, groupId } = req.params;
+      const { name, description } = req.body || {};
+      if (!companyId || !groupId) return res.status(400).json({ error: 'Missing company ID or group ID' });
+      const access = await ensureCompanyAccess(req, companyId, true);
+      if (access.error) return res.status(access.error.status).json(access.error.body);
+      const result = await prisma.profileGroup.updateMany({
+        where: { id: groupId, company_id: companyId },
+        data: {
+          ...(typeof name === 'string' && { name: name.trim() }),
+          ...(typeof description === 'string' && { description }),
+        },
+      });
+      if (result.count === 0) return res.status(404).json({ error: 'Group not found' });
+      const updated = await prisma.profileGroup.findUnique({ where: { id: groupId } });
+      return res.json(updated);
+    } catch (error) {
+      console.error('updateGroup error:', error);
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
+  async deleteGroup(req: AuthRequest, res: Response) {
+    try {
+      const { companyId, groupId } = req.params;
+      if (!companyId || !groupId) return res.status(400).json({ error: 'Missing company ID or group ID' });
+      const access = await ensureCompanyAccess(req, companyId, true);
+      if (access.error) return res.status(access.error.status).json(access.error.body);
+      const result = await prisma.profileGroup.deleteMany({
+        where: { id: groupId, company_id: companyId },
+      });
+      if (result.count === 0) return res.status(404).json({ error: 'Group not found' });
+      return res.status(204).send();
+    } catch (error) {
+      console.error('deleteGroup error:', error);
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
+  /** GET /api/companies/:companyId/group-members - all memberships for company groups */
+  async listAllGroupMembers(req: AuthRequest, res: Response) {
+    try {
+      const { companyId } = req.params;
+      if (!companyId) return res.status(400).json({ error: 'Missing company ID' });
+      const access = await ensureCompanyAccess(req, companyId);
+      if (access.error) return res.status(access.error.status).json(access.error.body);
+      const members = await prisma.profileGroupMember.findMany({
+        where: { group: { company_id: companyId } },
+        select: { profile_id: true, group_id: true },
+      });
+      return res.json(members);
+    } catch (error) {
+      console.error('listAllGroupMembers error:', error);
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
+  async listGroupMembers(req: AuthRequest, res: Response) {
+    try {
+      const { companyId, groupId } = req.params;
+      if (!companyId || !groupId) return res.status(400).json({ error: 'Missing company ID or group ID' });
+      const access = await ensureCompanyAccess(req, companyId);
+      if (access.error) return res.status(access.error.status).json(access.error.body);
+      const group = await prisma.profileGroup.findFirst({
+        where: { id: groupId, company_id: companyId },
+        include: { members: { include: { profile: { select: { id: true, email: true, full_name: true } } } } },
+      });
+      if (!group) return res.status(404).json({ error: 'Group not found' });
+      return res.json(group.members);
+    } catch (error) {
+      console.error('listGroupMembers error:', error);
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
+  async addGroupMember(req: AuthRequest, res: Response) {
+    try {
+      const { companyId, groupId } = req.params;
+      const { profile_id } = req.body || {};
+      if (!companyId || !groupId || !profile_id) return res.status(400).json({ error: 'Missing company ID, group ID or profile_id' });
+      const access = await ensureCompanyAccess(req, companyId, true);
+      if (access.error) return res.status(access.error.status).json(access.error.body);
+      const group = await prisma.profileGroup.findFirst({ where: { id: groupId, company_id: companyId } });
+      if (!group) return res.status(404).json({ error: 'Group not found' });
+      await prisma.profileGroupMember.create({
+        data: { group_id: groupId, profile_id },
+      });
+      const member = await prisma.profileGroupMember.findFirst({
+        where: { group_id: groupId, profile_id },
+        include: { profile: { select: { id: true, email: true, full_name: true } } },
+      });
+      return res.status(201).json(member);
+    } catch (error: unknown) {
+      const e = error as { code?: string };
+      if (e.code === 'P2002') return res.status(400).json({ error: 'Member already in group' });
+      console.error('addGroupMember error:', error);
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
+  async removeGroupMember(req: AuthRequest, res: Response) {
+    try {
+      const { companyId, groupId, memberId } = req.params;
+      if (!companyId || !groupId || !memberId) return res.status(400).json({ error: 'Missing company ID, group ID or member ID' });
+      const access = await ensureCompanyAccess(req, companyId, true);
+      if (access.error) return res.status(access.error.status).json(access.error.body);
+      const group = await prisma.profileGroup.findFirst({ where: { id: groupId, company_id: companyId } });
+      if (!group) return res.status(404).json({ error: 'Group not found' });
+      const result = await prisma.profileGroupMember.deleteMany({
+        where: { id: memberId, group_id: groupId },
+      });
+      if (result.count === 0) return res.status(404).json({ error: 'Member not found' });
+      return res.status(204).send();
+    } catch (error) {
+      console.error('removeGroupMember error:', error);
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
+  /** DELETE /api/companies/:companyId/groups/:groupId/members/by-profile/:profileId */
+  async removeGroupMemberByProfile(req: AuthRequest, res: Response) {
+    try {
+      const { companyId, groupId, profileId } = req.params;
+      if (!companyId || !groupId || !profileId) return res.status(400).json({ error: 'Missing company ID, group ID or profile ID' });
+      const access = await ensureCompanyAccess(req, companyId, true);
+      if (access.error) return res.status(access.error.status).json(access.error.body);
+      const group = await prisma.profileGroup.findFirst({ where: { id: groupId, company_id: companyId } });
+      if (!group) return res.status(404).json({ error: 'Group not found' });
+      const result = await prisma.profileGroupMember.deleteMany({
+        where: { group_id: groupId, profile_id: profileId },
+      });
+      if (result.count === 0) return res.status(404).json({ error: 'Member not found' });
+      return res.status(204).send();
+    } catch (error) {
+      console.error('removeGroupMemberByProfile error:', error);
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
+  // --- API configurations ---
+  async listApiConfigurations(req: AuthRequest, res: Response) {
+    try {
+      const { companyId } = req.params;
+      const configType = req.query.config_type as string | undefined;
+      if (!companyId) return res.status(400).json({ error: 'Missing company ID' });
+      const access = await ensureCompanyAccess(req, companyId);
+      if (access.error) return res.status(access.error.status).json(access.error.body);
+      const where: { company_id: string; config_type?: string } = { company_id: companyId };
+      if (configType) where.config_type = configType;
+      const list = await prisma.apiConfiguration.findMany({ where, orderBy: { name: 'asc' } });
+      return res.json(list);
+    } catch (error) {
+      console.error('listApiConfigurations error:', error);
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
+  async createApiConfiguration(req: AuthRequest, res: Response) {
+    try {
+      const { companyId } = req.params;
+      const body = req.body || {};
+      if (!companyId) return res.status(400).json({ error: 'Missing company ID' });
+      const access = await ensureCompanyAccess(req, companyId, true);
+      if (access.error) return res.status(access.error.status).json(access.error.body);
+      const config = await prisma.apiConfiguration.create({
+        data: {
+          company_id: companyId,
+          name: body.name || 'New Config',
+          description: body.description ?? null,
+          config_type: body.config_type || 'custom',
+          api_url: body.api_url || '',
+          api_method: body.api_method || 'POST',
+          api_headers: body.api_headers ?? [],
+          api_params: body.api_params ?? [],
+          api_data: body.api_data ?? [],
+        },
+      });
+      return res.status(201).json(config);
+    } catch (error) {
+      console.error('createApiConfiguration error:', error);
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
+  async updateApiConfiguration(req: AuthRequest, res: Response) {
+    try {
+      const { companyId, configId } = req.params;
+      const body = req.body || {};
+      if (!companyId || !configId) return res.status(400).json({ error: 'Missing company ID or config ID' });
+      const access = await ensureCompanyAccess(req, companyId, true);
+      if (access.error) return res.status(access.error.status).json(access.error.body);
+      const result = await prisma.apiConfiguration.updateMany({
+        where: { id: configId, company_id: companyId },
+        data: {
+          ...(body.name !== undefined && { name: body.name }),
+          ...(body.description !== undefined && { description: body.description }),
+          ...(body.config_type !== undefined && { config_type: body.config_type }),
+          ...(body.api_url !== undefined && { api_url: body.api_url }),
+          ...(body.api_method !== undefined && { api_method: body.api_method }),
+          ...(body.api_headers !== undefined && { api_headers: body.api_headers }),
+          ...(body.api_params !== undefined && { api_params: body.api_params }),
+          ...(body.api_data !== undefined && { api_data: body.api_data }),
+        },
+      });
+      if (result.count === 0) return res.status(404).json({ error: 'API configuration not found' });
+      const updated = await prisma.apiConfiguration.findUnique({ where: { id: configId } });
+      return res.json(updated);
+    } catch (error) {
+      console.error('updateApiConfiguration error:', error);
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
+  async deleteApiConfiguration(req: AuthRequest, res: Response) {
+    try {
+      const { companyId, configId } = req.params;
+      if (!companyId || !configId) return res.status(400).json({ error: 'Missing company ID or config ID' });
+      const access = await ensureCompanyAccess(req, companyId, true);
+      if (access.error) return res.status(access.error.status).json(access.error.body);
+      const result = await prisma.apiConfiguration.deleteMany({
+        where: { id: configId, company_id: companyId },
+      });
+      if (result.count === 0) return res.status(404).json({ error: 'API configuration not found' });
+      return res.status(204).send();
+    } catch (error) {
+      console.error('deleteApiConfiguration error:', error);
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
+  // --- Global variables ---
+  async listGlobalVariables(req: AuthRequest, res: Response) {
+    try {
+      const { companyId } = req.params;
+      if (!companyId) return res.status(400).json({ error: 'Missing company ID' });
+      const access = await ensureCompanyAccess(req, companyId);
+      if (access.error) return res.status(access.error.status).json(access.error.body);
+      const list = await prisma.dataGlobalVariable.findMany({
+        where: { company_id: companyId },
+        orderBy: [{ position: 'asc' }, { name: 'asc' }],
+      });
+      return res.json(list);
+    } catch (error) {
+      console.error('listGlobalVariables error:', error);
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
+  async createGlobalVariable(req: AuthRequest, res: Response) {
+    try {
+      const { companyId } = req.params;
+      const body = req.body || {};
+      if (!companyId) return res.status(400).json({ error: 'Missing company ID' });
+      const access = await ensureCompanyAccess(req, companyId, true);
+      if (access.error) return res.status(access.error.status).json(access.error.body);
+      const variable = await prisma.dataGlobalVariable.create({
+        data: {
+          company_id: companyId,
+          name: body.name || 'New Variable',
+          key: body.key ?? null,
+          variable_type: body.variable_type || 'text',
+          position: typeof body.position === 'number' ? body.position : 0,
+          options: body.options ?? {},
+          value: body.value ?? null,
+          is_locked: !!body.is_locked,
+        },
+      });
+      return res.status(201).json(variable);
+    } catch (error) {
+      console.error('createGlobalVariable error:', error);
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
+  async updateGlobalVariable(req: AuthRequest, res: Response) {
+    try {
+      const { companyId, variableId } = req.params;
+      const body = req.body || {};
+      if (!companyId || !variableId) return res.status(400).json({ error: 'Missing company ID or variable ID' });
+      const access = await ensureCompanyAccess(req, companyId, true);
+      if (access.error) return res.status(access.error.status).json(access.error.body);
+      const result = await prisma.dataGlobalVariable.updateMany({
+        where: { id: variableId, company_id: companyId },
+        data: {
+          ...(body.name !== undefined && { name: body.name }),
+          ...(body.key !== undefined && { key: body.key }),
+          ...(body.variable_type !== undefined && { variable_type: body.variable_type }),
+          ...(body.position !== undefined && { position: body.position }),
+          ...(body.options !== undefined && { options: body.options }),
+          ...(body.value !== undefined && { value: body.value }),
+          ...(body.is_locked !== undefined && { is_locked: body.is_locked }),
+        },
+      });
+      if (result.count === 0) return res.status(404).json({ error: 'Global variable not found' });
+      const updated = await prisma.dataGlobalVariable.findUnique({ where: { id: variableId } });
+      return res.json(updated);
+    } catch (error) {
+      console.error('updateGlobalVariable error:', error);
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
+  async deleteGlobalVariable(req: AuthRequest, res: Response) {
+    try {
+      const { companyId, variableId } = req.params;
+      if (!companyId || !variableId) return res.status(400).json({ error: 'Missing company ID or variable ID' });
+      const access = await ensureCompanyAccess(req, companyId, true);
+      if (access.error) return res.status(access.error.status).json(access.error.body);
+      const result = await prisma.dataGlobalVariable.deleteMany({
+        where: { id: variableId, company_id: companyId },
+      });
+      if (result.count === 0) return res.status(404).json({ error: 'Global variable not found' });
+      return res.status(204).send();
+    } catch (error) {
+      console.error('deleteGlobalVariable error:', error);
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
+  // --- Data tables ---
+  async listDataTables(req: AuthRequest, res: Response) {
+    try {
+      const { companyId } = req.params;
+      if (!companyId) return res.status(400).json({ error: 'Missing company ID' });
+      const access = await ensureCompanyAccess(req, companyId);
+      if (access.error) return res.status(access.error.status).json(access.error.body);
+      const list = await prisma.dataTable.findMany({
+        where: { company_id: companyId },
+        orderBy: [{ position: 'asc' }, { name: 'asc' }],
+        include: { fields: { orderBy: { position: 'asc' } } },
+      });
+      return res.json(list);
+    } catch (error) {
+      console.error('listDataTables error:', error);
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
+  async createDataTable(req: AuthRequest, res: Response) {
+    try {
+      const { companyId } = req.params;
+      const body = req.body || {};
+      if (!companyId) return res.status(400).json({ error: 'Missing company ID' });
+      const access = await ensureCompanyAccess(req, companyId, true);
+      if (access.error) return res.status(access.error.status).json(access.error.body);
+      const table = await prisma.dataTable.create({
+        data: {
+          company_id: companyId,
+          name: body.name || 'New Table',
+          description: body.description ?? null,
+          position: typeof body.position === 'number' ? body.position : 0,
+        },
+      });
+      return res.status(201).json(table);
+    } catch (error) {
+      console.error('createDataTable error:', error);
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
+  async updateDataTable(req: AuthRequest, res: Response) {
+    try {
+      const { companyId, tableId } = req.params;
+      const body = req.body || {};
+      if (!companyId || !tableId) return res.status(400).json({ error: 'Missing company ID or table ID' });
+      const access = await ensureCompanyAccess(req, companyId, true);
+      if (access.error) return res.status(access.error.status).json(access.error.body);
+      const result = await prisma.dataTable.updateMany({
+        where: { id: tableId, company_id: companyId },
+        data: {
+          ...(body.name !== undefined && { name: body.name }),
+          ...(body.description !== undefined && { description: body.description }),
+          ...(body.position !== undefined && { position: body.position }),
+          ...(body.primary_field_id !== undefined && { primary_field_id: body.primary_field_id }),
+        },
+      });
+      if (result.count === 0) return res.status(404).json({ error: 'Data table not found' });
+      const updated = await prisma.dataTable.findUnique({ where: { id: tableId }, include: { fields: true } });
+      return res.json(updated);
+    } catch (error) {
+      console.error('updateDataTable error:', error);
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
+  async deleteDataTable(req: AuthRequest, res: Response) {
+    try {
+      const { companyId, tableId } = req.params;
+      if (!companyId || !tableId) return res.status(400).json({ error: 'Missing company ID or table ID' });
+      const access = await ensureCompanyAccess(req, companyId, true);
+      if (access.error) return res.status(access.error.status).json(access.error.body);
+      const result = await prisma.dataTable.deleteMany({
+        where: { id: tableId, company_id: companyId },
+      });
+      if (result.count === 0) return res.status(404).json({ error: 'Data table not found' });
+      return res.status(204).send();
+    } catch (error) {
+      console.error('deleteDataTable error:', error);
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
+  async copyDataTable(req: AuthRequest, res: Response) {
+    try {
+      const { companyId, tableId } = req.params;
+      const body = req.body || {};
+      if (!companyId || !tableId) return res.status(400).json({ error: 'Missing company ID or table ID' });
+      const access = await ensureCompanyAccess(req, companyId, true);
+      if (access.error) return res.status(access.error.status).json(access.error.body);
+      const source = await prisma.dataTable.findFirst({
+        where: { id: tableId, company_id: companyId },
+        include: { fields: true },
+      });
+      if (!source) return res.status(404).json({ error: 'Data table not found' });
+      const newName = typeof body.name === 'string' ? body.name : `${source.name} (copy)`;
+      const newTable = await prisma.dataTable.create({
+        data: {
+          company_id: companyId,
+          name: newName,
+          description: source.description,
+          position: source.position,
+        },
+      });
+      for (const f of source.fields) {
+        await prisma.dataTableField.create({
+          data: {
+            table_id: newTable.id,
+            company_id: companyId,
+            name: f.name,
+            field_type: f.field_type,
+            options: f.options,
+            position: f.position,
+            is_required: f.is_required,
+          },
+        });
+      }
+      const created = await prisma.dataTable.findUnique({ where: { id: newTable.id }, include: { fields: true } });
+      return res.status(201).json(created);
+    } catch (error) {
+      console.error('copyDataTable error:', error);
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
+  async listDataTableFields(req: AuthRequest, res: Response) {
+    try {
+      const { companyId, tableId } = req.params;
+      if (!companyId || !tableId) return res.status(400).json({ error: 'Missing company ID or table ID' });
+      const access = await ensureCompanyAccess(req, companyId);
+      if (access.error) return res.status(access.error.status).json(access.error.body);
+      const table = await prisma.dataTable.findFirst({
+        where: { id: tableId, company_id: companyId },
+        include: { fields: { orderBy: { position: 'asc' } } },
+      });
+      if (!table) return res.status(404).json({ error: 'Data table not found' });
+      return res.json(table.fields);
+    } catch (error) {
+      console.error('listDataTableFields error:', error);
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
+  async createDataTableField(req: AuthRequest, res: Response) {
+    try {
+      const { companyId, tableId } = req.params;
+      const body = req.body || {};
+      if (!companyId || !tableId) return res.status(400).json({ error: 'Missing company ID or table ID' });
+      const access = await ensureCompanyAccess(req, companyId, true);
+      if (access.error) return res.status(access.error.status).json(access.error.body);
+      const table = await prisma.dataTable.findFirst({ where: { id: tableId, company_id: companyId } });
+      if (!table) return res.status(404).json({ error: 'Data table not found' });
+      const field = await prisma.dataTableField.create({
+        data: {
+          table_id: tableId,
+          company_id: companyId,
+          name: body.name || 'New Field',
+          field_type: body.field_type || 'text',
+          options: body.options ?? undefined,
+          position: typeof body.position === 'number' ? body.position : 0,
+          is_required: !!body.is_required,
+        },
+      });
+      return res.status(201).json(field);
+    } catch (error) {
+      console.error('createDataTableField error:', error);
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
+  async updateDataTableField(req: AuthRequest, res: Response) {
+    try {
+      const { companyId, tableId, fieldId } = req.params;
+      const body = req.body || {};
+      if (!companyId || !tableId || !fieldId) return res.status(400).json({ error: 'Missing company ID, table ID or field ID' });
+      const access = await ensureCompanyAccess(req, companyId, true);
+      if (access.error) return res.status(access.error.status).json(access.error.body);
+      const result = await prisma.dataTableField.updateMany({
+        where: { id: fieldId, table_id: tableId, company_id: companyId },
+        data: {
+          ...(body.name !== undefined && { name: body.name }),
+          ...(body.field_type !== undefined && { field_type: body.field_type }),
+          ...(body.options !== undefined && { options: body.options }),
+          ...(body.position !== undefined && { position: body.position }),
+          ...(body.is_required !== undefined && { is_required: body.is_required }),
+        },
+      });
+      if (result.count === 0) return res.status(404).json({ error: 'Field not found' });
+      const updated = await prisma.dataTableField.findUnique({ where: { id: fieldId } });
+      return res.json(updated);
+    } catch (error) {
+      console.error('updateDataTableField error:', error);
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
+  async deleteDataTableField(req: AuthRequest, res: Response) {
+    try {
+      const { companyId, tableId, fieldId } = req.params;
+      if (!companyId || !tableId || !fieldId) return res.status(400).json({ error: 'Missing company ID, table ID or field ID' });
+      const access = await ensureCompanyAccess(req, companyId, true);
+      if (access.error) return res.status(access.error.status).json(access.error.body);
+      const result = await prisma.dataTableField.deleteMany({
+        where: { id: fieldId, table_id: tableId, company_id: companyId },
+      });
+      if (result.count === 0) return res.status(404).json({ error: 'Field not found' });
+      return res.status(204).send();
+    } catch (error) {
+      console.error('deleteDataTableField error:', error);
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
+  async listDataTableRecords(req: AuthRequest, res: Response) {
+    try {
+      const { companyId, tableId } = req.params;
+      if (!companyId || !tableId) return res.status(400).json({ error: 'Missing company ID or table ID' });
+      const access = await ensureCompanyAccess(req, companyId);
+      if (access.error) return res.status(access.error.status).json(access.error.body);
+      const table = await prisma.dataTable.findFirst({ where: { id: tableId, company_id: companyId } });
+      if (!table) return res.status(404).json({ error: 'Data table not found' });
+      const records = await prisma.dataTableRecord.findMany({
+        where: { table_id: tableId, company_id: companyId },
+        orderBy: [{ position: 'asc' }, { created_at: 'asc' }],
+      });
+      return res.json(records);
+    } catch (error) {
+      console.error('listDataTableRecords error:', error);
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
+  async createDataTableRecord(req: AuthRequest, res: Response) {
+    try {
+      const { companyId, tableId } = req.params;
+      const body = req.body || {};
+      if (!companyId || !tableId) return res.status(400).json({ error: 'Missing company ID or table ID' });
+      const access = await ensureCompanyAccess(req, companyId, true);
+      if (access.error) return res.status(access.error.status).json(access.error.body);
+      const table = await prisma.dataTable.findFirst({ where: { id: tableId, company_id: companyId } });
+      if (!table) return res.status(404).json({ error: 'Data table not found' });
+      const record = await prisma.dataTableRecord.create({
+        data: {
+          table_id: tableId,
+          company_id: companyId,
+          data: body.data ?? {},
+          created_by: req.user?.id ?? null,
+          position: typeof body.position === 'number' ? body.position : 0,
+        },
+      });
+      return res.status(201).json(record);
+    } catch (error) {
+      console.error('createDataTableRecord error:', error);
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
+  async updateDataTableRecord(req: AuthRequest, res: Response) {
+    try {
+      const { companyId, tableId, recordId } = req.params;
+      const body = req.body || {};
+      if (!companyId || !tableId || !recordId) return res.status(400).json({ error: 'Missing company ID, table ID or record ID' });
+      const access = await ensureCompanyAccess(req, companyId, true);
+      if (access.error) return res.status(access.error.status).json(access.error.body);
+      const result = await prisma.dataTableRecord.updateMany({
+        where: { id: recordId, table_id: tableId, company_id: companyId },
+        data: {
+          ...(body.data !== undefined && { data: body.data }),
+          ...(body.position !== undefined && { position: body.position }),
+        },
+      });
+      if (result.count === 0) return res.status(404).json({ error: 'Record not found' });
+      const updated = await prisma.dataTableRecord.findUnique({ where: { id: recordId } });
+      return res.json(updated);
+    } catch (error) {
+      console.error('updateDataTableRecord error:', error);
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
+  async deleteDataTableRecord(req: AuthRequest, res: Response) {
+    try {
+      const { companyId, tableId, recordId } = req.params;
+      if (!companyId || !tableId || !recordId) return res.status(400).json({ error: 'Missing company ID, table ID or record ID' });
+      const access = await ensureCompanyAccess(req, companyId, true);
+      if (access.error) return res.status(access.error.status).json(access.error.body);
+      const result = await prisma.dataTableRecord.deleteMany({
+        where: { id: recordId, table_id: tableId, company_id: companyId },
+      });
+      if (result.count === 0) return res.status(404).json({ error: 'Record not found' });
+      return res.status(204).send();
+    } catch (error) {
+      console.error('deleteDataTableRecord error:', error);
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
+  // --- Folders (document management) ---
+  async getFolder(req: AuthRequest, res: Response) {
+    try {
+      const { companyId, folderId } = req.params;
+      if (!companyId || !folderId) return res.status(400).json({ error: 'Missing company ID or folder ID' });
+      const access = await ensureCompanyAccess(req, companyId);
+      if (access.error) return res.status(access.error.status).json(access.error.body);
+      const folder = await prisma.folder.findFirst({
+        where: { id: folderId, company_id: companyId },
+      });
+      if (!folder) return res.status(404).json({ error: 'Folder not found' });
+      return res.json(folder);
+    } catch (error) {
+      console.error('getFolder error:', error);
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
+  async listFolders(req: AuthRequest, res: Response) {
+    try {
+      const { companyId } = req.params;
+      const parentFolderId = req.query.parent_folder_id as string | undefined;
+      if (!companyId) return res.status(400).json({ error: 'Missing company ID' });
+      const access = await ensureCompanyAccess(req, companyId);
+      if (access.error) return res.status(access.error.status).json(access.error.body);
+      const where: { company_id: string | null; parent_folder_id?: string | null } = { company_id: companyId };
+      if (parentFolderId !== undefined) where.parent_folder_id = parentFolderId === '' ? null : parentFolderId || null;
+      const folders = await prisma.folder.findMany({
+        where,
+        orderBy: { name: 'asc' },
+      });
+      return res.json(folders);
+    } catch (error) {
+      console.error('listFolders error:', error);
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
+  async createFolder(req: AuthRequest, res: Response) {
+    try {
+      const { companyId } = req.params;
+      const { name, description, parent_folder_id } = req.body || {};
+      if (!companyId) return res.status(400).json({ error: 'Missing company ID' });
+      const access = await ensureCompanyAccess(req, companyId, true);
+      if (access.error) return res.status(access.error.status).json(access.error.body);
+      const folder = await prisma.folder.create({
+        data: {
+          company_id: companyId,
+          name: typeof name === 'string' ? name.trim() : 'New Folder',
+          description: typeof description === 'string' ? description : null,
+          parent_folder_id: parent_folder_id || null,
+        },
+      });
+      return res.status(201).json(folder);
+    } catch (error) {
+      console.error('createFolder error:', error);
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
+  async updateFolder(req: AuthRequest, res: Response) {
+    try {
+      const { companyId, folderId } = req.params;
+      const { name, description } = req.body || {};
+      if (!companyId || !folderId) return res.status(400).json({ error: 'Missing company ID or folder ID' });
+      const access = await ensureCompanyAccess(req, companyId, true);
+      if (access.error) return res.status(access.error.status).json(access.error.body);
+      const result = await prisma.folder.updateMany({
+        where: { id: folderId, company_id: companyId },
+        data: {
+          ...(typeof name === 'string' && { name: name.trim() }),
+          ...(typeof description === 'string' && { description }),
+        },
+      });
+      if (result.count === 0) return res.status(404).json({ error: 'Folder not found' });
+      const updated = await prisma.folder.findUnique({ where: { id: folderId } });
+      return res.json(updated);
+    } catch (error) {
+      console.error('updateFolder error:', error);
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
+  async deleteFolder(req: AuthRequest, res: Response) {
+    try {
+      const { companyId, folderId } = req.params;
+      if (!companyId || !folderId) return res.status(400).json({ error: 'Missing company ID or folder ID' });
+      const access = await ensureCompanyAccess(req, companyId, true);
+      if (access.error) return res.status(access.error.status).json(access.error.body);
+      const result = await prisma.folder.deleteMany({
+        where: { id: folderId, company_id: companyId },
+      });
+      if (result.count === 0) return res.status(404).json({ error: 'Folder not found' });
+      return res.status(204).send();
+    } catch (error) {
+      console.error('deleteFolder error:', error);
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
+  async listFiles(req: AuthRequest, res: Response) {
+    try {
+      const { companyId } = req.params;
+      const folderId = req.query.folder_id as string | undefined;
+      const idsParam = req.query.ids as string | undefined;
+      if (!companyId) return res.status(400).json({ error: 'Missing company ID' });
+      const access = await ensureCompanyAccess(req, companyId);
+      if (access.error) return res.status(access.error.status).json(access.error.body);
+      const where: { company_id: string | null; folder_id?: string | string[] | { in: string[] }; id?: { in: string[] } } = { company_id: companyId };
+      if (folderId !== undefined) {
+        if (folderId === '') {
+          const rootFolders = await prisma.folder.findMany({
+            where: { company_id: companyId, parent_folder_id: null },
+            select: { id: true },
+          });
+          const rootIds = rootFolders.map((f) => f.id);
+          where.folder_id = rootIds.length ? { in: rootIds } : 'none';
+        } else {
+          where.folder_id = folderId;
+        }
+      }
+      if (idsParam && typeof idsParam === 'string') {
+        const idList = idsParam.split(',').map((s) => s.trim()).filter(Boolean);
+        if (idList.length > 0) where.id = { in: idList };
+      }
+      const files = await prisma.file.findMany({
+        where,
+        orderBy: { name: 'asc' },
+        include: { metadata_values: { include: { metadata: { select: { id: true, name: true } } } } },
+      });
+      return res.json(files);
+    } catch (error) {
+      console.error('listFiles error:', error);
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
+  async createFile(req: AuthRequest, res: Response) {
+    try {
+      const { companyId } = req.params;
+      const body = req.body || {};
+      if (!companyId) return res.status(400).json({ error: 'Missing company ID' });
+      const access = await ensureCompanyAccess(req, companyId, true);
+      if (access.error) return res.status(access.error.status).json(access.error.body);
+      const userId = req.user?.id ?? null;
+      const file = await prisma.file.create({
+        data: {
+          company_id: companyId,
+          name: typeof body.name === 'string' ? body.name : 'file',
+          folder_id: body.folder_id ?? null,
+          storage_path: typeof body.storage_path === 'string' ? body.storage_path : '',
+          size_bytes: typeof body.size_bytes === 'number' ? BigInt(body.size_bytes) : BigInt(0),
+          mime_type: typeof body.mime_type === 'string' ? body.mime_type : null,
+          uploaded_by: userId,
+        },
+      });
+      return res.status(201).json({
+        ...file,
+        size_bytes: file.size_bytes?.toString(),
+      });
+    } catch (error) {
+      console.error('createFile error:', error);
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
+  /** GET /api/companies/:companyId/files/by-metadata?metadata_id=xxx&value=yyy - returns { fileIds: string[] } */
+  async getFileIdsByMetadata(req: AuthRequest, res: Response) {
+    try {
+      const { companyId } = req.params;
+      const metadataId = req.query.metadata_id as string;
+      const value = req.query.value as string | undefined;
+      if (!companyId || !metadataId) return res.status(400).json({ error: 'Missing company ID or metadata_id' });
+      const access = await ensureCompanyAccess(req, companyId);
+      if (access.error) return res.status(access.error.status).json(access.error.body);
+      const where: { company_id: string; metadata_id: string; value?: string } = { company_id: companyId, metadata_id: metadataId };
+      if (value !== undefined && value !== '') where.value = value;
+      const rows = await prisma.filesMetadataValue.findMany({
+        where,
+        select: { files_id: true },
+      });
+      const fileIds = [...new Set(rows.map((r) => r.files_id))];
+      return res.json({ fileIds });
+    } catch (error) {
+      console.error('getFileIdsByMetadata error:', error);
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
+  // --- Agent permissions ---
+  async listAgentPermissions(req: AuthRequest, res: Response) {
+    try {
+      const { companyId } = req.params;
+      if (!companyId) return res.status(400).json({ error: 'Missing company ID' });
+      const access = await ensureCompanyAccess(req, companyId);
+      if (access.error) return res.status(access.error.status).json(access.error.body);
+      const list = await prisma.agentPermission.findMany({
+        where: { company_id: companyId },
+        include: {
+          agent_configuration: { select: { id: true, name: true, agent_type: true } },
+          company: { select: { id: true, name: true } },
+        },
+      });
+      return res.json(list);
+    } catch (error) {
+      console.error('listAgentPermissions error:', error);
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
+  async addAgentPermission(req: AuthRequest, res: Response) {
+    try {
+      const { companyId } = req.params;
+      const { agent_configuration_id, enabled } = req.body || {};
+      if (!companyId || !agent_configuration_id) return res.status(400).json({ error: 'Missing company ID or agent_configuration_id' });
+      const access = await ensureCompanyAccess(req, companyId, true);
+      if (access.error) return res.status(access.error.status).json(access.error.body);
+      const perm = await prisma.agentPermission.create({
+        data: {
+          agent_configuration_id,
+          company_id: companyId,
+          enabled: enabled !== false,
+        },
+      });
+      return res.status(201).json(perm);
+    } catch (error: unknown) {
+      const e = error as { code?: string };
+      if (e.code === 'P2002') return res.status(400).json({ error: 'Permission already exists for this agent and company' });
+      console.error('addAgentPermission error:', error);
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
+  async updateAgentPermission(req: AuthRequest, res: Response) {
+    try {
+      const { companyId, permissionId } = req.params;
+      const { enabled } = req.body || {};
+      if (!companyId || !permissionId) return res.status(400).json({ error: 'Missing company ID or permission ID' });
+      const access = await ensureCompanyAccess(req, companyId, true);
+      if (access.error) return res.status(access.error.status).json(access.error.body);
+      const result = await prisma.agentPermission.updateMany({
+        where: { id: permissionId, company_id: companyId },
+        data: { ...(typeof enabled === 'boolean' && { enabled }) },
+      });
+      if (result.count === 0) return res.status(404).json({ error: 'Permission not found' });
+      const updated = await prisma.agentPermission.findUnique({ where: { id: permissionId } });
+      return res.json(updated);
+    } catch (error) {
+      console.error('updateAgentPermission error:', error);
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
+  async deleteAgentPermission(req: AuthRequest, res: Response) {
+    try {
+      const { companyId, permissionId } = req.params;
+      if (!companyId || !permissionId) return res.status(400).json({ error: 'Missing company ID or permission ID' });
+      const access = await ensureCompanyAccess(req, companyId, true);
+      if (access.error) return res.status(access.error.status).json(access.error.body);
+      const result = await prisma.agentPermission.deleteMany({
+        where: { id: permissionId, company_id: companyId },
+      });
+      if (result.count === 0) return res.status(404).json({ error: 'Permission not found' });
+      return res.status(204).send();
+    } catch (error) {
+      console.error('deleteAgentPermission error:', error);
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+};

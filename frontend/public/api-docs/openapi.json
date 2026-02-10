@@ -1,0 +1,1353 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Path Art Workflow API",
+    "description": "Comprehensive API documentation for Path Art workflow management system. This API allows you to trigger workflows, manage executions, make decisions, update data, and interact with workflow steps programmatically.",
+    "version": "1.0.0",
+    "contact": {
+      "name": "API Support",
+      "email": "support@pathart.com"
+    },
+    "license": {
+      "name": "Proprietary"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://services.floowly.app/functions/v1",
+      "description": "Floowly Services endpoint"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Workflows",
+      "description": "Operations for triggering and managing workflows"
+    },
+    {
+      "name": "Executions",
+      "description": "Operations for managing workflow executions"
+    },
+    {
+      "name": "Decisions",
+      "description": "Operations for making decisions in workflow steps"
+    },
+    {
+      "name": "Data",
+      "description": "Operations for managing execution data"
+    },
+    {
+      "name": "Steps",
+      "description": "Operations for managing workflow execution steps"
+    },
+    {
+      "name": "Utilities",
+      "description": "Utility operations for file URLs, user information, and logging"
+    },
+    {
+      "name": "AI",
+      "description": "AI-powered operations for workflow creation and audio transcription"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "ApiKeyAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-api-key",
+        "description": "Company-specific API key for authentication. Obtain this from Organization Settings."
+      },
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "Supabase anon key for gateway authentication. Safe to use in client-side applications."
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "Error message"
+          },
+          "details": {
+            "type": "string",
+            "description": "Detailed error information"
+          }
+        },
+        "required": ["error"]
+      },
+      "SuccessResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "example": true
+          },
+          "message": {
+            "type": "string",
+            "description": "Success message"
+          }
+        },
+        "required": ["success"]
+      },
+      "WorkflowTriggerRequest": {
+        "type": "object",
+        "required": ["workflow_id"],
+        "properties": {
+          "workflow_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The ID of the workflow to trigger"
+          },
+          "data": {
+            "type": "object",
+            "description": "Input data to pass to the workflow execution",
+            "additionalProperties": true
+          }
+        }
+      },
+      "WorkflowTriggerResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "example": true
+          },
+          "execution_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The ID of the created execution"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["started"],
+            "description": "Execution status"
+          }
+        },
+        "required": ["success", "execution_id", "status"]
+      },
+      "ExecutionData": {
+        "type": "object",
+        "description": "Complete execution data including workflow, steps, and execution data",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "workflow_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["pending", "running", "completed", "cancelled"]
+          },
+          "workflow": {
+            "type": "object",
+            "description": "Workflow details"
+          },
+          "execution_steps": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "execution_data_array": {
+            "type": "array",
+            "description": "Execution data as array with field names",
+            "items": {
+              "type": "object",
+              "properties": {
+                "field_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "field_name": {
+                  "type": "string"
+                },
+                "field_type": {
+                  "type": "string"
+                },
+                "value": {
+                  "description": "Field value (type depends on field_type)"
+                },
+                "signed_url": {
+                  "type": "string",
+                  "format": "uri",
+                  "description": "Signed URL for file fields (if applicable)"
+                }
+              }
+            }
+          },
+          "execution_data_mapped": {
+            "type": "object",
+            "description": "Execution data as object with field names as keys",
+            "additionalProperties": true
+          }
+        }
+      },
+      "MakeDecisionRequest": {
+        "type": "object",
+        "required": ["execution_id", "execution_step_id", "decision_choice"],
+        "properties": {
+          "execution_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The execution ID"
+          },
+          "execution_step_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The execution step ID"
+          },
+          "decision_choice": {
+            "type": "string",
+            "description": "The decision choice (must match one of the step's output names)"
+          },
+          "decision_reason": {
+            "type": "string",
+            "description": "Optional reason for the decision (for agent decisions)"
+          },
+          "decision_comment": {
+            "type": "string",
+            "description": "Optional comment for the decision"
+          }
+        }
+      },
+      "MakeDecisionResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": "string"
+          },
+          "decision_choice": {
+            "type": "string"
+          },
+          "next_step_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "ID of the next step (if workflow continues)"
+          },
+          "execution_status": {
+            "type": "string",
+            "enum": ["running", "completed"]
+          },
+          "agent_decision": {
+            "type": "string",
+            "description": "Agent decision choice (for Agent + Human decisions)"
+          },
+          "requires_human_validation": {
+            "type": "boolean",
+            "description": "Whether human validation is required (for Agent + Human decisions)"
+          }
+        },
+        "required": ["success", "message"]
+      },
+      "UpdateExecutionDataRequest": {
+        "type": "object",
+        "required": ["execution_id", "data"],
+        "properties": {
+          "execution_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "data": {
+            "type": "object",
+            "description": "Data object with field names as keys. For array fields, provide array of objects with child field names as keys.",
+            "additionalProperties": true,
+            "example": {
+              "Customer Name": "John Doe",
+              "Amount": 1000,
+              "Items": [
+                {
+                  "Product": "Widget A",
+                  "Quantity": 5,
+                  "Price": 100
+                }
+              ]
+            }
+          }
+        }
+      },
+      "UpdateExecutionDataResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": "string"
+          },
+          "updated_record": {
+            "type": "object"
+          },
+          "updated_fields": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "array_fields_updated": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Array fields that were updated"
+          }
+        },
+        "required": ["success", "message"]
+      },
+      "CompleteAutomaticStepRequest": {
+        "type": "object",
+        "required": ["execution_id", "execution_step_id"],
+        "properties": {
+          "execution_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "execution_step_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "step_data": {
+            "type": "object",
+            "description": "Optional step data snapshot. If not provided, current execution data will be used.",
+            "additionalProperties": true
+          }
+        }
+      },
+      "CompleteAutomaticStepResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": "string"
+          },
+          "next_step_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "execution_status": {
+            "type": "string",
+            "enum": ["running", "completed"]
+          }
+        },
+        "required": ["success", "message"]
+      },
+      "AddLogRequest": {
+        "type": "object",
+        "required": ["execution_id", "log_text"],
+        "properties": {
+          "execution_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "step_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Optional step ID to associate log with specific step"
+          },
+          "log_text": {
+            "type": "string",
+            "description": "Log message text"
+          }
+        }
+      },
+      "AddLogResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": "string"
+          },
+          "log_entry": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "created_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "execution_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "step_id": {
+                "type": "string",
+                "format": "uuid",
+                "nullable": true
+              },
+              "log_text": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "required": ["success", "message"]
+      },
+      "GetSignedUrlRequest": {
+        "type": "object",
+        "required": ["bucket", "path"],
+        "properties": {
+          "bucket": {
+            "type": "string",
+            "description": "Storage bucket name",
+            "example": "documents"
+          },
+          "path": {
+            "type": "string",
+            "description": "File path within the bucket"
+          },
+          "expiresIn": {
+            "type": "integer",
+            "description": "Expiration time in seconds (default: 31536000 = 1 year)",
+            "default": 31536000
+          }
+        }
+      },
+      "GetSignedUrlResponse": {
+        "type": "object",
+        "properties": {
+          "signedUrl": {
+            "type": "string",
+            "format": "uri",
+            "description": "Signed URL for accessing the file"
+          }
+        },
+        "required": ["signedUrl"]
+      },
+      "GetUserResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "user": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "email": {
+                "type": "string",
+                "format": "email"
+              },
+              "full_name": {
+                "type": "string",
+                "nullable": true
+              },
+              "created_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "updated_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "company_id": {
+                "type": "string",
+                "format": "uuid",
+                "nullable": true
+              },
+              "user_company": {
+                "type": "array",
+                "items": {
+                  "type": "object"
+                }
+              },
+              "profile_group_members": {
+                "type": "array",
+                "items": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        },
+        "required": ["success", "user"]
+      },
+      "TranscribeAudioRequest": {
+        "type": "object",
+        "required": ["audio"],
+        "properties": {
+          "audio": {
+            "type": "string",
+            "format": "base64",
+            "description": "Base64-encoded audio data (WebM format)"
+          }
+        }
+      },
+      "TranscribeAudioResponse": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "Transcribed text from the audio"
+          }
+        },
+        "required": ["text"]
+      },
+      "CreateWorkflowWithAIRequest": {
+        "type": "object",
+        "required": ["messages", "companyId"],
+        "properties": {
+          "messages": {
+            "type": "array",
+            "description": "Conversation messages with the AI",
+            "items": {
+              "type": "object",
+              "properties": {
+                "role": {
+                  "type": "string",
+                  "enum": ["user", "assistant", "system"]
+                },
+                "content": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "companyId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "CreateWorkflowWithAIResponse": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "workflowId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": ["workflowId", "message"]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "message": {
+                "type": "string",
+                "description": "AI response message (question or information)"
+              }
+            },
+            "required": ["message"]
+          }
+        ]
+      }
+    }
+  },
+  "paths": {
+    "/trigger-workflow": {
+      "post": {
+        "tags": ["Workflows"],
+        "summary": "Trigger a workflow execution",
+        "description": "Starts a new workflow execution. The workflow must have `api_enabled` set to `true` and must belong to the company associated with the API key.",
+        "operationId": "triggerWorkflow",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkflowTriggerRequest"
+              },
+              "examples": {
+                "basic": {
+                  "summary": "Basic workflow trigger",
+                  "value": {
+                    "workflow_id": "123e4567-e89b-12d3-a456-426614174000",
+                    "data": {
+                      "Customer Name": "John Doe",
+                      "Amount": 1000
+                    }
+                  }
+                },
+                "minimal": {
+                  "summary": "Minimal request",
+                  "value": {
+                    "workflow_id": "123e4567-e89b-12d3-a456-426614174000"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Workflow triggered successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkflowTriggerResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request - missing required fields",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized - invalid or missing API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden - workflow does not allow API triggers",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Workflow not found or access denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/get-execution-data": {
+      "get": {
+        "tags": ["Executions"],
+        "summary": "Get execution data",
+        "description": "Retrieves complete execution data including workflow details, execution steps, and execution data. Returns data in both array and mapped formats for easy access. File fields include signed URLs for secure access.",
+        "operationId": "getExecutionData",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "execution_id",
+            "in": "query",
+            "required": true,
+            "description": "Execution ID (can also use 'id' parameter)",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "id",
+            "in": "query",
+            "required": false,
+            "description": "Alternative parameter name for execution_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "debug",
+            "in": "query",
+            "required": false,
+            "description": "Include debug information in response",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Execution data retrieved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecutionData"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request - missing execution_id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized - invalid or missing API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Execution not found or access denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/update-execution-data": {
+      "post": {
+        "tags": ["Data"],
+        "summary": "Update execution data",
+        "description": "Updates execution data fields. Use field names (not IDs) as keys. For array fields, provide an array of objects where each object uses child field names as keys. New array items will be appended to existing arrays.",
+        "operationId": "updateExecutionData",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateExecutionDataRequest"
+              },
+              "examples": {
+                "simple": {
+                  "summary": "Update simple fields",
+                  "value": {
+                    "execution_id": "123e4567-e89b-12d3-a456-426614174000",
+                    "data": {
+                      "Customer Name": "Jane Doe",
+                      "Amount": 2000
+                    }
+                  }
+                },
+                "array": {
+                  "summary": "Add items to array field",
+                  "value": {
+                    "execution_id": "123e4567-e89b-12d3-a456-426614174000",
+                    "data": {
+                      "Items": [
+                        {
+                          "Product": "Widget B",
+                          "Quantity": 3,
+                          "Price": 150
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Execution data updated successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateExecutionDataResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request - missing or invalid data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized - invalid or missing API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Execution not found or no execution data found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/make-decision": {
+      "post": {
+        "tags": ["Decisions"],
+        "summary": "Make a decision in a decision step",
+        "description": "Records a decision choice for a decision step and advances the workflow. For 'Agent + Human' decision types, this records the agent's decision and keeps the step running for human validation. For regular 'Agent' decisions, this completes the step immediately and advances the workflow.",
+        "operationId": "makeDecision",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MakeDecisionRequest"
+              },
+              "examples": {
+                "basic": {
+                  "summary": "Basic decision",
+                  "value": {
+                    "execution_id": "123e4567-e89b-12d3-a456-426614174000",
+                    "execution_step_id": "456e7890-e89b-12d3-a456-426614174001",
+                    "decision_choice": "Approve"
+                  }
+                },
+                "with_reason": {
+                  "summary": "Decision with reason and comment",
+                  "value": {
+                    "execution_id": "123e4567-e89b-12d3-a456-426614174000",
+                    "execution_step_id": "456e7890-e89b-12d3-a456-426614174001",
+                    "decision_choice": "Reject",
+                    "decision_reason": "Amount exceeds limit",
+                    "decision_comment": "Customer needs additional verification"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Decision recorded successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MakeDecisionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request - missing required fields or invalid step type/status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized - invalid or missing API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Execution or step not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/complete-automatic-step": {
+      "post": {
+        "tags": ["Steps"],
+        "summary": "Complete an automatic action step",
+        "description": "Marks an automatic action step as completed and advances the workflow to the next step. If the next step is also automatic, it will be triggered automatically.",
+        "operationId": "completeAutomaticStep",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompleteAutomaticStepRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Step completed successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompleteAutomaticStepResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request - missing required fields or invalid step type/status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized - invalid or missing API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Execution or step not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/add-execution-step-log": {
+      "post": {
+        "tags": ["Utilities"],
+        "summary": "Add a log entry to an execution",
+        "description": "Creates a log entry for an execution, optionally associated with a specific step. Useful for tracking execution progress and debugging.",
+        "operationId": "addExecutionStepLog",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddLogRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Log entry created successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddLogResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request - missing required fields",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized - invalid or missing API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Execution or step not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/get-signed-url": {
+      "post": {
+        "tags": ["Utilities"],
+        "summary": "Get a signed URL for a file",
+        "description": "Generates a signed URL for accessing a file from storage. The URL is valid for the specified expiration time (default: 1 year).",
+        "operationId": "getSignedUrl",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GetSignedUrlRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Signed URL generated successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetSignedUrlResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request - missing required fields",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/get-user": {
+      "get": {
+        "tags": ["Utilities"],
+        "summary": "Get user information",
+        "description": "Retrieves user profile information including company associations and group memberships. The user must belong to the company associated with the API key.",
+        "operationId": "getUser",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "query",
+            "required": true,
+            "description": "User ID (UUID format). Can also be provided in URL path.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "User information retrieved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetUserResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request - missing or invalid user_id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized - invalid or missing API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden - user does not belong to company",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "User not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/transcribe-audio": {
+      "post": {
+        "tags": ["AI"],
+        "summary": "Transcribe audio to text",
+        "description": "Transcribes audio data (WebM format) to text using OpenAI Whisper. The audio should be provided as base64-encoded data.",
+        "operationId": "transcribeAudio",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TranscribeAudioRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Audio transcribed successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TranscribeAudioResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request - missing audio data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/create-workflow-with-ai": {
+      "post": {
+        "tags": ["AI"],
+        "summary": "Create workflow with AI assistance",
+        "description": "Uses AI to help create workflows through conversation. The AI will ask questions to understand your business process and then generate a complete workflow structure. Requires Bearer token authentication (user session).",
+        "operationId": "createWorkflowWithAI",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateWorkflowWithAIRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Workflow created or AI response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateWorkflowWithAIResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized - missing or invalid token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+

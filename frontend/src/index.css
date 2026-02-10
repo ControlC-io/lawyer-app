@@ -1,0 +1,304 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
+All colors MUST be HSL.
+*/
+
+@layer base {
+  :root {
+    --background: 240 20% 99%;
+    --foreground: 240 10% 10%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 240 10% 10%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 10% 10%;
+
+    --primary: 262 83% 58%;
+    --primary-foreground: 0 0% 100%;
+    --primary-glow: 262 100% 75%;
+
+    --secondary: 240 5% 96%;
+    --secondary-foreground: 240 10% 10%;
+
+    --muted: 240 5% 96%;
+    --muted-foreground: 240 4% 46%;
+
+    --accent: 262 83% 95%;
+    --accent-foreground: 262 83% 40%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 240 6% 90%;
+    --input: 240 6% 90%;
+    --ring: 262 83% 58%;
+
+    --radius: 0.75rem;
+
+    /* Chart colors */
+    --chart-1: 217 91% 60%;
+    --chart-2: 142 76% 36%;
+    --chart-3: 45 93% 47%;
+    --chart-4: 280 65% 60%;
+    --chart-5: 340 75% 55%;
+
+    /* Node colors */
+    --node-start: 142 76% 36%;
+    --node-start-glow: 142 76% 80%;
+    --node-end: 0 84% 60%;
+    --node-end-glow: 0 84% 80%;
+    --node-decision: 45 93% 47%;
+    --node-decision-glow: 45 93% 80%;
+    --node-action: 217 91% 60%;
+    --node-action-glow: 217 91% 80%;
+
+    /* Gradients */
+    --gradient-primary: linear-gradient(135deg, hsl(262 83% 58%), hsl(262 100% 75%));
+    --gradient-subtle: linear-gradient(180deg, hsl(240 20% 99%), hsl(240 15% 97%));
+    --shadow-glow: 0 8px 32px -8px hsl(262 83% 58% / 0.3);
+    --shadow-node: 0 4px 12px -2px hsl(240 10% 10% / 0.1);
+
+    --sidebar-background: 0 0% 100%;
+    --sidebar-foreground: 240 10% 10%;
+    --sidebar-primary: 262 83% 58%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 262 83% 95%;
+    --sidebar-accent-foreground: 262 83% 40%;
+    --sidebar-border: 240 6% 90%;
+    --sidebar-ring: 262 83% 58%;
+
+    /* Transitions */
+    --transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .dark {
+    --background: 240 10% 10%;
+    --foreground: 240 5% 96%;
+
+    --card: 240 10% 13%;
+    --card-foreground: 240 5% 96%;
+
+    --popover: 240 10% 13%;
+    --popover-foreground: 240 5% 96%;
+
+    --primary: 262 83% 58%;
+    --primary-foreground: 0 0% 100%;
+    --primary-glow: 262 100% 75%;
+
+    --secondary: 240 5% 20%;
+    --secondary-foreground: 240 5% 96%;
+
+    --muted: 240 5% 20%;
+    --muted-foreground: 240 5% 64%;
+
+    --accent: 240 5% 20%;
+    --accent-foreground: 262 83% 58%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 240 5% 20%;
+    --input: 240 5% 20%;
+    --ring: 262 83% 58%;
+
+    --gradient-subtle: linear-gradient(180deg, hsl(240 10% 10%), hsl(240 10% 8%));
+    --shadow-glow: 0 8px 32px -8px hsl(262 83% 58% / 0.5);
+
+    --sidebar-background: 240 10% 13%;
+    --sidebar-foreground: 240 5% 96%;
+    --sidebar-primary: 262 83% 58%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 240 5% 20%;
+    --sidebar-accent-foreground: 262 83% 58%;
+    --sidebar-border: 240 5% 20%;
+    --sidebar-ring: 262 83% 58%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+@keyframes flow-animation {
+  to {
+    stroke-dashoffset: -20;
+  }
+}
+
+.animate-flow {
+  animation: flow-animation 1s linear infinite;
+}
+
+/* Weekend gradient styling for calendar - only show when not selected or today */
+.rdp-day.weekend:not(.rdp-day_selected):not(.rdp-day_today) {
+  background: linear-gradient(to bottom right, hsl(var(--muted) / 0.25), hsl(var(--muted) / 0.08)) !important;
+}
+
+/* Alternative selector for weekend days */
+button.rdp-day.weekend:not([aria-selected="true"]):not(.rdp-day_today) {
+  background: linear-gradient(to bottom right, hsl(var(--muted) / 0.25), hsl(var(--muted) / 0.08)) !important;
+}
+
+/* React Day Picker dropdown styles */
+.rdp-caption_dropdowns {
+  @apply flex items-center justify-center gap-3 flex-wrap;
+  @apply text-sm;
+}
+
+.rdp-caption_dropdowns .rdp-dropdown {
+  @apply flex items-center gap-1.5;
+}
+
+/* Style the select elements */
+.rdp-dropdown_month,
+.rdp-dropdown_year {
+  @apply h-8 min-w-[100px] rounded-md border border-input bg-background px-3 py-1 text-sm font-medium;
+  @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2;
+  @apply hover:bg-accent hover:text-accent-foreground;
+  @apply cursor-pointer;
+  @apply appearance-none;
+  @apply pr-8;
+  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='hsl(var(--muted-foreground))' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
+  background-position: right 0.5rem center;
+  background-repeat: no-repeat;
+  background-size: 1.25em 1.25em;
+  padding-right: 2rem;
+}
+
+.rdp-dropdown_year {
+  @apply min-w-[80px];
+}
+
+/* Hide the default caption label when using dropdowns */
+.rdp[data-caption-layout="dropdown-buttons"] .rdp-caption_label {
+  @apply hidden;
+}
+
+.rdp-dropdown {
+  @apply relative inline-flex items-center gap-1;
+}
+
+.rdp-dropdown_month,
+.rdp-dropdown_year {
+  @apply h-8 min-w-[100px] rounded-md border border-input bg-background px-3 py-1 text-sm font-medium;
+  @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2;
+  @apply hover:bg-accent hover:text-accent-foreground;
+  @apply cursor-pointer;
+  @apply appearance-none;
+  @apply pr-8;
+  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='hsl(var(--muted-foreground))' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
+  background-position: right 0.5rem center;
+  background-repeat: no-repeat;
+  background-size: 1.25em 1.25em;
+  padding-right: 2rem;
+}
+
+.rdp-dropdown_icon {
+  @apply ml-1 h-4 w-4 opacity-50 pointer-events-none;
+}
+
+/* Canvas comment markdown styles */
+.markdown-content {
+  @apply text-sm text-gray-800;
+}
+
+.markdown-content h1 {
+  @apply text-base font-bold mb-2 mt-1;
+}
+
+.markdown-content h2 {
+  @apply text-sm font-bold mb-1 mt-1;
+}
+
+.markdown-content h3 {
+  @apply text-sm font-semibold mb-1 mt-1;
+}
+
+.markdown-content p {
+  @apply mb-1;
+}
+
+.markdown-content ul,
+.markdown-content ol {
+  @apply ml-4 mb-1;
+}
+
+.markdown-content li {
+  @apply mb-0.5;
+}
+
+.markdown-content strong {
+  @apply font-semibold;
+}
+
+.markdown-content em {
+  @apply italic;
+}
+
+.markdown-content code {
+  @apply bg-black/10 px-1 rounded text-xs font-mono;
+}
+
+.markdown-content pre {
+  @apply bg-black/10 p-2 rounded text-xs font-mono overflow-x-auto mb-1;
+}
+
+.markdown-content blockquote {
+  @apply border-l-2 border-gray-400 pl-2 italic;
+}
+
+/* Handwriting style for textarea */
+.font-handwriting {
+  font-family: 'Segoe Print', 'Bradley Hand', 'Brush Script MT', cursive;
+}
+
+/* ReactQuill editor theme customization */
+.ql-toolbar.ql-snow {
+  @apply border-input bg-background rounded-t-md;
+}
+
+.ql-container.ql-snow {
+  @apply border-input bg-background rounded-b-md;
+}
+
+.ql-editor {
+  @apply text-foreground;
+  min-height: 200px;
+}
+
+.ql-editor.ql-blank::before {
+  @apply text-muted-foreground;
+}
+
+.dark .ql-snow .ql-stroke {
+  stroke: hsl(var(--foreground));
+}
+
+.dark .ql-snow .ql-fill {
+  fill: hsl(var(--foreground));
+}
+
+.dark .ql-snow .ql-picker {
+  @apply text-foreground;
+}
+
+.dark .ql-snow .ql-picker-options {
+  @apply bg-popover border-border;
+}
+
+.dark .ql-snow .ql-picker-label:hover,
+.dark .ql-snow .ql-picker-label.ql-active,
+.dark .ql-snow .ql-picker-item:hover,
+.dark .ql-snow .ql-picker-item.ql-selected {
+  @apply text-primary;
+}

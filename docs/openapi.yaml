@@ -1,0 +1,810 @@
+openapi: 3.0.0
+info:
+  title: Floowly API
+  version: 1.0.0
+  description: API documentation for the Floowly backend services.
+
+servers:
+  - url: /api
+    description: Main API
+
+paths:
+  # Auth Endpoints
+  /auth/register:
+    post:
+      summary: Register a new user
+      tags: [Auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                  format: password
+                full_name:
+                  type: string
+      responses:
+        201:
+          description: User registered successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        400:
+          description: User already exists
+
+  /auth/login:
+    post:
+      summary: Login a user
+      tags: [Auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                  format: password
+      responses:
+        200:
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        401:
+          description: Invalid credentials
+
+  # Public Endpoints
+  /public/feedback:
+    post:
+      summary: Send feedback
+      tags: [Public]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [userEmail, feedback]
+              properties:
+                userEmail:
+                  type: string
+                  format: email
+                userName:
+                  type: string
+                feedback:
+                  type: string
+      responses:
+        200:
+          description: Feedback received
+        500:
+          description: Internal error
+
+  /public/demo-request:
+    post:
+      summary: Request a demo
+      tags: [Public]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [firstName, lastName, email, companyName]
+              properties:
+                firstName:
+                  type: string
+                lastName:
+                  type: string
+                email:
+                  type: string
+                  format: email
+                companyName:
+                  type: string
+      responses:
+        200:
+          description: Demo request received
+        500:
+          description: Internal error
+
+  # External Endpoints
+  /external/steps/{token}/submit:
+    post:
+      summary: Submit external step
+      description: Submit data for a step via an external token (no authentication required).
+      tags: [External]
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                data:
+                  type: object
+      responses:
+        200:
+          description: Step submitted successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  triggered_steps:
+                    type: array
+                    items:
+                      type: object
+                  validation:
+                    type: object
+                    properties:
+                      is_valid:
+                        type: boolean
+                      validation_comment:
+                        type: string
+        404:
+          description: Invalid or expired token
+
+  /external/steps/{stepId}/send-link:
+    post:
+      summary: Send external form link
+      description: Send a link to an external form via email.
+      tags: [External]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: stepId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, token, executionId, companyId]
+              properties:
+                email:
+                  type: string
+                  format: email
+                token:
+                  type: string
+                executionId:
+                  type: string
+                  format: uuid
+                companyId:
+                  type: string
+                  format: uuid
+                stepName:
+                  type: string
+                comment:
+                  type: string
+      responses:
+        200:
+          description: Link sent successfully
+        401:
+          description: Unauthorized
+
+  # Workflow Endpoints
+  /workflows/{workflowId}/trigger:
+    post:
+      summary: Trigger a workflow execution
+      tags: [Workflows]
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: workflowId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                data:
+                  type: object
+                  description: Initial data for the workflow execution
+      responses:
+        200:
+          description: Workflow triggered successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  execution_id:
+                    type: string
+                    format: uuid
+                  status:
+                    type: string
+        401:
+          description: Missing company authorization
+        404:
+          description: Workflow not found
+
+  /workflows/executions/{executionId}:
+    get:
+      summary: Get execution data
+      description: Retrieve all data and steps for a specific execution.
+      tags: [Workflows]
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: executionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        200:
+          description: Execution data retrieved
+        404:
+          description: Execution not found
+
+  /workflows/executions/{executionId}/data:
+    put:
+      summary: Update execution data
+      tags: [Workflows]
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: executionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                data:
+                  type: object
+                  description: Map of field names to values to update
+      responses:
+        200:
+          description: Data updated successfully
+        400:
+          description: Field names do not match structure
+
+  /workflows/executions/{executionId}/name:
+    patch:
+      summary: Rename an execution
+      tags: [Workflows]
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: executionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+      responses:
+        200:
+          description: Execution renamed successfully
+
+  /workflows/executions/{executionId}/logs:
+    post:
+      summary: Add a log entry
+      tags: [Workflows]
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: executionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [log_text]
+              properties:
+                log_text:
+                  type: string
+                step_id:
+                  type: string
+                  format: uuid
+                log_type:
+                  type: string
+      responses:
+        200:
+          description: Log entry added successfully
+
+  /workflows/executions/{executionId}/steps/{stepId}/process:
+    post:
+      summary: Process an automatic step
+      description: Manually trigger the processing of an automatic or agent step.
+      tags: [Workflows]
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: executionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: stepId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        200:
+          description: Step processing completed
+
+  /workflows/executions/{executionId}/steps/{stepId}/complete:
+    post:
+      summary: Complete a step
+      description: Mark a step as completed and advance the workflow.
+      tags: [Workflows]
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: executionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: stepId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                step_data:
+                  type: object
+      responses:
+        200:
+          description: Step completed and workflow advanced
+
+  /workflows/executions/{executionId}/steps/{stepId}/decision:
+    post:
+      summary: Make a decision
+      description: Record a decision for a decision node and advance the workflow.
+      tags: [Workflows]
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: executionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: stepId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision_choice]
+              properties:
+                decision_choice:
+                  type: string
+                decision_reason:
+                  type: string
+                decision_comment:
+                  type: string
+      responses:
+        200:
+          description: Decision recorded
+
+  # File Endpoints
+  /files/workflows/executions/{executionId}/files:
+    post:
+      summary: Upload a file for an execution
+      tags: [Files]
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: executionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [field_name]
+              properties:
+                field_name:
+                  type: string
+                file_url:
+                  type: string
+                  format: uri
+                file_base64:
+                  type: string
+                file_name:
+                  type: string
+                mime_type:
+                  type: string
+      responses:
+        200:
+          description: File uploaded successfully
+
+  /files/upload:
+    post:
+      summary: Upload an external file
+      description: Upload a file using a multi-part form and an external token.
+      tags: [Files]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file, token]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                token:
+                  type: string
+      responses:
+        200:
+          description: File uploaded successfully
+
+  /files/signed-url:
+    post:
+      summary: Get a signed URL
+      tags: [Files]
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [bucket, path]
+              properties:
+                bucket:
+                  type: string
+                path:
+                  type: string
+                expiresIn:
+                  type: integer
+                  description: Expiration time in seconds
+      responses:
+        200:
+          description: Signed URL retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  signedUrl:
+                    type: string
+
+  /files/workflows/executions/{executionId}/steps/{stepId}/process-file:
+    post:
+      summary: Process a file step
+      tags: [Files]
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: executionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: stepId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [workflow_step_id]
+              properties:
+                workflow_step_id:
+                  type: string
+                  format: uuid
+      responses:
+        200:
+          description: File step processed
+
+  # User/Company Endpoints
+  /companies/{companyId}/invitations:
+    post:
+      summary: Invite a user to a company
+      tags: [Users]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email:
+                  type: string
+                  format: email
+                role:
+                  type: string
+                  description: Role to assign to the user (e.g., company_admin, user)
+      responses:
+        200:
+          description: Invitation sent
+
+  /invitations/{token}/accept:
+    post:
+      summary: Accept an invitation
+      tags: [Users]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        200:
+          description: Invitation accepted
+
+  /users/{userId}:
+    get:
+      summary: Get user information
+      tags: [Users]
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        200:
+          description: User info retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  user:
+                    type: object
+                    properties:
+                      id: { type: string, format: uuid }
+                      email: { type: string, format: email }
+                      full_name: { type: string }
+                      user_company: { type: array, items: { type: object } }
+
+  # Agent Endpoints
+  /agents/{agentId}:
+    get:
+      summary: Get agent configuration
+      tags: [Agents]
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        200:
+          description: Agent config retrieved
+
+  /agents/workflows/create-with-ai:
+    post:
+      summary: Create workflow using AI
+      tags: [Agents]
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [messages, companyId]
+              properties:
+                messages:
+                  type: array
+                  items:
+                    type: object
+                companyId:
+                  type: string
+                  format: uuid
+      responses:
+        200:
+          description: Workflow created or AI needs more info
+
+  /agents/forms/validate-with-ai:
+    post:
+      summary: Validate form data using AI
+      tags: [Agents]
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [company_id, data, validation_rule]
+              properties:
+                company_id:
+                  type: string
+                  format: uuid
+                data:
+                  type: object
+                validation_rule:
+                  type: string
+      responses:
+        200:
+          description: Validation result returned
+
+  /agents/audio/transcribe:
+    post:
+      summary: Transcribe audio
+      tags: [Agents]
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [audio]
+              properties:
+                audio:
+                  type: string
+                  description: Base64 encoded audio data
+      responses:
+        200:
+          description: Transcription successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  text:
+                    type: string
+
+  # Notification Endpoints
+  /notifications/assignment:
+    post:
+      summary: Send assignment notification
+      tags: [Notifications]
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [execution_step_id]
+              properties:
+                execution_step_id:
+                  type: string
+                  format: uuid
+      responses:
+        200:
+          description: Notification sent
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: x-api-key
+
+  schemas:
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        full_name:
+          type: string
+
+    AuthResponse:
+      type: object
+      properties:
+        user:
+          $ref: '#/components/schemas/User'
+        token:
+          type: string

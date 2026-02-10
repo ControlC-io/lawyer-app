@@ -1,0 +1,173 @@
+{
+  "departments": [
+    {
+      "id": "hr",
+      "icon": "Users",
+      "workflows": [
+        {
+          "id": "recruitment",
+          "icon": "UserPlus",
+          "titleKey": "recruitment",
+          "descriptionKey": "recruitmentDescription"
+        },
+        {
+          "id": "onboarding",
+          "icon": "UserCheck",
+          "titleKey": "onboarding",
+          "descriptionKey": "onboardingDescription"
+        },
+        {
+          "id": "leave-request",
+          "icon": "Calendar",
+          "titleKey": "leaveRequest",
+          "descriptionKey": "leaveRequestDescription"
+        },
+        {
+          "id": "performance-review",
+          "icon": "BarChart3",
+          "titleKey": "performanceReview",
+          "descriptionKey": "performanceReviewDescription"
+        }
+      ]
+    },
+    {
+      "id": "finance",
+      "icon": "DollarSign",
+      "workflows": [
+        {
+          "id": "expense-approval",
+          "icon": "Receipt",
+          "titleKey": "expenseApproval",
+          "descriptionKey": "expenseApprovalDescription"
+        },
+        {
+          "id": "invoice-processing",
+          "icon": "FileText",
+          "titleKey": "invoiceProcessing",
+          "descriptionKey": "invoiceProcessingDescription"
+        },
+        {
+          "id": "budget-approval",
+          "icon": "Wallet",
+          "titleKey": "budgetApproval",
+          "descriptionKey": "budgetApprovalDescription"
+        },
+        {
+          "id": "payment-request",
+          "icon": "CreditCard",
+          "titleKey": "paymentRequest",
+          "descriptionKey": "paymentRequestDescription"
+        }
+      ]
+    },
+    {
+      "id": "procurement",
+      "icon": "ShoppingCart",
+      "workflows": [
+        {
+          "id": "purchase-order",
+          "icon": "ShoppingBag",
+          "titleKey": "purchaseOrder",
+          "descriptionKey": "purchaseOrderDescription"
+        },
+        {
+          "id": "vendor-management",
+          "icon": "Building2",
+          "titleKey": "vendorManagement",
+          "descriptionKey": "vendorManagementDescription"
+        },
+        {
+          "id": "contract-approval",
+          "icon": "FileCheck",
+          "titleKey": "contractApproval",
+          "descriptionKey": "contractApprovalDescription"
+        },
+        {
+          "id": "supplier-evaluation",
+          "icon": "ClipboardCheck",
+          "titleKey": "supplierEvaluation",
+          "descriptionKey": "supplierEvaluationDescription"
+        }
+      ]
+    },
+    {
+      "id": "it",
+      "icon": "Laptop",
+      "workflows": [
+        {
+          "id": "access-request",
+          "icon": "Key",
+          "titleKey": "accessRequest",
+          "descriptionKey": "accessRequestDescription"
+        },
+        {
+          "id": "software-request",
+          "icon": "Package",
+          "titleKey": "softwareRequest",
+          "descriptionKey": "softwareRequestDescription"
+        },
+        {
+          "id": "incident-management",
+          "icon": "AlertCircle",
+          "titleKey": "incidentManagement",
+          "descriptionKey": "incidentManagementDescription"
+        },
+        {
+          "id": "change-request",
+          "icon": "Settings",
+          "titleKey": "changeRequest",
+          "descriptionKey": "changeRequestDescription"
+        }
+      ]
+    },
+    {
+      "id": "legal",
+      "icon": "Scale",
+      "workflows": [
+        {
+          "id": "contract-review",
+          "icon": "FileSearch",
+          "titleKey": "contractReview",
+          "descriptionKey": "contractReviewDescription"
+        },
+        {
+          "id": "compliance-check",
+          "icon": "ShieldCheck",
+          "titleKey": "complianceCheck",
+          "descriptionKey": "complianceCheckDescription"
+        },
+        {
+          "id": "nda-approval",
+          "icon": "Lock",
+          "titleKey": "ndaApproval",
+          "descriptionKey": "ndaApprovalDescription"
+        }
+      ]
+    },
+    {
+      "id": "operations",
+      "icon": "Cog",
+      "workflows": [
+        {
+          "id": "maintenance-request",
+          "icon": "Wrench",
+          "titleKey": "maintenanceRequest",
+          "descriptionKey": "maintenanceRequestDescription"
+        },
+        {
+          "id": "quality-control",
+          "icon": "CheckCircle2",
+          "titleKey": "qualityControl",
+          "descriptionKey": "qualityControlDescription"
+        },
+        {
+          "id": "incident-report",
+          "icon": "AlertTriangle",
+          "titleKey": "incidentReport",
+          "descriptionKey": "incidentReportDescription"
+        }
+      ]
+    }
+  ]
+}
+

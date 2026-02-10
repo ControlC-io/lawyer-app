@@ -1,0 +1,2876 @@
+import React, { useState, useEffect, useRef } from "react";
+import { useNavigate } from "react-router-dom";
+import { Plus, Trash2, Copy, Key, Zap, Edit, ChevronRight, GripVertical, Star, X, Link2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { api } from "@/lib/api";
+import { toast } from "sonner";
+import { formatDistanceToNow } from "date-fns";
+import { useCompanyId } from "@/hooks/useCompanyId";
+import { useAuth } from "@/contexts/AuthContext";
+import { useQueryClient } from "@tanstack/react-query";
+import { CreateWorkflowDialog } from "@/components/workflow/CreateWorkflowDialog";
+import { WorkflowAIChat } from "@/components/workflow/WorkflowAIChat";
+import { CategoryDialog } from "@/components/workflow/CategoryDialog";
+import { CategoryCard } from "@/components/workflow/CategoryCard";
+import { CategoryBreadcrumb } from "@/components/workflow/CategoryBreadcrumb";
+import { SearchResults } from "@/components/workflow/SearchResults";
+import { IconPicker } from "@/components/workflow/IconPicker";
+import { FolderPlus, MoreVertical, Workflow as WorkflowIcon, Folder } from "lucide-react";
+import { renderIcon } from "@/lib/iconUtils";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+
+interface Workflow {
+  id: string;
+  name: string;
+  description: string | null;
+  created_at: string;
+  updated_at: string;
+  step_count?: number;
+  category_id: string | null;
+  icon: string | null;
+  is_active?: boolean;
+}
+
+interface WorkflowCategory {
+  id: string;
+  name: string;
+  description: string | null;
+  parent_category_id: string | null;
+  icon: string | null;
+  company_id: string;
+  created_at: string;
+  updated_at: string;
+}
+
+type KeyValuePairWithMode = { key: string; value: string; mode?: "static" | "bind" };
+
+type DataStructureField = {
+  id: string;
+  data_structure_id: string;
+  parent_item_id: string | null;
+  name: string;
+  description: string | null;
+  field_type: string;
+  options: string[] | null;
+  position: number;
+  options_source?: "static" | "dynamic";
+  api_configuration_id?: string | null;
+  api_query_params?: KeyValuePairWithMode[];
+};
+
+type FieldFormData = {
+  name: string;
+  description: string;
+  field_type: string;
+  options: string;
+  parent_item_id: string;
+  options_source?: "static" | "dynamic";
+  api_configuration_id?: string | null;
+  use_query_params?: boolean;
+  api_query_params?: KeyValuePairWithMode[];
+};
+
+const FIELD_TYPES = [
+  { value: "text", label: "Text" },
+  { value: "number", label: "Number" },
+  { value: "boolean", label: "Boolean" },
+  { value: "date", label: "Date" },
+  { value: "time", label: "Time" },
+  { value: "datetime", label: "Date & Time" },
+  { value: "option", label: "Option (Single)" },
+  { value: "multiple_option", label: "Multiple Options" },
+  { value: "array", label: "Array" },
+  { value: "file", label: "File" },
+  { value: "multiple_files", label: "Multiple Files" },
+  { value: "html", label: "HTML" },
+  { value: "signature", label: "Handwritten Signature" },
+];
+
+interface User {
+  id: string;
+  full_name: string | null;
+  email: string;
+}
+
+interface Group {
+  id: string;
+  name: string;
+  description: string | null;
+}
+
+interface WorkflowStatus {
+  id: string;
+  workflow_id: string;
+  name: string;
+  order: number;
+  color: string;
+  created_at: string;
+  updated_at: string;
+  company_id: string | null;
+}
+
+interface Company {
+  id: string;
+  name: string;
+}
+
+type StatusFormData = {
+  name: string;
+  color: string;
+};
+
+export default function WorkflowList() {
+  const navigate = useNavigate();
+  const companyId = useCompanyId();
+  const { isSuperAdmin } = useAuth();
+  const queryClient = useQueryClient();
+  const [workflows, setWorkflows] = useState<Workflow[]>([]);
+  const [allWorkflows, setAllWorkflows] = useState<Workflow[]>([]); // All workflows for counting
+  const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editingWorkflow, setEditingWorkflow] = useState<Workflow | null>(null);
+  const [workflowToDelete, setWorkflowToDelete] = useState<Workflow | null>(null);
+  const [formData, setFormData] = useState({ name: "", description: "", is_public: false, api_enabled: false });
+  const [dataStructureFields, setDataStructureFields] = useState<DataStructureField[]>([]);
+  const [isFieldDialogOpen, setIsFieldDialogOpen] = useState(false);
+  const [editingFieldId, setEditingFieldId] = useState<string | null>(null);
+  const [fieldFormData, setFieldFormData] = useState<FieldFormData>({
+    name: "",
+    description: "",
+    field_type: "text",
+    options: "",
+    parent_item_id: "",
+    options_source: "static",
+    api_configuration_id: null,
+    use_query_params: false,
+    api_query_params: [],
+  });
+  const [users, setUsers] = useState<User[]>([]);
+  const [groups, setGroups] = useState<Group[]>([]);
+  const [selectedUsers, setSelectedUsers] = useState<string[]>([]);
+  const [selectedGroups, setSelectedGroups] = useState<string[]>([]);
+  const [permissionType, setPermissionType] = useState<"public" | "specific">("public");
+  const [showWorkflowId, setShowWorkflowId] = useState<string | null>(null);
+  const [draggedFieldId, setDraggedFieldId] = useState<string | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+  const [draggedParentId, setDraggedParentId] = useState<string | null>(null);
+  const [dragOverParentId, setDragOverParentId] = useState<string | null>(null);
+  const [showCreateDialog, setShowCreateDialog] = useState(false);
+  const [showAIChat, setShowAIChat] = useState(false);
+  const [categories, setCategories] = useState<WorkflowCategory[]>([]);
+  const [currentCategoryId, setCurrentCategoryId] = useState<string | null>(null);
+  const [categoryBreadcrumb, setCategoryBreadcrumb] = useState<WorkflowCategory[]>([]);
+  const [isCategoryDialogOpen, setIsCategoryDialogOpen] = useState(false);
+  const [editingCategory, setEditingCategory] = useState<WorkflowCategory | null>(null);
+  const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
+  const [selectedIcon, setSelectedIcon] = useState<string | null>(null);
+  const [isCategoriesStuck, setIsCategoriesStuck] = useState(false);
+  const [apiConfigurations, setApiConfigurations] = useState<Array<{ id: string; name: string }>>([]);
+  const categoriesStickyRef = useRef<HTMLDivElement>(null);
+  const categoriesSentinelRef = useRef<HTMLDivElement>(null);
+  const [draggedWorkflowId, setDraggedWorkflowId] = useState<string | null>(null);
+  const [dragOverCategoryId, setDragOverCategoryId] = useState<string | null | undefined>(undefined);
+
+  // Duplicate to company (super admin)
+  const [duplicateToCompanyDialogOpen, setDuplicateToCompanyDialogOpen] = useState(false);
+  const [workflowToDuplicate, setWorkflowToDuplicate] = useState<Workflow | null>(null);
+  const [duplicateTargetCompanyId, setDuplicateTargetCompanyId] = useState<string>("");
+  const [allCompanies, setAllCompanies] = useState<Company[]>([]);
+  const [loadingCompaniesForDuplicate, setLoadingCompaniesForDuplicate] = useState(false);
+
+  // Workflow Status State
+  const [workflowStatuses, setWorkflowStatuses] = useState<WorkflowStatus[]>([]);
+  const [isStatusDialogOpen, setIsStatusDialogOpen] = useState(false);
+  const [editingStatusId, setEditingStatusId] = useState<string | null>(null);
+  const [statusFormData, setStatusFormData] = useState<StatusFormData>({
+    name: "",
+    color: "#3b82f6",
+  });
+  const [draggedStatusId, setDraggedStatusId] = useState<string | null>(null);
+  const [dragOverStatusIndex, setDragOverStatusIndex] = useState<number | null>(null);
+  const [defaultStatusId, setDefaultStatusId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (companyId) {
+      fetchWorkflows();
+      fetchAllWorkflows(); // Fetch all workflows for counting
+      fetchCategories();
+      fetchUsers();
+      fetchGroups();
+      fetchApiConfigurations();
+    }
+  }, [companyId]);
+
+  // Fetch all companies when opening duplicate-to-company dialog (super admin only)
+  useEffect(() => {
+    if (duplicateToCompanyDialogOpen && isSuperAdmin) {
+      setLoadingCompaniesForDuplicate(true);
+      api
+        .get<{ id: string; name: string }[]>("/api/companies")
+        .then((data) => setAllCompanies(data || []))
+        .catch((err) => {
+          console.error("Error fetching companies for duplicate:", err);
+          toast.error("Failed to load companies");
+        })
+        .finally(() => setLoadingCompaniesForDuplicate(false));
+    }
+  }, [duplicateToCompanyDialogOpen, isSuperAdmin]);
+
+  // Refetch filtered workflows when category changes
+  useEffect(() => {
+    if (companyId) {
+      fetchWorkflows();
+    }
+  }, [currentCategoryId, companyId]);
+
+  // Update breadcrumb when current category changes
+  useEffect(() => {
+    if (currentCategoryId === null) {
+      setCategoryBreadcrumb([]);
+      return;
+    }
+
+    const buildBreadcrumb = (categoryId: string | null): WorkflowCategory[] => {
+      if (!categoryId) return [];
+
+      const category = categories.find((c) => c.id === categoryId);
+      if (!category) return [];
+
+      const path = buildBreadcrumb(category.parent_category_id);
+      path.push(category);
+      return path;
+    };
+
+    setCategoryBreadcrumb(buildBreadcrumb(currentCategoryId));
+  }, [currentCategoryId, categories]);
+
+  // Detect when categories section is stuck using Intersection Observer
+  useEffect(() => {
+    const subcategories = categories.filter((c) => c.parent_category_id === currentCategoryId);
+
+    if (subcategories.length === 0) {
+      setIsCategoriesStuck(false);
+      return;
+    }
+
+    // Wait for DOM to be ready before setting up observer
+    let observer: IntersectionObserver | null = null;
+    let timeoutId: NodeJS.Timeout | null = null;
+    let retryTimeoutId: NodeJS.Timeout | null = null;
+    let retryCount = 0;
+    const maxRetries = 10;
+    let scrollCleanup: (() => void) | null = null;
+
+    const checkStuckState = () => {
+      if (categoriesSentinelRef.current) {
+        const sentinelRect = categoriesSentinelRef.current.getBoundingClientRect();
+        setIsCategoriesStuck(sentinelRect.top < 0);
+      }
+    };
+
+    const setupObserver = () => {
+      if (!categoriesSentinelRef.current) {
+        // Retry if element not ready yet (max 10 retries = 500ms)
+        if (retryCount < maxRetries) {
+          retryCount++;
+          retryTimeoutId = setTimeout(setupObserver, 50);
+        }
+        return;
+      }
+
+      // Check initial state
+      checkStuckState();
+
+      observer = new IntersectionObserver(
+        (entries) => {
+          entries.forEach((entry) => {
+            // When sentinel is not intersecting (scrolled past), categories are stuck
+            setIsCategoriesStuck(!entry.isIntersecting);
+          });
+        },
+        {
+          // Use a small rootMargin to trigger slightly before the sentinel leaves viewport
+          rootMargin: '0px',
+          threshold: 0,
+        }
+      );
+
+      observer.observe(categoriesSentinelRef.current);
+
+      // Add scroll listener as fallback
+      window.addEventListener('scroll', checkStuckState, { passive: true });
+      scrollCleanup = () => {
+        window.removeEventListener('scroll', checkStuckState);
+      };
+    };
+
+    // Use requestAnimationFrame to ensure DOM is ready, with fallback timeout
+    const rafId = requestAnimationFrame(() => {
+      timeoutId = setTimeout(() => {
+        setupObserver();
+      }, 100);
+    });
+
+    return () => {
+      cancelAnimationFrame(rafId);
+      if (timeoutId) clearTimeout(timeoutId);
+      if (retryTimeoutId) clearTimeout(retryTimeoutId);
+      if (observer) observer.disconnect();
+      if (scrollCleanup) scrollCleanup();
+    };
+  }, [categories, currentCategoryId]);
+
+
+  const fetchUsers = async () => {
+    if (!companyId) return;
+    try {
+      const data = await api.get<{ id: string; full_name: string | null; email: string }[]>(
+        `/api/companies/${companyId}/users`
+      );
+      const usersData = (data || []).sort((a, b) =>
+        (a.full_name || "").localeCompare(b.full_name || "")
+      );
+      setUsers(usersData);
+    } catch (error) {
+      console.error("Error fetching users:", error);
+      toast.error("Failed to load users");
+    }
+  };
+
+  const fetchGroups = async () => {
+    if (!companyId) return;
+    try {
+      const data = await api.get<{ id: string; name: string; description: string | null }[]>(
+        `/api/companies/${companyId}/groups`
+      );
+      setGroups(data || []);
+    } catch (error) {
+      console.error("Error fetching groups:", error);
+      toast.error("Failed to load groups");
+    }
+  };
+
+  const fetchApiConfigurations = async () => {
+    if (!companyId) return;
+    try {
+      const data = await api.get<{ id: string; name: string; config_type?: string }[]>(
+        `/api/companies/${companyId}/api-configurations`
+      );
+      const filtered = (data || []).filter((c) => c.config_type === "dynamic_options");
+      setApiConfigurations(filtered);
+    } catch (error) {
+      console.error("Error fetching API configurations:", error);
+      toast.error("Failed to load API configurations");
+    }
+  };
+
+  const fetchWorkflowStatuses = async (workflowId: string) => {
+    if (!companyId) return;
+    try {
+      const [statuses, workflow] = await Promise.all([
+        api.get<any[]>(`/api/companies/${companyId}/workflows/${workflowId}/statuses`),
+        api.get<{ default_status_id: string | null }>(
+          `/api/companies/${companyId}/workflows/${workflowId}`
+        ),
+      ]);
+      setWorkflowStatuses(statuses || []);
+      setDefaultStatusId(workflow?.default_status_id ?? null);
+    } catch (error) {
+      console.error("Error fetching workflow statuses:", error);
+      toast.error("Failed to load workflow statuses");
+    }
+  };
+
+  const fetchCategories = async () => {
+    if (!companyId) return;
+    try {
+      const data = await api.get<any[]>(`/api/companies/${companyId}/workflow-categories`);
+      setCategories(data || []);
+    } catch (error) {
+      console.error("Error fetching categories:", error);
+      toast.error("Failed to load categories");
+    }
+  };
+
+  const fetchAllWorkflows = async () => {
+    if (!companyId) return;
+    try {
+      const workflowsWithCounts = await api.get<any[]>(
+        `/api/companies/${companyId}/workflows`
+      );
+      setAllWorkflows(workflowsWithCounts || []);
+    } catch (error) {
+      console.error("Error fetching all workflows:", error);
+      toast.error("Failed to load workflows");
+    }
+  };
+
+  const fetchWorkflows = async () => {
+    if (!companyId) {
+      setWorkflows([]);
+      setLoading(false);
+      return;
+    }
+    try {
+      const params = { categoryId: currentCategoryId ?? null };
+      const workflowsWithCounts = await api.get<any[]>(
+        `/api/companies/${companyId}/workflows`,
+        { params }
+      );
+      setWorkflows(workflowsWithCounts || []);
+    } catch (error) {
+      console.error("Error fetching workflows:", error);
+      toast.error("Failed to load workflows");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCreateOrUpdate = async () => {
+    if (!formData.name.trim()) {
+      toast.error("Workflow name is required");
+      return;
+    }
+
+    try {
+      if (editingWorkflow && companyId) {
+        await api.patch(
+          `/api/companies/${companyId}/workflows/${editingWorkflow.id}`,
+          {
+            name: formData.name,
+            description: formData.description,
+            is_public: formData.is_public,
+            api_enabled: formData.api_enabled,
+            category_id: selectedCategoryId || null,
+            icon: selectedIcon,
+          }
+        );
+
+        // Update or create data structure
+        await updateWorkflowDataStructure(editingWorkflow.id);
+
+        // Update workflow permissions
+        await updateWorkflowPermissions(editingWorkflow.id);
+
+        queryClient.invalidateQueries({ queryKey: ["workflows"] });
+        toast.success("Workflow updated successfully");
+      } else {
+        if (!companyId) {
+          toast.error("Company not set. Please contact administrator.");
+          return;
+        }
+
+        const data = await api.post<{ id: string }>(
+          `/api/companies/${companyId}/workflows`,
+          {
+            name: formData.name,
+            description: formData.description,
+            is_public: formData.is_public,
+            api_enabled: formData.api_enabled,
+            category_id: selectedCategoryId || null,
+            icon: selectedIcon,
+          }
+        );
+
+        if (data?.id) {
+          await createWorkflowDataStructure(data.id);
+          await createWorkflowPermissions(data.id);
+          queryClient.invalidateQueries({ queryKey: ["workflows"] });
+          toast.success("Workflow created successfully");
+          navigate(`/workflow/${data.id}`);
+          return;
+        }
+      }
+
+      setDialogOpen(false);
+      setPermissionType("public");
+      setFormData({ name: "", description: "", is_public: true, api_enabled: false }); // Default to public
+      setDataStructureFields([]);
+      setSelectedUsers([]);
+      setSelectedGroups([]);
+      setEditingWorkflow(null);
+      setSelectedCategoryId(null);
+      setSelectedIcon(null);
+      fetchWorkflows();
+      fetchAllWorkflows();
+    } catch (error) {
+      console.error("Error saving workflow:", error);
+      toast.error("Failed to save workflow");
+    }
+  };
+
+  const createWorkflowDataStructure = async (workflowId: string) => {
+    if (dataStructureFields.length === 0 || !companyId) return;
+    await api.patch(
+      `/api/companies/${companyId}/workflows/${workflowId}`,
+      { data_structure: dataStructureFields }
+    );
+  };
+
+  const updateWorkflowDataStructure = async (workflowId: string) => {
+    if (!companyId) return;
+    await api.patch(
+      `/api/companies/${companyId}/workflows/${workflowId}`,
+      { data_structure: dataStructureFields }
+    );
+  };
+
+  const createWorkflowPermissions = async (workflowId: string) => {
+    if (formData.is_public || !companyId) return;
+    const base = `/api/companies/${companyId}/workflows/${workflowId}/permissions`;
+    for (const userId of selectedUsers) {
+      await api.post(base, { user_id: userId, permission_type: "execute" });
+    }
+    for (const groupId of selectedGroups) {
+      await api.post(base, { group_id: groupId, permission_type: "execute" });
+    }
+  };
+
+  const updateWorkflowPermissions = async (workflowId: string) => {
+    if (!companyId) return;
+    const list = await api.get<{ id: string }[]>(
+      `/api/companies/${companyId}/workflows/${workflowId}/permissions`
+    );
+    for (const p of list || []) {
+      await api.delete(
+        `/api/companies/${companyId}/workflows/${workflowId}/permissions/${p.id}`
+      );
+    }
+    if (!formData.is_public) {
+      await createWorkflowPermissions(workflowId);
+    }
+  };
+
+  const confirmDelete = (e: React.MouseEvent, workflow: Workflow) => {
+    e.stopPropagation();
+    setWorkflowToDelete(workflow);
+  };
+
+  const executeDelete = async () => {
+    if (!workflowToDelete || !companyId) return;
+    try {
+      await api.delete(
+        `/api/companies/${companyId}/workflows/${workflowToDelete.id}`
+      );
+      queryClient.invalidateQueries({ queryKey: ["workflows"] });
+      toast.success("Workflow deleted successfully");
+      fetchWorkflows();
+      fetchAllWorkflows();
+    } catch (error) {
+      console.error("Error deleting workflow:", error);
+      toast.error("Failed to delete workflow");
+    } finally {
+      setWorkflowToDelete(null);
+    }
+  };
+
+  const handleToggleActive = async (e: React.MouseEvent, workflow: Workflow) => {
+    e.stopPropagation();
+    if (!workflow.id || !companyId) return;
+    try {
+      const newActiveState = !(workflow.is_active ?? true);
+      await api.patch(
+        `/api/companies/${companyId}/workflows/${workflow.id}`,
+        { is_active: newActiveState }
+      );
+      setWorkflows((prev) =>
+        prev.map((w) => (w.id === workflow.id ? { ...w, is_active: newActiveState } : w))
+      );
+      setAllWorkflows((prev) =>
+        prev.map((w) => (w.id === workflow.id ? { ...w, is_active: newActiveState } : w))
+      );
+      queryClient.invalidateQueries({ queryKey: ["workflows"] });
+      toast.success(newActiveState ? "Workflow activated" : "Workflow deactivated");
+    } catch (error) {
+      console.error("Error toggling workflow active state:", error);
+      toast.error("Failed to update workflow status");
+    }
+  };
+
+  const handleDuplicate = async (workflow: Workflow, targetCompanyId?: string | null) => {
+    const effectiveCompanyId = targetCompanyId ?? companyId;
+    if (!effectiveCompanyId) {
+      toast.error("Company not set. Please contact administrator.");
+      return;
+    }
+    if (targetCompanyId != null && targetCompanyId !== companyId && !isSuperAdmin) {
+      toast.error("Only super admins can duplicate a workflow to another company.");
+      return;
+    }
+
+    const isCopyingToAnotherCompany = targetCompanyId != null && targetCompanyId !== companyId;
+
+    try {
+      const sourceCompanyId = workflow.company_id ?? companyId;
+      const fullWorkflow = await api.get<any>(
+        `/api/companies/${sourceCompanyId}/workflows/${workflow.id}`
+      );
+      const workflowData = fullWorkflow;
+
+      const newCategoryId = isCopyingToAnotherCompany ? null : (workflowData.category_id || null);
+
+      const newWorkflow = await api.post<{ id: string }>(
+        `/api/companies/${effectiveCompanyId}/workflows`,
+        {
+          name: `${workflowData.name} (Copy)`,
+          description: workflowData.description,
+          category_id: newCategoryId,
+          icon: workflowData.icon || null,
+          is_active: workflowData.is_active ?? false,
+          data_structure: workflowData.data_structure || null,
+          is_public: workflowData.is_public ?? false,
+          api_enabled: workflowData.api_enabled ?? false,
+        }
+      );
+
+      if (!newWorkflow?.id) throw new Error("Workflow copy created but no data returned");
+
+      const steps = workflowData.steps || [];
+      const stepIdMap = new Map<string, string>();
+
+      if (steps.length > 0) {
+        const newSteps = steps.map((step: any) => {
+          const config = step.config ? JSON.parse(JSON.stringify(step.config)) : {};
+          return {
+            step_type: step.step_type,
+            name: step.name,
+            position_x: step.position_x,
+            position_y: step.position_y,
+            config,
+            action_type: step.action_type || "manual",
+            decision_node_type: step.decision_node_type || "Human",
+            assigned_to_user_id: step.assigned_to_user_id || config?.assigned_to_user_id || null,
+            assigned_to_group_id: step.assigned_to_group_id || config?.assigned_to_group_id || null,
+          };
+        });
+        const insertedSteps = await api.put<any[]>(
+          `/api/companies/${effectiveCompanyId}/workflows/${newWorkflow.id}/steps`,
+          { steps: newSteps }
+        );
+        if (insertedSteps && Array.isArray(insertedSteps)) {
+          steps.forEach((oldStep: any, index: number) => {
+            if (insertedSteps[index]) stepIdMap.set(oldStep.id, insertedSteps[index].id);
+          });
+        }
+      }
+
+      const connections = workflowData.connections || [];
+      if (connections.length > 0) {
+        const newConnections = connections.map((conn: any) => ({
+          source_step_id: stepIdMap.get(conn.source_step_id) || conn.source_step_id,
+          target_step_id: stepIdMap.get(conn.target_step_id) || conn.target_step_id,
+          output_name: conn.output_name || "default",
+          config: conn.config ? JSON.parse(JSON.stringify(conn.config)) : { color: "hsl(var(--primary))", style: "solid" },
+        }));
+        try {
+          await api.put(
+            `/api/companies/${effectiveCompanyId}/workflows/${newWorkflow.id}/connections`,
+            { connections: newConnections }
+          );
+        } catch (err) {
+          console.error("Error copying workflow connections:", err);
+        }
+      }
+
+      const statuses = workflowData.statuses || [];
+      if (statuses.length > 0) {
+        let insertedStatuses: any[] = [];
+        try {
+          for (let i = 0; i < statuses.length; i++) {
+            const s = statuses[i];
+            const created = await api.post<any>(
+              `/api/companies/${effectiveCompanyId}/workflows/${newWorkflow.id}/statuses`,
+              { name: s.name, order: s.order, color: s.color }
+            );
+            insertedStatuses.push(created);
+          }
+        } catch (err) {
+          console.error("Error copying workflow statuses:", err);
+        }
+        if (insertedStatuses.length && workflowData.default_status_id) {
+          const oldIdx = statuses.findIndex((s: any) => s.id === workflowData.default_status_id);
+          if (oldIdx !== -1 && insertedStatuses[oldIdx]) {
+            try {
+              await api.patch(
+                `/api/companies/${effectiveCompanyId}/workflows/${newWorkflow.id}`,
+                { default_status_id: insertedStatuses[oldIdx].id }
+              );
+            } catch (err) {
+              console.error("Error setting default status:", err);
+            }
+          }
+        }
+      }
+
+      toast.success("Workflow duplicated successfully");
+      
+      // Refresh the workflow lists
+      await fetchWorkflows();
+      await fetchAllWorkflows();
+    } catch (error) {
+      console.error("Error duplicating workflow:", error);
+      const errorMessage = error instanceof Error ? error.message : "Failed to duplicate workflow";
+      toast.error(errorMessage);
+    }
+  };
+
+  const copyToClipboard = async (text: string, label: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success(`${label} copied to clipboard`);
+    } catch (error) {
+      console.error("Failed to copy to clipboard:", error);
+      toast.error("Failed to copy to clipboard");
+    }
+  };
+
+  const openDialog = async (workflow?: Workflow) => {
+    // Ensure we capture the current category at the time of opening
+    const categoryToUse = currentCategoryId;
+
+    if (workflow) {
+      setEditingWorkflow(workflow);
+      setFormData({
+        name: workflow.name,
+        description: workflow.description || "",
+        is_public: (workflow as any).is_public || false,
+        api_enabled: (workflow as any).api_enabled || false
+      });
+      setSelectedCategoryId(workflow.category_id || null);
+      setSelectedIcon(workflow.icon || null);
+
+      let workflowDataTyped: { data_structure?: any[]; is_public?: boolean; api_enabled?: boolean } = {};
+      if (companyId) {
+        workflowDataTyped = await api.get(
+          `/api/companies/${companyId}/workflows/${workflow.id}`
+        );
+      }
+
+      const fields = (workflowDataTyped?.data_structure as any[]) || [];
+      setDataStructureFields(fields
+        .map((f: any) => ({
+          id: f.id || crypto.randomUUID(),
+          data_structure_id: "",
+          parent_item_id: f.parent_item_id || null,
+          name: f.name,
+          description: f.description || null,
+          field_type: f.field_type,
+          options: f.options || null,
+          position: f.position ?? 0,
+          options_source: f.options_source || (f.options ? "static" : undefined),
+          api_configuration_id: f.api_configuration_id || null,
+          api_query_params: f.api_query_params || undefined,
+        }))
+        .sort((a: any, b: any) => {
+          if (!a.parent_item_id && !b.parent_item_id) return a.position - b.position;
+          return 0;
+        }));
+
+      setPermissionType(workflowDataTyped?.is_public ? "public" : "specific");
+
+      let userIds: string[] = [];
+      let groupIds: string[] = [];
+      if (companyId) {
+        const permissions = await api.get<{ user_id: string | null; group_id: string | null }[]>(
+          `/api/companies/${companyId}/workflows/${workflow.id}/permissions`
+        );
+        userIds = permissions?.filter((p) => p.user_id).map((p) => p.user_id!) || [];
+        groupIds = permissions?.filter((p) => p.group_id).map((p) => p.group_id!) || [];
+      }
+
+      setSelectedUsers(userIds);
+      setSelectedGroups(groupIds);
+
+      // Fetch workflow statuses
+      await fetchWorkflowStatuses(workflow.id);
+    } else {
+      setEditingWorkflow(null);
+      setPermissionType("public");
+      setFormData({ name: "", description: "", is_public: true, api_enabled: false }); // Default to public when creating new workflow
+      setDataStructureFields([]);
+      setSelectedUsers([]);
+      setSelectedGroups([]);
+      setSelectedCategoryId(categoryToUse); // Default to current category (captured at open time)
+      setSelectedIcon(null);
+      setIsFieldDialogOpen(false);
+      setEditingFieldId(null);
+      setFieldFormData({
+        name: "",
+        description: "",
+        field_type: "text",
+        options: "",
+        parent_item_id: "",
+      });
+    }
+    setDialogOpen(true);
+  };
+
+  // Category management functions
+  const handleNavigateCategory = (categoryId: string | null) => {
+    // Don't navigate if we're already in this category
+    if (currentCategoryId === categoryId) {
+      return;
+    }
+    setCurrentCategoryId(categoryId);
+    setLoading(true);
+  };
+
+  const handleDeleteCategory = async (categoryId: string) => {
+    // Check if category has workflows or subcategories
+    const hasWorkflows = workflows.some((w) => w.category_id === categoryId);
+    const hasSubcategories = categories.some((c) => c.parent_category_id === categoryId);
+
+    if (hasWorkflows || hasSubcategories) {
+      if (!confirm(`This category contains ${hasWorkflows ? 'workflows' : ''}${hasWorkflows && hasSubcategories ? ' and ' : ''}${hasSubcategories ? 'subcategories' : ''}. Are you sure you want to delete it? Workflows will be moved to uncategorized.`)) {
+        return;
+      }
+    } else {
+      if (!confirm("Are you sure you want to delete this category?")) {
+        return;
+      }
+    }
+
+    if (!companyId) return;
+    try {
+      if (hasWorkflows) {
+        const inCategory = workflows.filter((w) => w.category_id === categoryId);
+        for (const w of inCategory) {
+          await api.patch(`/api/companies/${companyId}/workflows/${w.id}`, { category_id: null });
+        }
+      }
+
+      if (hasSubcategories) {
+        const category = categories.find((c) => c.id === categoryId);
+        const newParentId = category?.parent_category_id || null;
+        const subcats = categories.filter((c) => c.parent_category_id === categoryId);
+        for (const sub of subcats) {
+          await api.patch(`/api/companies/${companyId}/workflow-categories/${sub.id}`, { parent_category_id: newParentId });
+        }
+      }
+
+      await api.delete(`/api/companies/${companyId}/workflow-categories/${categoryId}`);
+
+      toast.success("Category deleted successfully");
+
+      // If we deleted the current category, navigate to parent or root
+      if (currentCategoryId === categoryId) {
+        const category = categories.find((c) => c.id === categoryId);
+        setCurrentCategoryId(category?.parent_category_id || null);
+      }
+
+      fetchCategories();
+      fetchWorkflows();
+      fetchAllWorkflows();
+    } catch (error) {
+      console.error("Error deleting category:", error);
+      toast.error("Failed to delete category");
+    }
+  };
+
+  const handleEditCategory = (category: WorkflowCategory) => {
+    setEditingCategory(category);
+    setIsCategoryDialogOpen(true);
+  };
+
+  const [pendingParentId, setPendingParentId] = useState<string | null>(null);
+  const [dialogKeyCounter, setDialogKeyCounter] = useState(0);
+  const pendingParentIdRef = useRef<string | null>(null);
+
+  const handleCreateCategory = (parentCategoryId?: string | null) => {
+    setEditingCategory(null);
+    // When creating from within a category, parentCategoryId is currentCategoryId
+    // When creating from root, parentCategoryId is null
+    // Always use the explicitly passed value, falling back to currentCategoryId if not provided
+    const parentId = parentCategoryId !== undefined ? parentCategoryId : currentCategoryId;
+
+    // Store in ref immediately (synchronous) for immediate access
+    pendingParentIdRef.current = parentId;
+
+    // Set state and increment counter at the same time
+    setPendingParentId(parentId);
+    setDialogKeyCounter(prev => prev + 1);
+
+    // Open dialog immediately - ref ensures correct value is available
+    // The key change will force React to create a fresh component with correct props
+    setIsCategoryDialogOpen(true);
+  };
+
+  const handleCategoryDialogSuccess = () => {
+    fetchCategories();
+  };
+
+  // Get subcategories of current category
+  const getSubcategories = () => {
+    return categories.filter((c) => c.parent_category_id === currentCategoryId);
+  };
+
+  // Get total workflow count for category (recursively includes all workflows in subcategories)
+  const getCategoryItemCount = (categoryId: string): number => {
+    // Count workflows directly in this category using allWorkflows (unfiltered)
+    const directWorkflowCount = allWorkflows.filter((w) => w.category_id === categoryId).length;
+
+    // Get all subcategories of this category
+    const subcategories = categories.filter((c) => c.parent_category_id === categoryId);
+
+    // Recursively count workflows in all subcategories
+    const subcategoryWorkflowCount = subcategories.reduce((total, subcategory) => {
+      return total + getCategoryItemCount(subcategory.id);
+    }, 0);
+
+    // Return total count (direct workflows + workflows in all subcategories)
+    return directWorkflowCount + subcategoryWorkflowCount;
+  };
+
+  const getAllWorkflowsForSearch = async () => {
+    if (!companyId) return [];
+    try {
+      return await api.get<any[]>(`/api/companies/${companyId}/workflows`);
+    } catch (error) {
+      console.error("Error fetching all workflows:", error);
+      return [];
+    }
+  };
+
+  // Get filtered workflows and categories for search
+  const getSearchResults = () => {
+    if (!searchQuery.trim()) {
+      return { workflows: [], categories: [] };
+    }
+
+    const query = searchQuery.toLowerCase();
+    const filteredWorkflows = workflows.filter((w) =>
+      w.name.toLowerCase().includes(query) ||
+      (w.description && w.description.toLowerCase().includes(query))
+    );
+    const filteredCategories = categories.filter((c) =>
+      c.name.toLowerCase().includes(query) ||
+      (c.description && c.description.toLowerCase().includes(query))
+    );
+
+    return { workflows: filteredWorkflows, categories: filteredCategories };
+  };
+
+  const handleAddField = () => {
+    setFieldFormData({
+      name: "",
+      description: "",
+      field_type: "text",
+      options: "",
+      parent_item_id: "",
+      options_source: "static",
+      api_configuration_id: null,
+    });
+    setEditingFieldId(null);
+    setIsFieldDialogOpen(true);
+  };
+
+  const handleEditField = (field: DataStructureField) => {
+    // Reset field_type if it's invalid for a sub-item (file, signature, or array cannot be sub-items)
+    const fieldType = field.parent_item_id && (field.field_type === "file" || field.field_type === "multiple_files" || field.field_type === "signature" || field.field_type === "array")
+      ? "text"
+      : field.field_type;
+
+    const queryParams = field.api_query_params || [];
+    const parsedQueryParams = queryParams.map((p: any) => ({
+      key: p.key || "",
+      value: p.value || "",
+      mode: p.value?.startsWith("{{") ? "bind" : "static"
+    }));
+
+    setFieldFormData({
+      name: field.name,
+      description: field.description || "",
+      field_type: fieldType,
+      options: field.options?.join(", ") || "",
+      parent_item_id: field.parent_item_id || "",
+      options_source: field.options_source || "static",
+      api_configuration_id: field.api_configuration_id || null,
+      use_query_params: parsedQueryParams.length > 0,
+      api_query_params: parsedQueryParams.length > 0 ? parsedQueryParams : [],
+    });
+    setEditingFieldId(field.id);
+    setIsFieldDialogOpen(true);
+  };
+
+  const handleAddSubItem = (parentId: string) => {
+    setFieldFormData({
+      name: "",
+      description: "",
+      field_type: "text",
+      options: "",
+      parent_item_id: parentId,
+      options_source: "static",
+      api_configuration_id: null,
+    });
+    setEditingFieldId(null);
+    setIsFieldDialogOpen(true);
+  };
+
+  const handleSubmitField = (e: React.FormEvent) => {
+    e.preventDefault();
+
+    // Validate: cannot add file, signature, or array types as sub-items
+    if (fieldFormData.parent_item_id && (fieldFormData.field_type === "file" || fieldFormData.field_type === "multiple_files" || fieldFormData.field_type === "signature" || fieldFormData.field_type === "array")) {
+      toast.error("Cannot add file, signature, or array types as sub-items of an array");
+      return;
+    }
+
+    // Preserve existing position when editing, or calculate new position for new fields
+    let position: number;
+    if (editingFieldId) {
+      // When editing, preserve the existing position
+      const existingField = dataStructureFields.find(f => f.id === editingFieldId);
+      position = existingField?.position ?? 0;
+    } else {
+      // When creating new field, calculate position based on parent context
+      if (fieldFormData.parent_item_id) {
+        // For child fields, find max position among siblings
+        const siblings = dataStructureFields.filter(f => f.parent_item_id === fieldFormData.parent_item_id);
+        const maxSiblingPosition = siblings.length > 0
+          ? Math.max(...siblings.map(f => f.position))
+          : -1;
+        position = maxSiblingPosition + 1;
+      } else {
+        // For top-level fields, find max position among top-level fields
+        const topLevelFields = dataStructureFields.filter(f => !f.parent_item_id);
+        const maxTopLevelPosition = topLevelFields.length > 0
+          ? Math.max(...topLevelFields.map(f => f.position))
+          : -1;
+        position = maxTopLevelPosition + 1;
+      }
+    }
+
+    const fieldData: DataStructureField = {
+      id: editingFieldId || crypto.randomUUID(),
+      data_structure_id: "",
+      name: fieldFormData.name,
+      description: fieldFormData.description || null,
+      field_type: fieldFormData.field_type,
+      parent_item_id: fieldFormData.parent_item_id || null,
+      options: (fieldFormData.field_type === "option" || fieldFormData.field_type === "multiple_option") && fieldFormData.options_source === "static" && fieldFormData.options
+        ? fieldFormData.options.split(",").map(o => o.trim()).filter(Boolean)
+        : null,
+      position: position,
+      options_source: (fieldFormData.field_type === "option" || fieldFormData.field_type === "multiple_option") ? (fieldFormData.options_source || "static") : undefined,
+      api_configuration_id: (fieldFormData.field_type === "option" || fieldFormData.field_type === "multiple_option") && fieldFormData.options_source === "dynamic" ? (fieldFormData.api_configuration_id || null) : null,
+      api_query_params: (fieldFormData.field_type === "option" || fieldFormData.field_type === "multiple_option") && fieldFormData.options_source === "dynamic" && fieldFormData.use_query_params && fieldFormData.api_query_params
+        ? fieldFormData.api_query_params.filter(p => p.key.trim())
+        : undefined,
+    };
+
+    if (editingFieldId) {
+      setDataStructureFields(prev =>
+        prev.map(f => f.id === editingFieldId ? { ...f, ...fieldData } : f)
+      );
+    } else {
+      setDataStructureFields(prev => [...prev, fieldData]);
+    }
+
+    setIsFieldDialogOpen(false);
+    setFieldFormData({
+      name: "",
+      description: "",
+      field_type: "text",
+      options: "",
+      parent_item_id: "",
+      options_source: "static",
+      api_configuration_id: null,
+      use_query_params: false,
+      api_query_params: [],
+    });
+    setEditingFieldId(null);
+  };
+
+  const handleDeleteField = (fieldId: string) => {
+    setDataStructureFields(prev =>
+      prev.filter(f => f.id !== fieldId && f.parent_item_id !== fieldId)
+    );
+  };
+
+  const handleDragStart = (e: React.DragEvent, fieldId: string, parentId: string | null = null) => {
+    setDraggedFieldId(fieldId);
+    setDraggedParentId(parentId);
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", fieldId);
+  };
+
+  const handleDragOver = (e: React.DragEvent, index: number, parentId: string | null = null) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    setDragOverIndex(index);
+    setDragOverParentId(parentId);
+  };
+
+  const handleDragLeave = () => {
+    setDragOverIndex(null);
+    setDragOverParentId(null);
+  };
+
+  const handleDrop = (e: React.DragEvent, targetIndex: number, targetParentId: string | null = null) => {
+    e.preventDefault();
+    setDragOverIndex(null);
+    setDragOverParentId(null);
+
+    if (!draggedFieldId) return;
+
+    // Check if we're dragging within the same parent context
+    if (draggedParentId !== targetParentId) {
+      setDraggedFieldId(null);
+      setDraggedParentId(null);
+      return;
+    }
+
+    if (targetParentId === null) {
+      // Reordering top-level fields
+      const topLevelFields = dataStructureFields
+        .filter(f => !f.parent_item_id)
+        .sort((a, b) => a.position - b.position);
+
+      const draggedIndex = topLevelFields.findIndex(f => f.id === draggedFieldId);
+
+      if (draggedIndex === -1 || draggedIndex === targetIndex) {
+        setDraggedFieldId(null);
+        setDraggedParentId(null);
+        return;
+      }
+
+      // Reorder the fields
+      const reorderedFields = [...topLevelFields];
+      const [removed] = reorderedFields.splice(draggedIndex, 1);
+      reorderedFields.splice(targetIndex, 0, removed);
+
+      // Update positions for all top-level fields
+      const updatedFields = dataStructureFields.map(field => {
+        if (field.parent_item_id) {
+          // Keep child fields as-is
+          return field;
+        }
+
+        const newIndex = reorderedFields.findIndex(f => f.id === field.id);
+        if (newIndex !== -1) {
+          return { ...field, position: newIndex };
+        }
+        return field;
+      });
+
+      setDataStructureFields(updatedFields);
+    } else {
+      // Reordering child fields within the same parent
+      const childFields = dataStructureFields
+        .filter(f => f.parent_item_id === targetParentId)
+        .sort((a, b) => a.position - b.position);
+
+      const draggedIndex = childFields.findIndex(f => f.id === draggedFieldId);
+
+      if (draggedIndex === -1 || draggedIndex === targetIndex) {
+        setDraggedFieldId(null);
+        setDraggedParentId(null);
+        return;
+      }
+
+      // Reorder the child fields
+      const reorderedChildren = [...childFields];
+      const [removed] = reorderedChildren.splice(draggedIndex, 1);
+      reorderedChildren.splice(targetIndex, 0, removed);
+
+      // Update positions for all child fields of this parent
+      const updatedFields = dataStructureFields.map(field => {
+        if (field.parent_item_id === targetParentId) {
+          const newIndex = reorderedChildren.findIndex(f => f.id === field.id);
+          if (newIndex !== -1) {
+            return { ...field, position: newIndex };
+          }
+        }
+        return field;
+      });
+
+      setDataStructureFields(updatedFields);
+    }
+
+    setDraggedFieldId(null);
+    setDraggedParentId(null);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedFieldId(null);
+    setDraggedParentId(null);
+    setDragOverIndex(null);
+    setDragOverParentId(null);
+  };
+
+  // Workflow Status Handlers
+  const handleAddStatus = () => {
+    setEditingStatusId(null);
+    setStatusFormData({
+      name: "",
+      color: "#3b82f6",
+    });
+    setIsStatusDialogOpen(true);
+  };
+
+  const handleEditStatus = (status: WorkflowStatus) => {
+    setEditingStatusId(status.id);
+    setStatusFormData({
+      name: status.name,
+      color: status.color,
+    });
+    setIsStatusDialogOpen(true);
+  };
+
+  const handleDeleteStatus = async (statusId: string) => {
+    if (!confirm("Are you sure you want to delete this status?") || !editingWorkflow || !companyId) return;
+    try {
+      await api.delete(
+        `/api/companies/${companyId}/workflows/${editingWorkflow.id}/statuses/${statusId}`
+      );
+      setWorkflowStatuses((prev) => prev.filter((s) => s.id !== statusId));
+      toast.success("Status deleted successfully");
+    } catch (error) {
+      console.error("Error deleting status:", error);
+      toast.error("Failed to delete status");
+    }
+  };
+
+  const handleSubmitStatus = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!editingWorkflow) {
+      toast.error("No workflow selected");
+      return;
+    }
+
+    if (!statusFormData.name.trim()) {
+      toast.error("Status name is required");
+      return;
+    }
+
+    if (!companyId) return;
+    try {
+      if (editingStatusId) {
+        await api.patch(
+          `/api/companies/${companyId}/workflows/${editingWorkflow.id}/statuses/${editingStatusId}`,
+          { name: statusFormData.name, color: statusFormData.color }
+        );
+        setWorkflowStatuses((prev) =>
+          prev.map((s) =>
+            s.id === editingStatusId
+              ? { ...s, name: statusFormData.name, color: statusFormData.color }
+              : s
+          )
+        );
+        toast.success("Status updated successfully");
+      } else {
+        const newOrder = workflowStatuses.length;
+        const data = await api.post(
+          `/api/companies/${companyId}/workflows/${editingWorkflow.id}/statuses`,
+          { name: statusFormData.name, color: statusFormData.color, order: newOrder }
+        );
+        setWorkflowStatuses((prev) => [...prev, data]);
+        toast.success("Status created successfully");
+      }
+
+      setIsStatusDialogOpen(false);
+      setEditingStatusId(null);
+      setStatusFormData({ name: "", color: "#3b82f6" });
+    } catch (error) {
+      console.error("Error saving status:", error);
+      toast.error("Failed to save status");
+    }
+  };
+
+  const handleStatusDragStart = (e: React.DragEvent, statusId: string) => {
+    setDraggedStatusId(statusId);
+    e.dataTransfer.effectAllowed = "move";
+  };
+
+  const handleStatusDragOver = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    setDragOverStatusIndex(index);
+  };
+
+  const handleStatusDragLeave = () => {
+    setDragOverStatusIndex(null);
+  };
+
+  const handleStatusDrop = async (e: React.DragEvent, targetIndex: number) => {
+    e.preventDefault();
+
+    if (!draggedStatusId) return;
+
+    const draggedIndex = workflowStatuses.findIndex(s => s.id === draggedStatusId);
+    if (draggedIndex === -1 || draggedIndex === targetIndex) {
+      setDraggedStatusId(null);
+      setDragOverStatusIndex(null);
+      return;
+    }
+
+    // Reorder statuses
+    const reordered = [...workflowStatuses];
+    const [removed] = reordered.splice(draggedIndex, 1);
+    reordered.splice(targetIndex, 0, removed);
+
+    // Update order values
+    const updatedStatuses = reordered.map((status, index) => ({
+      ...status,
+      order: index,
+    }));
+
+    setWorkflowStatuses(updatedStatuses);
+
+    if (!companyId || !editingWorkflow) return;
+    try {
+      await Promise.all(
+        updatedStatuses.map((status) =>
+          api.patch(
+            `/api/companies/${companyId}/workflows/${editingWorkflow.id}/statuses/${status.id}`,
+            { order: status.order }
+          )
+        )
+      );
+    } catch (error) {
+      console.error("Error updating status order:", error);
+      toast.error("Failed to update status order");
+      // Revert on error
+      if (editingWorkflow) {
+        await fetchWorkflowStatuses(editingWorkflow.id);
+      }
+    }
+
+    setDraggedStatusId(null);
+    setDragOverStatusIndex(null);
+  };
+
+  const handleStatusDragEnd = () => {
+    setDraggedStatusId(null);
+    setDragOverStatusIndex(null);
+  };
+
+  const handleSetDefaultStatus = async (statusId: string) => {
+    if (!editingWorkflow || !companyId) {
+      toast.error("No workflow selected");
+      return;
+    }
+    try {
+      await api.patch(
+        `/api/companies/${companyId}/workflows/${editingWorkflow.id}`,
+        { default_status_id: statusId }
+      );
+      setDefaultStatusId(statusId);
+      toast.success("Default status updated successfully");
+    } catch (error) {
+      console.error("Error setting default status:", error);
+      toast.error("Failed to set default status");
+    }
+  };
+
+  const handleCloseFieldDialog = () => {
+    setIsFieldDialogOpen(false);
+    setFieldFormData({
+      name: "",
+      description: "",
+      field_type: "text",
+      options: "",
+      parent_item_id: "",
+      options_source: "static",
+      api_configuration_id: null,
+      use_query_params: false,
+      api_query_params: [],
+    });
+    setEditingFieldId(null);
+  };
+
+  // Workflow drag and drop handlers
+  const handleWorkflowDragStart = (e: React.DragEvent, workflowId: string) => {
+    setDraggedWorkflowId(workflowId);
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", workflowId);
+    // Add a visual indicator
+    if (e.currentTarget instanceof HTMLElement) {
+      e.currentTarget.style.opacity = "0.5";
+    }
+  };
+
+  const handleWorkflowDragEnd = (e: React.DragEvent) => {
+    setDraggedWorkflowId(null);
+    setDragOverCategoryId(undefined);
+    // Reset opacity
+    if (e.currentTarget instanceof HTMLElement) {
+      e.currentTarget.style.opacity = "1";
+    }
+  };
+
+  const handleCategoryDragOver = (e: React.DragEvent, categoryId: string | null) => {
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = "move";
+    if (draggedWorkflowId) {
+      setDragOverCategoryId(categoryId);
+    }
+  };
+
+  const handleCategoryDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    // Only clear if we're actually leaving the category card (not just moving to a child element)
+    const relatedTarget = e.relatedTarget as HTMLElement;
+    if (!relatedTarget || !e.currentTarget.contains(relatedTarget)) {
+      setDragOverCategoryId(undefined);
+    }
+  };
+
+  const handleCategoryDrop = async (e: React.DragEvent, targetCategoryId: string | null) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (!draggedWorkflowId) return;
+
+    // Don't update if dropping on the same category
+    const workflow = workflows.find(w => w.id === draggedWorkflowId);
+    if (workflow && workflow.category_id === targetCategoryId) {
+      setDraggedWorkflowId(null);
+      setDragOverCategoryId(undefined);
+      return;
+    }
+
+    if (!companyId) return;
+    try {
+      await api.patch(
+        `/api/companies/${companyId}/workflows/${draggedWorkflowId}`,
+        { category_id: targetCategoryId }
+      );
+      toast.success("Workflow moved successfully");
+      fetchWorkflows();
+      fetchAllWorkflows();
+    } catch (error) {
+      console.error("Error moving workflow:", error);
+      toast.error("Failed to move workflow");
+    } finally {
+      setDraggedWorkflowId(null);
+      setDragOverCategoryId(undefined);
+    }
+  };
+
+  // Get items to display in grid view
+  const subcategories = getSubcategories();
+  const displayWorkflows = searchQuery ? [] : workflows; // Only show in grid when not searching
+
+  // Get all workflows for search when searching
+  const [searchWorkflows, setSearchWorkflows] = useState<Workflow[]>([]);
+  const searchResults = searchQuery ? getSearchResults() : { workflows: [], categories: [] };
+
+  useEffect(() => {
+    if (searchQuery) {
+      // Fetch all workflows when searching
+      getAllWorkflowsForSearch().then((allWorkflows) => {
+        const query = searchQuery.toLowerCase();
+        const filtered = allWorkflows.filter((w) =>
+          w.name.toLowerCase().includes(query) ||
+          (w.description && w.description.toLowerCase().includes(query))
+        );
+        setSearchWorkflows(filtered);
+      });
+    } else {
+      setSearchWorkflows([]);
+    }
+  }, [searchQuery]);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <div className="text-muted-foreground">Loading workflows...</div>
+      </div>
+    );
+  }
+
+  // Get category path helper
+  const getCategoryPath = (categoryId: string): string => {
+    const category = categories.find((c) => c.id === categoryId);
+    if (!category) return "Unknown";
+
+    const path: string[] = [];
+    let current: WorkflowCategory | undefined = category;
+
+    while (current) {
+      path.unshift(current.name);
+      if (current.parent_category_id) {
+        current = categories.find((c) => c.id === current!.parent_category_id);
+      } else {
+        break;
+      }
+    }
+
+    return path.join(" > ");
+  };
+
+  // Helper to render workflow icon
+  const renderWorkflowIcon = (iconName: string | null) => {
+    if (!iconName) return null;
+    return renderIcon(iconName, "h-6 w-6 text-primary", WorkflowIcon);
+  };
+
+  return (
+    <div className="p-6 space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Workflows</h1>
+          <p className="text-muted-foreground mt-0.5">
+            Create and manage your visual workflows
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button onClick={() => handleCreateCategory(currentCategoryId)} variant="outline" className="gap-2">
+            <FolderPlus className="h-4 w-4" />
+            New Category
+          </Button>
+          <Button onClick={() => setShowCreateDialog(true)} className="gap-2">
+            <Plus className="h-4 w-4" />
+            New Workflow
+          </Button>
+        </div>
+      </div>
+
+      {/* Breadcrumb Navigation */}
+      <CategoryBreadcrumb
+        categories={categoryBreadcrumb}
+        onNavigate={handleNavigateCategory}
+      />
+
+      <div className="flex items-center gap-4">
+        <Input
+          placeholder="Search workflows..."
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          className="max-w-md"
+        />
+      </div>
+
+      {/* Search Results View */}
+      {searchQuery && (
+        <SearchResults
+          workflows={searchWorkflows}
+          categories={categories}
+          searchQuery={searchQuery}
+          onWorkflowClick={(workflowId) => navigate(`/workflow/${workflowId}`)}
+          onCategoryClick={handleNavigateCategory}
+          onClearSearch={() => setSearchQuery("")}
+        />
+      )}
+
+      {/* Grid View (when not searching) */}
+      {!searchQuery && (
+        <>
+          {/* Sentinel element to detect when categories section is stuck */}
+          {subcategories.length > 0 && (
+            <div
+              ref={categoriesSentinelRef}
+              className="w-full pointer-events-none"
+              style={{ height: '1px', marginTop: '-1px', marginBottom: '0px' }}
+            />
+          )}
+
+          {/* Compact Categories Section */}
+          {subcategories.length > 0 && (
+            <div
+              ref={categoriesStickyRef}
+              className={`sticky top-0 z-10 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 pb-3 pt-2 -mx-8 px-8 mb-4 space-y-2 transition-all ${isCategoriesStuck ? 'border-b border-border shadow-sm' : ''}`}
+              style={isCategoriesStuck ? {
+                borderBottomWidth: '1px',
+                borderBottomStyle: 'solid',
+                borderBottomColor: 'hsl(var(--border))'
+              } : undefined}
+            >
+              <div className="flex items-center justify-between">
+                <h2 className="text-sm font-medium text-muted-foreground">Categories</h2>
+              </div>
+              <div className="flex flex-wrap gap-3">
+                {subcategories.map((category) => {
+                  const categoryIcon = renderIcon(category.icon, "h-4 w-4 text-primary", FolderPlus) || <FolderPlus className="h-4 w-4 text-primary" />;
+
+                  return (
+                    <div key={category.id} className="relative group" style={{ maxWidth: '280px' }}>
+                      <Card
+                        className={`hover:shadow-md transition-all duration-200 cursor-pointer border-2 border-dashed hover:border-solid ${dragOverCategoryId === category.id ? 'border-primary border-solid bg-primary/5' : ''
+                          }`}
+                        onClick={() => handleNavigateCategory(category.id)}
+                        onDragOver={(e) => handleCategoryDragOver(e, category.id)}
+                        onDragLeave={handleCategoryDragLeave}
+                        onDrop={(e) => handleCategoryDrop(e, category.id)}
+                      >
+                        <CardContent className="pl-4 pr-6 py-4">
+                          <div className="flex items-center gap-3">
+                            <div className="text-primary flex-shrink-0 flex items-center justify-center">
+                              {categoryIcon}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="font-medium text-sm truncate">{category.name}</div>
+                              <div className="text-xs text-muted-foreground">
+                                {getCategoryItemCount(category.id)} {getCategoryItemCount(category.id) === 1 ? "workflow" : "workflows"}
+                              </div>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                      {/* Category Actions Menu */}
+                      <div className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon" className="h-6 w-6">
+                              <MoreVertical className="h-3 w-3" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem onClick={() => handleEditCategory(category)}>
+                              <Edit className="h-4 w-4 mr-2" />
+                              Edit
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => handleCreateCategory(category.id)}>
+                              <FolderPlus className="h-4 w-4 mr-2" />
+                              Create Subcategory
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={() => handleDeleteCategory(category.id)}
+                              className="text-destructive"
+                            >
+                              <Trash2 className="h-4 w-4 mr-2" />
+                              Delete
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Workflows Section */}
+          {displayWorkflows.length > 0 && (
+            <div
+              className={`space-y-3 mb-4 rounded-lg transition-all ${dragOverCategoryId === null && draggedWorkflowId ? 'bg-primary/5 border-2 border-dashed border-primary' : ''
+                }`}
+              onDragOver={(e) => {
+                if (draggedWorkflowId) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  e.dataTransfer.dropEffect = "move";
+                  setDragOverCategoryId(null);
+                }
+              }}
+              onDragLeave={(e) => {
+                const relatedTarget = e.relatedTarget as HTMLElement;
+                if (!relatedTarget || !e.currentTarget.contains(relatedTarget)) {
+                  // Only clear if we're actually leaving the workflows section
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  const x = e.clientX;
+                  const y = e.clientY;
+                  if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) {
+                    setDragOverCategoryId(undefined);
+                  }
+                }
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                handleCategoryDrop(e, null);
+              }}
+            >
+              <h2 className="text-sm font-medium text-muted-foreground">Workflows</h2>
+              {dragOverCategoryId === null && draggedWorkflowId && (
+                <p className="text-xs text-primary">Drop here to uncategorize</p>
+              )}
+            </div>
+          )}
+
+          <div className="grid gap-6 sm:grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+            {/* Render Workflows */}
+            {displayWorkflows.map((workflow) => {
+              const WorkflowIcon = renderWorkflowIcon(workflow.icon);
+              return (
+                <Card
+                  key={workflow.id}
+                  className={`hover:shadow-lg transition-all duration-300 cursor-pointer group h-fit min-h-[280px] flex flex-col ${draggedWorkflowId === workflow.id ? 'opacity-50' : ''
+                    }`}
+                  onClick={() => navigate(`/workflow/${workflow.id}`)}
+                  draggable
+                  onDragStart={(e) => handleWorkflowDragStart(e, workflow.id)}
+                  onDragEnd={handleWorkflowDragEnd}
+                >
+                  <CardHeader className="pb-3 flex-shrink-0">
+                    <div className="flex items-start justify-between gap-3 mb-2">
+                      <div className="flex items-center gap-3 flex-1 min-w-0">
+                        {WorkflowIcon && (
+                          <span className="flex-shrink-0 flex items-center justify-center text-primary">
+                            {WorkflowIcon}
+                          </span>
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <CardTitle className="text-lg leading-tight break-words font-semibold">
+                            {workflow.name}
+                          </CardTitle>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1 flex-shrink-0">
+                        <div className="opacity-40 group-hover:opacity-100 transition-opacity cursor-grab active:cursor-grabbing text-muted-foreground hover:text-foreground" title="Drag to move to category">
+                          <GripVertical className="h-4 w-4" />
+                        </div>
+                      </div>
+                    </div>
+                    <CardDescription className="text-sm text-muted-foreground mt-1">
+                      {workflow.description || "No description provided"}
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="pt-0 flex-1 flex flex-col justify-end">
+                    <div className="flex flex-col gap-3">
+                      <div className="flex items-center justify-between text-[10px] text-muted-foreground uppercase tracking-wider">
+                        <span>{workflow.step_count} steps</span>
+                        <span>
+                          Updated {formatDistanceToNow(new Date(workflow.updated_at))} ago
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                          <Switch
+                            checked={workflow.is_active ?? true}
+                            onCheckedChange={() => {
+                              const syntheticEvent = { stopPropagation: () => { } } as React.MouseEvent;
+                              handleToggleActive(syntheticEvent, workflow);
+                            }}
+                            className="data-[state=checked]:bg-primary"
+                          />
+                          <span className="text-xs font-medium text-muted-foreground">Active</span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (isSuperAdmin) {
+                                setWorkflowToDuplicate(workflow);
+                                setDuplicateTargetCompanyId(companyId || "");
+                                setDuplicateToCompanyDialogOpen(true);
+                              } else {
+                                handleDuplicate(workflow);
+                              }
+                            }}
+                            title={isSuperAdmin ? "Duplicate workflow (choose company)" : "Duplicate workflow"}
+                          >
+                            <Copy className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity text-destructive hover:text-destructive"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              confirmDelete(e, workflow);
+                            }}
+                            title="Delete workflow"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+
+          {subcategories.length === 0 && displayWorkflows.length === 0 && (
+            <div className="text-center py-16">
+              <div className="max-w-md mx-auto">
+                <div className="w-16 h-16 mx-auto mb-4 bg-muted rounded-full flex items-center justify-center">
+                  <Plus className="h-8 w-8 text-muted-foreground" />
+                </div>
+                <h3 className="text-lg font-semibold mb-2">
+                  {currentCategoryId === null ? "No workflows yet" : "Empty category"}
+                </h3>
+                <p className="text-muted-foreground mb-4">
+                  {currentCategoryId === null
+                    ? "Get started by creating your first workflow or category to organize your processes."
+                    : "This category is empty. Add workflows or subcategories to get started."}
+                </p>
+                <div className="flex items-center justify-center gap-2">
+                  <Button onClick={() => handleCreateCategory(currentCategoryId)} variant="outline" className="gap-2">
+                    <FolderPlus className="h-4 w-4" />
+                    Create Category
+                  </Button>
+                  <Button onClick={() => setShowCreateDialog(true)} className="gap-2">
+                    <Plus className="h-4 w-4" />
+                    Create Workflow
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Show empty state for workflows only if there are categories but no workflows */}
+          {subcategories.length > 0 && displayWorkflows.length === 0 && (
+            <div className="text-center py-12">
+              <div className="max-w-md mx-auto">
+                <div className="w-12 h-12 mx-auto mb-4 bg-muted rounded-full flex items-center justify-center">
+                  <WorkflowIcon className="h-6 w-6 text-muted-foreground" />
+                </div>
+                <h3 className="text-base font-semibold mb-2">No workflows in this category</h3>
+                <p className="text-sm text-muted-foreground mb-4">
+                  Create a workflow to get started in this category.
+                </p>
+                <Button onClick={() => setShowCreateDialog(true)} className="gap-2">
+                  <Plus className="h-4 w-4" />
+                  Create Workflow
+                </Button>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+
+      <Dialog
+        key={editingWorkflow ? `edit-${editingWorkflow.id}` : `new-${currentCategoryId || 'root'}`}
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+      >
+        <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
+          <DialogHeader className="flex-shrink-0">
+            <DialogTitle>
+              {editingWorkflow ? "Edit Workflow" : "Create New Workflow"}
+            </DialogTitle>
+            <DialogDescription>
+              {editingWorkflow
+                ? "Update your workflow details"
+                : "Create a new workflow to get started"}
+            </DialogDescription>
+          </DialogHeader>
+          <Tabs defaultValue="general" className="flex-1 flex flex-col overflow-hidden">
+            <div className="px-6 pt-2">
+              <TabsList className="w-full grid grid-cols-3">
+                <TabsTrigger value="general">General</TabsTrigger>
+                <TabsTrigger value="data-structure">Data Structure</TabsTrigger>
+                <TabsTrigger value="status">Status</TabsTrigger>
+              </TabsList>
+            </div>
+
+            <div className="flex-1 overflow-y-auto py-4 px-6">
+              <TabsContent value="general" className="space-y-6 mt-0 h-full">
+                {/* Basic Information Section */}
+                <div className="space-y-4">
+                  <div className="border-b pb-2">
+                    <h3 className="text-lg font-medium">Basic Information</h3>
+                    <p className="text-sm text-muted-foreground">Basic details about your workflow</p>
+                  </div>
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="name">Name</Label>
+                      <Input
+                        id="name"
+                        value={formData.name}
+                        onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                        placeholder="My Workflow"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="description">Description</Label>
+                      <Textarea
+                        id="description"
+                        value={formData.description}
+                        onChange={(e) =>
+                          setFormData({ ...formData, description: e.target.value })
+                        }
+                        placeholder="Describe your workflow..."
+                        rows={3}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Category</Label>
+                      <Select
+                        value={selectedCategoryId || "none"}
+                        onValueChange={(value) =>
+                          setSelectedCategoryId(value === "none" ? null : value)
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select category" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">None (Uncategorized)</SelectItem>
+                          {categories.map((cat) => (
+                            <SelectItem key={cat.id} value={cat.id}>
+                              {getCategoryPath(cat.id)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-muted-foreground">
+                        Choose a category to organize this workflow
+                      </p>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Icon</Label>
+                      <div className="w-full">
+                        <IconPicker value={selectedIcon} onChange={setSelectedIcon} className="w-full" />
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Choose an icon to visually identify this workflow
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Features Section */}
+                <div className="space-y-4">
+                  <div className="border-b pb-2">
+                    <h3 className="text-lg font-medium">Features</h3>
+                    <p className="text-sm text-muted-foreground">Configure workflow capabilities</p>
+                  </div>
+                  <div className="space-y-2">
+                    <div className="flex items-center space-x-2">
+                      <Checkbox
+                        id="api_enabled"
+                        checked={formData.api_enabled || false}
+                        onCheckedChange={(checked) => {
+                          setFormData({ ...formData, api_enabled: checked as boolean });
+                        }}
+                      />
+                      <label
+                        htmlFor="api_enabled"
+                        className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer"
+                      >
+                        Enable API triggers for this workflow
+                      </label>
+                    </div>
+                    <p className="text-xs text-muted-foreground ml-6">
+                      Allow this workflow to be triggered via external API calls
+                    </p>
+                  </div>
+                </div>
+
+                {/* Permissions Section */}
+                <div className="space-y-4">
+                  <div className="border-b pb-2">
+                    <h3 className="text-lg font-medium">Workflow Permissions</h3>
+                    <p className="text-sm text-muted-foreground">Control who can execute this workflow</p>
+                  </div>
+                  <div className="space-y-3">
+                    <div className="flex items-center space-x-2">
+                      <input
+                        type="radio"
+                        id="public"
+                        name="permissionType"
+                        value="public"
+                        checked={permissionType === "public"}
+                        onChange={(e) => {
+                          setPermissionType(e.target.value as "public" | "specific");
+                          setFormData({ ...formData, is_public: true });
+                        }}
+                        className="h-4 w-4"
+                      />
+                      <label htmlFor="public" className="text-sm font-medium cursor-pointer">
+                        Public - Everyone in the company can execute this workflow
+                      </label>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <input
+                        type="radio"
+                        id="specific"
+                        name="permissionType"
+                        value="specific"
+                        checked={permissionType === "specific"}
+                        onChange={(e) => {
+                          setPermissionType(e.target.value as "public" | "specific");
+                          setFormData({ ...formData, is_public: false });
+                        }}
+                        className="h-4 w-4"
+                      />
+                      <label htmlFor="specific" className="text-sm font-medium cursor-pointer">
+                        Specific - Only selected users and groups can execute
+                      </label>
+                    </div>
+                  </div>
+
+                  {permissionType === "specific" && (
+                    <div className="space-y-4 pl-6 border-l-2 border-muted bg-muted/20 p-4 rounded-md">
+                      <div className="space-y-3">
+                        <div className="space-y-2">
+                          <Label className="text-sm font-medium">Allowed Users</Label>
+                          <Select onValueChange={(value) => {
+                            if (!selectedUsers.includes(value)) {
+                              setSelectedUsers([...selectedUsers, value]);
+                            }
+                          }}>
+                            <SelectTrigger className="h-9">
+                              <SelectValue placeholder="Select users..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {users.filter(user => !selectedUsers.includes(user.id)).map((user) => (
+                                <SelectItem key={user.id} value={user.id}>
+                                  {user.full_name || user.email}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          {selectedUsers.length > 0 && (
+                            <div className="flex flex-wrap gap-2">
+                              {selectedUsers.map((userId) => {
+                                const user = users.find(u => u.id === userId);
+                                return (
+                                  <Badge key={userId} variant="secondary" className="flex items-center gap-1 text-xs">
+                                    {user?.full_name || user?.email}
+                                    <X
+                                      className="h-3 w-3 cursor-pointer hover:text-destructive"
+                                      onClick={() => setSelectedUsers(selectedUsers.filter(id => id !== userId))}
+                                    />
+                                  </Badge>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label className="text-sm font-medium">Allowed Groups</Label>
+                          <Select onValueChange={(value) => {
+                            if (!selectedGroups.includes(value)) {
+                              setSelectedGroups([...selectedGroups, value]);
+                            }
+                          }}>
+                            <SelectTrigger className="h-9">
+                              <SelectValue placeholder="Select groups..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {groups.filter(group => !selectedGroups.includes(group.id)).map((group) => (
+                                <SelectItem key={group.id} value={group.id}>
+                                  {group.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          {selectedGroups.length > 0 && (
+                            <div className="flex flex-wrap gap-2">
+                              {selectedGroups.map((groupId) => {
+                                const group = groups.find(g => g.id === groupId);
+                                return (
+                                  <Badge key={groupId} variant="secondary" className="flex items-center gap-1 text-xs">
+                                    {group?.name}
+                                    <X
+                                      className="h-3 w-3 cursor-pointer hover:text-destructive"
+                                      onClick={() => setSelectedGroups(selectedGroups.filter(id => id !== groupId))}
+                                    />
+                                  </Badge>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </TabsContent>
+
+              <TabsContent value="data-structure" className="space-y-6 mt-0 h-full">
+                {/* Data Structure Section */}
+                <div className="space-y-4">
+                  <div className="border-b pb-3 flex items-center justify-between">
+                    <div>
+                      <h3 className="text-lg font-medium">Data Structure</h3>
+                      <p className="text-sm text-muted-foreground">Define fields for this workflow's data</p>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={handleAddField}
+                      className="gap-2"
+                    >
+                      <Plus className="h-4 w-4" />
+                      Add Field
+                    </Button>
+                  </div>
+
+                  {dataStructureFields.filter(f => !f.parent_item_id).length === 0 ? (
+                    <div className="text-center py-12 border-2 border-dashed rounded-lg bg-muted/30">
+                      <div className="flex flex-col items-center gap-3">
+                        <div className="w-12 h-12 rounded-full bg-muted flex items-center justify-center">
+                          <Plus className="h-6 w-6 text-muted-foreground" />
+                        </div>
+                        <div>
+                          <p className="font-medium text-sm mb-1">No fields yet</p>
+                          <p className="text-sm text-muted-foreground mb-4">Get started by adding your first field</p>
+                        </div>
+                        <Button type="button" variant="outline" onClick={handleAddField} className="gap-2">
+                          <Plus className="h-4 w-4" />
+                          Add your first field
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {dataStructureFields
+                        .filter(f => !f.parent_item_id)
+                        .sort((a, b) => a.position - b.position)
+                        .map((field, fieldIndex) => {
+                          const renderFieldCard = (item: DataStructureField, depth: number = 0, parentIndex?: number, childIndex?: number): React.ReactNode => {
+                            const children = dataStructureFields
+                              .filter(f => f.parent_item_id === item.id)
+                              .sort((a, b) => a.position - b.position);
+
+                            const parentId = item.parent_item_id;
+                            const isTopLevel = depth === 0;
+                            const currentIndex = isTopLevel ? fieldIndex : (childIndex ?? 0);
+
+                            return (
+                              <div key={item.id} className="space-y-2">
+                                <div
+                                  draggable={true}
+                                  onDragStart={(e) => handleDragStart(e, item.id, parentId)}
+                                  onDragOver={(e) => handleDragOver(e, currentIndex, parentId)}
+                                  onDragLeave={handleDragLeave}
+                                  onDrop={(e) => handleDrop(e, currentIndex, parentId)}
+                                  onDragEnd={handleDragEnd}
+                                  className={`border rounded-lg bg-card hover:bg-accent/50 transition-colors ${depth > 0 ? 'ml-8 border-l-2 border-l-primary/30' : ''
+                                    } ${draggedFieldId === item.id ? 'opacity-50' : ''
+                                    } ${dragOverIndex === currentIndex && dragOverParentId === parentId && draggedFieldId !== item.id
+                                      ? 'border-primary border-2' : ''
+                                    } cursor-move`}
+                                >
+                                  <div className="flex items-center justify-between p-4 gap-4">
+                                    <div className="flex items-center text-muted-foreground cursor-grab active:cursor-grabbing flex-shrink-0">
+                                      <GripVertical className="h-5 w-5" />
+                                    </div>
+                                    <div className="flex-1 min-w-0 space-y-2">
+                                      <div className="flex items-center gap-2 flex-wrap">
+                                        {depth > 0 && (
+                                          <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                                        )}
+                                        <h4 className="font-semibold text-sm">{item.name}</h4>
+                                        <Badge variant="secondary" className="text-xs font-normal">
+                                          {item.field_type.replace("_", " ")}
+                                        </Badge>
+                                        {(item.field_type === "option" || item.field_type === "multiple_option") && (
+                                          <>
+                                            {item.options_source === "dynamic" ? (
+                                              <Badge variant="outline" className="text-xs font-normal bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/20 dark:text-blue-300 dark:border-blue-800">
+                                                Dynamic
+                                              </Badge>
+                                            ) : (
+                                              <Badge variant="outline" className="text-xs font-normal">
+                                                Static
+                                              </Badge>
+                                            )}
+                                            {item.options_source === "dynamic" && item.api_configuration_id && (
+                                              <Badge variant="outline" className="text-xs font-normal">
+                                                {apiConfigurations.find(c => c.id === item.api_configuration_id)?.name || "API Config"}
+                                              </Badge>
+                                            )}
+                                          </>
+                                        )}
+                                      </div>
+                                      {item.description && (
+                                        <p className="text-sm text-muted-foreground leading-relaxed">
+                                          {item.description}
+                                        </p>
+                                      )}
+                                      {item.options && item.options.length > 0 && (
+                                        <div className="flex flex-wrap gap-1.5 mt-2">
+                                          <span className="text-xs text-muted-foreground font-medium">Options:</span>
+                                          {item.options.map((option, idx) => (
+                                            <Badge key={idx} variant="outline" className="text-xs font-normal">
+                                              {option}
+                                            </Badge>
+                                          ))}
+                                        </div>
+                                      )}
+                                      {item.options_source === "dynamic" && item.api_configuration_id && (
+                                        <div className="flex items-center gap-1.5 mt-2">
+                                          <span className="text-xs text-muted-foreground font-medium">API:</span>
+                                          <span className="text-xs text-muted-foreground">
+                                            {apiConfigurations.find(c => c.id === item.api_configuration_id)?.name || "Unknown Configuration"}
+                                          </span>
+                                        </div>
+                                      )}
+                                    </div>
+                                    <div className="flex items-center gap-1 flex-shrink-0">
+                                      {item.field_type === "array" && (
+                                        <Button
+                                          type="button"
+                                          variant="ghost"
+                                          size="sm"
+                                          onClick={() => handleAddSubItem(item.id)}
+                                          className="gap-1.5 h-8 text-xs"
+                                        >
+                                          <Plus className="h-3.5 w-3.5" />
+                                          Add Sub-item
+                                        </Button>
+                                      )}
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-8 w-8"
+                                        onClick={() => handleEditField(item)}
+                                      >
+                                        <Edit className="h-3.5 w-3.5" />
+                                      </Button>
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-8 w-8 text-destructive hover:text-destructive"
+                                        onClick={() => handleDeleteField(item.id)}
+                                      >
+                                        <Trash2 className="h-3.5 w-3.5" />
+                                      </Button>
+                                    </div>
+                                  </div>
+                                </div>
+                                {children.length > 0 && (
+                                  <div className="space-y-2">
+                                    {children.map((child, idx) => renderFieldCard(child, depth + 1, currentIndex, idx))}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          };
+
+                          return renderFieldCard(field);
+                        })}
+                    </div>
+                  )}
+
+                  <Dialog open={isFieldDialogOpen} onOpenChange={handleCloseFieldDialog}>
+                    <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+                      <DialogHeader>
+                        <DialogTitle>{editingFieldId ? "Edit" : "Add"} Field</DialogTitle>
+                        <DialogDescription>
+                          {editingFieldId ? "Update" : "Add"} a field to your data structure
+                        </DialogDescription>
+                      </DialogHeader>
+                      <form onSubmit={handleSubmitField} className="space-y-4">
+                        <div>
+                          <Label htmlFor="field-name">Name</Label>
+                          <Input
+                            id="field-name"
+                            value={fieldFormData.name}
+                            onChange={(e) => setFieldFormData({ ...fieldFormData, name: e.target.value })}
+                            required
+                          />
+                        </div>
+                        <div>
+                          <Label htmlFor="field-description">Description</Label>
+                          <Textarea
+                            id="field-description"
+                            value={fieldFormData.description}
+                            onChange={(e) => setFieldFormData({ ...fieldFormData, description: e.target.value })}
+                            rows={2}
+                          />
+                        </div>
+                        <div>
+                          <Label htmlFor="field-type">Field Type</Label>
+                          <Select
+                            value={fieldFormData.field_type}
+                            onValueChange={(value) => setFieldFormData({ ...fieldFormData, field_type: value })}
+                          >
+                            <SelectTrigger>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {FIELD_TYPES
+                                .filter((type) => {
+                                  // When adding a sub-item (parent_item_id is set), exclude "file", "signature", and "array" types
+                                  if (fieldFormData.parent_item_id) {
+                                    return type.value !== "file" && type.value !== "multiple_files" && type.value !== "signature" && type.value !== "array";
+                                  }
+                                  return true;
+                                })
+                                .map((type) => (
+                                  <SelectItem key={type.value} value={type.value}>
+                                    {type.label}
+                                  </SelectItem>
+                                ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        {(fieldFormData.field_type === "option" || fieldFormData.field_type === "multiple_option") && (
+                          <>
+                            <div>
+                              <Label>Options Source</Label>
+                              <Select
+                                value={fieldFormData.options_source || "static"}
+                                onValueChange={(value: "static" | "dynamic") => {
+                                  setFieldFormData({
+                                    ...fieldFormData,
+                                    options_source: value,
+                                    api_configuration_id: value === "static" ? null : fieldFormData.api_configuration_id
+                                  });
+                                }}
+                              >
+                                <SelectTrigger>
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="static">Static (Define options manually)</SelectItem>
+                                  <SelectItem value="dynamic">Dynamic (Fetch from API)</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            {fieldFormData.options_source === "static" ? (
+                              <div>
+                                <Label htmlFor="field-options">Options (comma-separated)</Label>
+                                <Input
+                                  id="field-options"
+                                  value={fieldFormData.options}
+                                  onChange={(e) => setFieldFormData({ ...fieldFormData, options: e.target.value })}
+                                  placeholder="Option 1, Option 2, Option 3"
+                                />
+                              </div>
+                            ) : (
+                              <div>
+                                <Label htmlFor="field-api-config">API Configuration</Label>
+                                <Select
+                                  value={fieldFormData.api_configuration_id || ""}
+                                  onValueChange={(value) => setFieldFormData({ ...fieldFormData, api_configuration_id: value || null })}
+                                >
+                                  <SelectTrigger id="field-api-config">
+                                    <SelectValue placeholder="Select API configuration" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {apiConfigurations.length === 0 ? (
+                                      <SelectItem value="" disabled>No API configurations available</SelectItem>
+                                    ) : (
+                                      apiConfigurations.map((config) => (
+                                        <SelectItem key={config.id} value={config.id}>
+                                          {config.name}
+                                        </SelectItem>
+                                      ))
+                                    )}
+                                  </SelectContent>
+                                </Select>
+                                <p className="text-xs text-muted-foreground mt-1">
+                                  The API should return a JSON array of strings (e.g., ["Option 1", "Option 2"])
+                                </p>
+                                
+                                <div className="mt-4 space-y-3">
+                                  <div className="flex items-center justify-between">
+                                    <Label htmlFor="field-use-query-params">Add additional query parameters</Label>
+                                    <Switch
+                                      id="field-use-query-params"
+                                      checked={fieldFormData.use_query_params || false}
+                                      onCheckedChange={(checked) => {
+                                        setFieldFormData({
+                                          ...fieldFormData,
+                                          use_query_params: checked,
+                                          api_query_params: checked && (!fieldFormData.api_query_params || fieldFormData.api_query_params.length === 0)
+                                            ? [{ key: "", value: "", mode: "static" }]
+                                            : fieldFormData.api_query_params || [],
+                                        });
+                                      }}
+                                    />
+                                  </div>
+                                  
+                                  {fieldFormData.use_query_params && (
+                                    <div className="space-y-2 border rounded-md p-3">
+                                      <div className="flex items-center justify-between mb-2">
+                                        <Label className="text-sm">Query Parameters</Label>
+                                        <Button
+                                          type="button"
+                                          size="sm"
+                                          variant="outline"
+                                          onClick={() => {
+                                            setFieldFormData({
+                                              ...fieldFormData,
+                                              api_query_params: [...(fieldFormData.api_query_params || []), { key: "", value: "", mode: "static" }],
+                                            });
+                                          }}
+                                        >
+                                          <Plus className="h-4 w-4 mr-1" />
+                                          Add Parameter
+                                        </Button>
+                                      </div>
+                                      
+                                      {(fieldFormData.api_query_params || []).map((param, index) => (
+                                        <div key={index} className="space-y-2">
+                                          <div className="flex gap-2">
+                                            <Input
+                                              placeholder="Parameter key"
+                                              value={param.key}
+                                              onChange={(e) => {
+                                                const updated = [...(fieldFormData.api_query_params || [])];
+                                                updated[index].key = e.target.value;
+                                                setFieldFormData({ ...fieldFormData, api_query_params: updated });
+                                              }}
+                                              className="flex-1"
+                                            />
+                                            <Select
+                                              value={param.mode || "static"}
+                                              onValueChange={(value: "static" | "bind") => {
+                                                const updated = [...(fieldFormData.api_query_params || [])];
+                                                updated[index].mode = value;
+                                                if (value === "static") {
+                                                  updated[index].value = "";
+                                                } else {
+                                                  updated[index].value = "";
+                                                }
+                                                setFieldFormData({ ...fieldFormData, api_query_params: updated });
+                                              }}
+                                            >
+                                              <SelectTrigger className="w-32">
+                                                <SelectValue />
+                                              </SelectTrigger>
+                                              <SelectContent>
+                                                <SelectItem value="static">Static</SelectItem>
+                                                <SelectItem value="bind">Dynamic</SelectItem>
+                                              </SelectContent>
+                                            </Select>
+                                            {(fieldFormData.api_query_params || []).length > 1 && (
+                                              <Button
+                                                type="button"
+                                                size="icon"
+                                                variant="ghost"
+                                                onClick={() => {
+                                                  const updated = (fieldFormData.api_query_params || []).filter((_, i) => i !== index);
+                                                  setFieldFormData({ ...fieldFormData, api_query_params: updated });
+                                                }}
+                                              >
+                                                <X className="h-4 w-4" />
+                                              </Button>
+                                            )}
+                                          </div>
+                                          
+                                          {param.mode === "bind" ? (
+                                            <div className="flex gap-1">
+                                              <Input
+                                                placeholder="Select data to bind"
+                                                value={param.value.startsWith("{{") ? dataStructureFields.find(f => param.value === `{{${f.id}}}`)?.name || "Not found" : ""}
+                                                disabled
+                                                className="flex-1"
+                                              />
+                                              <Popover>
+                                                <PopoverTrigger asChild>
+                                                  <Button type="button" size="icon" variant="outline">
+                                                    <Link2 className="h-4 w-4" />
+                                                  </Button>
+                                                </PopoverTrigger>
+                                                <PopoverContent className="w-80">
+                                                  <div className="space-y-2">
+                                                    <Label className="text-xs font-medium">Bind to Data Structure Item</Label>
+                                                    <div className="max-h-60 overflow-y-auto space-y-1">
+                                                      {dataStructureFields
+                                                        .filter(f => f.id !== editingFieldId) // Exclude current field being edited
+                                                        .map((dsItem) => (
+                                                          <Button
+                                                            key={dsItem.id}
+                                                            type="button"
+                                                            variant="ghost"
+                                                            size="sm"
+                                                            className="w-full justify-start text-xs"
+                                                            onClick={() => {
+                                                              const updated = [...(fieldFormData.api_query_params || [])];
+                                                              updated[index].value = `{{${dsItem.id}}}`;
+                                                              setFieldFormData({ ...fieldFormData, api_query_params: updated });
+                                                            }}
+                                                          >
+                                                            <div className="flex flex-col items-start">
+                                                              <span className="font-medium">{dsItem.name}</span>
+                                                              <span className="text-muted-foreground text-xs">{dsItem.field_type.replace("_", " ")}</span>
+                                                            </div>
+                                                          </Button>
+                                                        ))}
+                                                      {dataStructureFields.filter(f => f.id !== editingFieldId).length === 0 && (
+                                                        <p className="text-xs text-muted-foreground p-2">No data structure items available</p>
+                                                      )}
+                                                    </div>
+                                                  </div>
+                                                </PopoverContent>
+                                              </Popover>
+                                            </div>
+                                          ) : (
+                                            <Input
+                                              placeholder="Static value"
+                                              value={param.value}
+                                              onChange={(e) => {
+                                                const updated = [...(fieldFormData.api_query_params || [])];
+                                                updated[index].value = e.target.value;
+                                                setFieldFormData({ ...fieldFormData, api_query_params: updated });
+                                              }}
+                                              className="flex-1"
+                                            />
+                                          )}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+                          </>
+                        )}
+                        <div className="flex justify-end gap-2">
+                          <Button type="button" variant="outline" onClick={handleCloseFieldDialog}>
+                            Cancel
+                          </Button>
+                          <Button type="submit">
+                            {editingFieldId ? "Update" : "Create"}
+                          </Button>
+                        </div>
+                      </form>
+                    </DialogContent>
+                  </Dialog>
+                </div>
+              </TabsContent>
+
+              <TabsContent value="status" className="space-y-6 mt-0 h-full">
+                <div className="space-y-4">
+                  <div className="border-b pb-3 flex items-center justify-between">
+                    <div>
+                      <h3 className="text-lg font-medium">Workflow Statuses</h3>
+                      <p className="text-sm text-muted-foreground">Define status options for this workflow</p>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={handleAddStatus}
+                      className="gap-2"
+                    >
+                      <Plus className="h-4 w-4" />
+                      Add Status
+                    </Button>
+                  </div>
+
+                  {workflowStatuses.length === 0 ? (
+                    <div className="text-center py-12 border-2 border-dashed rounded-lg bg-muted/30">
+                      <div className="flex flex-col items-center gap-3">
+                        <div className="w-12 h-12 rounded-full bg-muted flex items-center justify-center">
+                          <Plus className="h-6 w-6 text-muted-foreground" />
+                        </div>
+                        <div>
+                          <p className="font-medium text-sm">No statuses yet</p>
+                          <p className="text-sm text-muted-foreground">Add your first status to get started</p>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={handleAddStatus}
+                          className="gap-2 mt-2"
+                        >
+                          <Plus className="h-4 w-4" />
+                          Add Status
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {workflowStatuses.map((status, index) => (
+                        <div
+                          key={status.id}
+                          draggable
+                          onDragStart={(e) => handleStatusDragStart(e, status.id)}
+                          onDragOver={(e) => handleStatusDragOver(e, index)}
+                          onDragLeave={handleStatusDragLeave}
+                          onDrop={(e) => handleStatusDrop(e, index)}
+                          onDragEnd={handleStatusDragEnd}
+                          className={`group relative flex items-center gap-3 p-4 rounded-lg border bg-card hover:bg-accent/50 transition-colors cursor-move ${dragOverStatusIndex === index && draggedStatusId !== status.id
+                            ? "border-primary border-2"
+                            : ""
+                            } ${draggedStatusId === status.id ? "opacity-50" : ""}`}
+                        >
+                          <GripVertical className="h-5 w-5 text-muted-foreground flex-shrink-0" />
+                          <div
+                            className="w-4 h-4 rounded-full flex-shrink-0 border-2 border-background shadow-sm"
+                            style={{ backgroundColor: status.color }}
+                          />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <h4 className="font-semibold text-sm">{status.name}</h4>
+                              {defaultStatusId === status.id && (
+                                <Badge variant="secondary" className="text-xs flex items-center gap-1">
+                                  <Star className="h-3 w-3 fill-yellow-500 text-yellow-500" />
+                                  Default
+                                </Badge>
+                              )}
+                            </div>
+                            <p className="text-xs text-muted-foreground">Order: {status.order + 1}</p>
+                          </div>
+                          <div className="flex items-center gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className={`h-8 w-8 ${defaultStatusId === status.id ? 'text-yellow-500' : ''}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleSetDefaultStatus(status.id);
+                              }}
+                              title={defaultStatusId === status.id ? "Default status" : "Set as default"}
+                            >
+                              <Star className={`h-3.5 w-3.5 ${defaultStatusId === status.id ? 'fill-yellow-500' : ''}`} />
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8"
+                              onClick={() => handleEditStatus(status)}
+                            >
+                              <Edit className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-destructive hover:text-destructive"
+                              onClick={() => handleDeleteStatus(status.id)}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <Dialog open={isStatusDialogOpen} onOpenChange={setIsStatusDialogOpen}>
+                    <DialogContent className="max-w-md">
+                      <DialogHeader>
+                        <DialogTitle>{editingStatusId ? "Edit" : "Add"} Status</DialogTitle>
+                        <DialogDescription>
+                          {editingStatusId ? "Update" : "Add"} a status option for this workflow
+                        </DialogDescription>
+                      </DialogHeader>
+                      <form onSubmit={handleSubmitStatus} className="space-y-4">
+                        <div>
+                          <Label htmlFor="status-name">Name</Label>
+                          <Input
+                            id="status-name"
+                            value={statusFormData.name}
+                            onChange={(e) => setStatusFormData({ ...statusFormData, name: e.target.value })}
+                            placeholder="e.g., In Progress"
+                            required
+                          />
+                        </div>
+                        <div>
+                          <Label htmlFor="status-color">Color</Label>
+                          <div className="flex items-center gap-3">
+                            <Input
+                              id="status-color"
+                              type="color"
+                              value={statusFormData.color}
+                              onChange={(e) => setStatusFormData({ ...statusFormData, color: e.target.value })}
+                              className="w-20 h-10 cursor-pointer"
+                            />
+                            <Input
+                              type="text"
+                              value={statusFormData.color}
+                              onChange={(e) => setStatusFormData({ ...statusFormData, color: e.target.value })}
+                              placeholder="#3b82f6"
+                              pattern="^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$"
+                              className="flex-1"
+                            />
+                          </div>
+                          <p className="text-xs text-muted-foreground mt-1">
+                            Choose a color to represent this status
+                          </p>
+                        </div>
+                        <div className="flex justify-end gap-2 pt-4">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => setIsStatusDialogOpen(false)}
+                          >
+                            Cancel
+                          </Button>
+                          <Button type="submit">
+                            {editingStatusId ? "Update" : "Create"}
+                          </Button>
+                        </div>
+                      </form>
+                    </DialogContent>
+                  </Dialog>
+                </div>
+              </TabsContent>
+            </div>
+          </Tabs>
+          <DialogFooter className="flex-shrink-0 border-t pt-4">
+            <Button variant="outline" onClick={() => setDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleCreateOrUpdate}>
+              {editingWorkflow ? "Update" : "Create"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <CreateWorkflowDialog
+        open={showCreateDialog}
+        onOpenChange={setShowCreateDialog}
+        onSelectManual={() => {
+          setShowCreateDialog(false);
+          // Open dialog with current category context
+          openDialog();
+        }}
+        onSelectAI={() => {
+          setShowCreateDialog(false);
+          setShowAIChat(true);
+        }}
+      />
+
+      <WorkflowAIChat
+        open={showAIChat}
+        onOpenChange={setShowAIChat}
+        companyId={companyId}
+      />
+
+      <CategoryDialog
+        key={editingCategory ? `edit-${editingCategory.id}` : `new-${dialogKeyCounter}-${pendingParentIdRef.current ?? pendingParentId ?? 'root'}`}
+        open={isCategoryDialogOpen}
+        onOpenChange={(open) => {
+          setIsCategoryDialogOpen(open);
+          if (!open) {
+            // Reset when dialog closes
+            setEditingCategory(null);
+            setPendingParentId(null);
+            pendingParentIdRef.current = null;
+          }
+        }}
+        category={editingCategory}
+        companyId={companyId || ""}
+        onSuccess={handleCategoryDialogSuccess}
+        defaultParentCategoryId={editingCategory ? undefined : (pendingParentIdRef.current ?? pendingParentId)}
+      />
+
+      {/* Duplicate workflow to company (super admin only) */}
+      <Dialog
+        open={duplicateToCompanyDialogOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDuplicateToCompanyDialogOpen(false);
+            setWorkflowToDuplicate(null);
+          }
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Duplicate workflow</DialogTitle>
+            <DialogDescription>
+              Copy this workflow to another company. The workflow, its steps, connections, and statuses will be copied.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="duplicate-target-company">Target company</Label>
+              {loadingCompaniesForDuplicate ? (
+                <p className="text-sm text-muted-foreground">Loading companies...</p>
+              ) : (
+                <Select
+                  value={duplicateTargetCompanyId}
+                  onValueChange={setDuplicateTargetCompanyId}
+                  disabled={loadingCompaniesForDuplicate}
+                >
+                  <SelectTrigger id="duplicate-target-company">
+                    <SelectValue placeholder="Select company" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {allCompanies.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>
+                        {c.name}
+                        {c.id === companyId ? " (current)" : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setDuplicateToCompanyDialogOpen(false);
+                setWorkflowToDuplicate(null);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              disabled={!workflowToDuplicate || !duplicateTargetCompanyId || loadingCompaniesForDuplicate}
+              onClick={async () => {
+                if (!workflowToDuplicate || !duplicateTargetCompanyId) return;
+                await handleDuplicate(workflowToDuplicate, duplicateTargetCompanyId);
+                setDuplicateToCompanyDialogOpen(false);
+                setWorkflowToDuplicate(null);
+              }}
+            >
+              Duplicate
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog open={!!workflowToDelete} onOpenChange={(open) => !open && setWorkflowToDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This action cannot be undone. This will permanently delete the workflow
+              "{workflowToDelete?.name}" and all of its history.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={(e) => {
+                e.preventDefault();
+                executeDelete();
+              }}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}
