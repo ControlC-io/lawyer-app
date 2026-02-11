@@ -87,6 +87,14 @@ export function WorkflowNode({
       ? (step.config.outputs || ["Submit", "Cancel"])
       : ["default"];
 
+  // Ensure positions are valid numbers for CSS (API may send Prisma Decimals as strings)
+  const rawX = step.position_x;
+  const rawY = step.position_y;
+  const safePositionX = typeof rawX === "number" && !isNaN(rawX) ? rawX : Number(rawX);
+  const safePositionY = typeof rawY === "number" && !isNaN(rawY) ? rawY : Number(rawY);
+  const posX = Number.isFinite(safePositionX) ? safePositionX : 0;
+  const posY = Number.isFinite(safePositionY) ? safePositionY : 0;
+
   // Helper to determine if interaction should start a drag or a click connection
   const handleOutputMouseDown = (e: React.MouseEvent, outputName: string) => {
     e.stopPropagation();
@@ -151,8 +159,8 @@ export function WorkflowNode({
     <div
       className={`absolute ${readOnly ? "cursor-default" : "cursor-move"} group z-10 hover:z-20`}
       style={{
-        left: step.position_x,
-        top: step.position_y,
+        left: posX,
+        top: posY,
         transform: "translate(-50%, -50%)",
       }}
       onMouseDown={onMouseDown}

@@ -49,6 +49,10 @@ export function CanvasComment({
   const width = comment.width || 200;
   const height = comment.height || 150;
 
+  // Ensure positions are valid numbers for CSS
+  const safePositionX = typeof comment.position_x === 'number' && !isNaN(comment.position_x) ? comment.position_x : 0;
+  const safePositionY = typeof comment.position_y === 'number' && !isNaN(comment.position_y) ? comment.position_y : 0;
+
   useEffect(() => {
     if (isEditing && textareaRef.current) {
       textareaRef.current.focus();
@@ -113,8 +117,8 @@ export function CanvasComment({
       ref={commentRef}
       className={`absolute group ${isDragging ? "opacity-50" : ""}`}
       style={{
-        left: `${comment.position_x}px`,
-        top: `${comment.position_y}px`,
+        left: `${safePositionX}px`,
+        top: `${safePositionY}px`,
         width: `${width}px`,
         height: `${height}px`,
         zIndex: 5,

@@ -108,6 +108,29 @@ describe('Public Endpoints', () => {
     });
   });
 
+  describe('GET /api/public/config', () => {
+    it('should return signupEnabled true when ENABLE_PUBLIC_SIGNUP is "true"', async () => {
+      process.env.ENABLE_PUBLIC_SIGNUP = 'true';
+      const response = await request(app).get('/api/public/config');
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({ signupEnabled: true });
+    });
+
+    it('should return signupEnabled false when ENABLE_PUBLIC_SIGNUP is not "true"', async () => {
+      process.env.ENABLE_PUBLIC_SIGNUP = 'false';
+      const response = await request(app).get('/api/public/config');
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({ signupEnabled: false });
+    });
+
+    it('should return signupEnabled false when ENABLE_PUBLIC_SIGNUP is unset', async () => {
+      delete process.env.ENABLE_PUBLIC_SIGNUP;
+      const response = await request(app).get('/api/public/config');
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({ signupEnabled: false });
+    });
+  });
+
   describe('POST /api/public/demo-request', () => {
     it('should return 400 when firstName is missing', async () => {
       const response = await request(app)

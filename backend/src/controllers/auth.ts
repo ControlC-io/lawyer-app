@@ -7,6 +7,10 @@ import { AuthRequest } from '../middleware/auth';
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
 
 export const register = async (req: Request, res: Response) => {
+  if (process.env.ENABLE_PUBLIC_SIGNUP !== 'true') {
+    return res.status(403).json({ message: 'Public signup is disabled' });
+  }
+
   const { email, password, full_name } = req.body;
 
   try {
@@ -170,7 +174,7 @@ export const updateMe = async (req: AuthRequest, res: Response) => {
 
     const { full_name, notifications_enabled } = req.body || {};
     const updateData: { full_name?: string; notifications_enabled?: boolean } = {};
-    if (typeof full_name === 'string') updateData.full_name = full_name.trim() || null;
+    if (typeof full_name === 'string') updateData.full_name = full_name.trim() || undefined;
     if (typeof notifications_enabled === 'boolean') updateData.notifications_enabled = notifications_enabled;
 
     const profile = await prisma.profile.update({

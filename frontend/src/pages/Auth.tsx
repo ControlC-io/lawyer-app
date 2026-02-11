@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useNavigate, Link, useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { api, setToken } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Loader2, ArrowLeft } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { useLanguage } from "@/contexts/LanguageContext";
 
 const Auth = () => {
@@ -16,11 +16,12 @@ const Auth = () => {
   const { t } = useLanguage();
   const { user, profile, refreshUserData } = useAuth();
   const [searchParams] = useSearchParams();
-  const next = searchParams.get("next") || "/executions";
+  const next = searchParams.get("next") || "/";
   const initialEmail = searchParams.get("email") || "";
   const initialMode = (searchParams.get("mode") as "signin" | "signup") || "signin";
   const isInvited = !!searchParams.get("email");
 
+  const [signupEnabled, setSignupEnabled] = useState(false);
   const [loading, setLoading] = useState(false);
   const [email, setEmail] = useState(initialEmail);
   const [password, setPassword] = useState("");
@@ -35,18 +36,26 @@ const Auth = () => {
     companyName: "",
   });
 
+  // Fetch public config (signup enabled or not) on mount
+  useEffect(() => {
+    api
+      .get<{ signupEnabled: boolean }>("/api/public/config", { skipAuth: true })
+      .then((data) => setSignupEnabled(data.signupEnabled === true))
+      .catch(() => setSignupEnabled(false));
+  }, []);
+
   // Update email and mode if query params change
   useEffect(() => {
     if (searchParams.get("email")) {
       setEmail(searchParams.get("email") || "");
     }
     const m = searchParams.get("mode");
-    if (m === "signup" && !searchParams.get("email")) {
+    if (m === "signup" && !searchParams.get("email") && !signupEnabled) {
       setMode("signin");
     } else if (m === "signin" || m === "signup") {
       setMode(m);
     }
-  }, [searchParams]);
+  }, [searchParams, signupEnabled]);
 
   // Prefill demo form when user or profile is available
   useEffect(() => {
@@ -144,14 +153,6 @@ const Auth = () => {
               className="h-[60px]"
             />
           </div>
-          <div className="flex items-center justify-center mb-2">
-            <Button variant="ghost" size="sm" asChild className="text-muted-foreground hover:text-foreground">
-              <Link to="/">
-                <ArrowLeft className="mr-2 h-4 w-4" />
-                {t("auth.backToSite")}
-              </Link>
-            </Button>
-          </div>
           <CardTitle className="text-center">{mode === "signin" ? t("auth.signIn") : t("auth.signUp")}</CardTitle>
           <CardDescription className="text-center">
             {mode === "signin" ? t("auth.signInDescription") : t("auth.signUpDescription")}
@@ -203,7 +204,7 @@ const Auth = () => {
               {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : (mode === "signin" ? t("auth.signInButton") : t("auth.signUpButton"))}
             </Button>
             
-            {isInvited && (
+            {(isInvited || signupEnabled) && (
               <div className="text-center text-sm">
                 <button 
                   type="button" 

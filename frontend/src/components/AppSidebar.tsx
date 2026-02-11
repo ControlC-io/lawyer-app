@@ -37,7 +37,7 @@ const menuSections: { groupLabelKey: string; items: MenuItem[] }[] = [
   {
     groupLabelKey: "sidebar.groupWorkflows",
     items: [
-      { titleKey: "sidebar.executions", url: "/executions", icon: PlayCircle },
+      { titleKey: "sidebar.executions", url: "/", icon: PlayCircle },
       { titleKey: "sidebar.workflows", url: "/workflows", icon: Workflow },
     ],
   },
@@ -83,7 +83,7 @@ export function AppSidebar() {
     const isData = item.titleKey === "sidebar.data";
     const isGlobalVariables = item.titleKey === "sidebar.globalVariables";
     return isExecutions
-      ? location.pathname === "/executions" || location.pathname.startsWith("/executions/")
+      ? location.pathname === "/" || location.pathname === "/executions" || location.pathname.startsWith("/executions/")
       : isData
         ? (location.pathname === "/data" || location.pathname.startsWith("/data/")) && location.pathname !== "/data/global-variables"
         : isGlobalVariables

@@ -1,4 +1,5 @@
 import { Response } from 'express';
+import { Prisma } from '@prisma/client';
 import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 
@@ -345,13 +346,13 @@ export const companiesController = {
         company_id: companyId,
       };
       if (workflowId) where.workflow_id = workflowId;
-      if (status) where.status = status as any;
+      if (status) where.status = status as 'pending' | 'running' | 'completed' | 'failed' | 'paused';
       if (categoryId !== undefined) {
         where.workflow = { category_id: categoryId || null };
       }
 
       const executions = await prisma.workflowExecution.findMany({
-        where,
+        where: where as Prisma.WorkflowExecutionWhereInput,
         orderBy: { created_at: 'desc' },
         include: {
           workflow: {
@@ -362,10 +363,10 @@ export const companiesController = {
         },
       });
 
-      return res.json(executions.map((e) => ({
-        ...e,
-        current_step_name: e.current_step?.name ?? null,
-      })));
+      return res.json(executions.map((e) => {
+        const ex = e as typeof e & { current_step?: { name: string | null } };
+        return { ...ex, current_step_name: ex.current_step?.name ?? null };
+      }));
     } catch (error) {
       console.error('listExecutions error:', error);
       return res.status(500).json({
@@ -956,7 +957,7 @@ export const companiesController = {
             company_id: companyId,
             name: f.name,
             field_type: f.field_type,
-            options: f.options,
+            options: f.options === null ? Prisma.JsonNull : f.options,
             position: f.position,
             is_required: f.is_required,
           },
@@ -1250,7 +1251,7 @@ export const companiesController = {
       if (!companyId) return res.status(400).json({ error: 'Missing company ID' });
       const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
-      const where: { company_id: string | null; folder_id?: string | string[] | { in: string[] }; id?: { in: string[] } } = { company_id: companyId };
+      const where: { company_id: string; folder_id?: string | { in: string[] }; id?: { in: string[] } } = { company_id: companyId };
       if (folderId !== undefined) {
         if (folderId === '') {
           const rootFolders = await prisma.folder.findMany({
@@ -1258,7 +1259,7 @@ export const companiesController = {
             select: { id: true },
           });
           const rootIds = rootFolders.map((f) => f.id);
-          where.folder_id = rootIds.length ? { in: rootIds } : 'none';
+          where.folder_id = rootIds.length > 0 ? { in: rootIds } : { in: [] };
         } else {
           where.folder_id = folderId;
         }

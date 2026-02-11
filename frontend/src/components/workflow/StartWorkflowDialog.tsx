@@ -13,7 +13,6 @@ import {
 import { Input } from "@/components/ui/input";
 import { toast } from "@/hooks/use-toast";
 import { useCompanyId } from "@/hooks/useCompanyId";
-import { useCompanyApiKey } from "@/hooks/useCompanyApiKey";
 import { SearchResults } from "@/components/workflow/SearchResults";
 import { CategoryBreadcrumb } from "@/components/workflow/CategoryBreadcrumb";
 import { CategoryCard } from "@/components/workflow/CategoryCard";
@@ -47,7 +46,6 @@ export function StartWorkflowDialog({ open, onOpenChange }: StartWorkflowDialogP
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const companyId = useCompanyId();
-  const apiKey = useCompanyApiKey(companyId);
   const [searchQuery, setSearchQuery] = useState("");
   const [currentCategoryId, setCurrentCategoryId] = useState<string | null>(null);
   const [categoryBreadcrumb, setCategoryBreadcrumb] = useState<WorkflowCategory[]>([]);
@@ -106,13 +104,12 @@ export function StartWorkflowDialog({ open, onOpenChange }: StartWorkflowDialogP
 
   const startExecutionMutation = useMutation({
     mutationFn: async (workflowId: string) => {
-      if (!companyId || !apiKey) {
-        throw new Error("Company or API key not set");
+      if (!companyId) {
+        throw new Error("Company not set");
       }
       const res = await api.post<{ execution_id?: string }>(
-        `/api/workflows/${workflowId}/trigger`,
-        {},
-        { apiKey: apiKey ?? undefined }
+        `/api/companies/${companyId}/workflows/${workflowId}/start`,
+        {}
       );
       const executionId = res?.execution_id;
       if (!executionId) throw new Error("No execution ID returned");

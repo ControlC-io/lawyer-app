@@ -324,7 +324,16 @@ export const filesController = {
         });
       }
 
-      const expirationSeconds = expiresIn || 31536000; // 1 year default
+      const rawExpiration =
+        typeof expiresIn === 'number'
+          ? expiresIn
+          : typeof expiresIn === 'string'
+          ? parseInt(expiresIn, 10)
+          : undefined;
+      const expirationSeconds =
+        typeof rawExpiration === 'number' && Number.isFinite(rawExpiration)
+          ? rawExpiration
+          : undefined;
 
       const signedUrl = await storageService.getSignedUrl(
         bucket,
@@ -476,7 +485,12 @@ export const filesController = {
           select: { id: true, name: true },
         });
 
-        const keyMap = new Map(metadataKeys.map((k) => [k.name, k.id]));
+        const keyMap = new Map<string, string>();
+        for (const key of metadataKeys) {
+          if (key.name != null) {
+            keyMap.set(key.name, key.id);
+          }
+        }
 
         for (const item of metadataConfig) {
           const keyName = item.key;

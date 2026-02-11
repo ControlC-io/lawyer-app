@@ -426,7 +426,7 @@ export default function DocumentManagement() {
           <p className="text-muted-foreground">Manage folders and files</p>
         </div>
         <div className="flex gap-2">
-          {filters.length === 0 && (
+          {companyId && filters.length === 0 && (
             <>
               <Dialog open={isCreateFolderOpen} onOpenChange={setIsCreateFolderOpen}>
                 <DialogTrigger asChild>
@@ -485,7 +485,8 @@ export default function DocumentManagement() {
         </div>
       </div>
 
-      {/* Metadata Filter */}
+      {/* Metadata Filter (only when company selected) */}
+      {companyId && (
       <Card>
         <CardContent className="p-4 space-y-4">
           <div className="flex items-end gap-4">
@@ -592,8 +593,10 @@ export default function DocumentManagement() {
           )}
         </CardContent>
       </Card>
+      )}
 
-      {/* Breadcrumb or Search Indicator */}
+      {/* Breadcrumb or Search Indicator (only when company selected) */}
+      {companyId && (
       <div className="flex items-center gap-2 text-sm">
         {filters.length === 0 ? (
           <>
@@ -627,8 +630,23 @@ export default function DocumentManagement() {
           </div>
         )}
       </div>
+      )}
+
+      {/* No company selected */}
+      {!companyId && (
+        <Card>
+          <CardContent className="flex flex-col items-center justify-center py-12 text-center">
+            <Folder className="h-12 w-12 text-muted-foreground mb-4" />
+            <h3 className="text-lg font-semibold mb-2">No company selected</h3>
+            <p className="text-muted-foreground max-w-md">
+              Document management is scoped to a company. Select a company from the switcher in the header to see folders and files, or create a folder and upload documents.
+            </p>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Folders and Files List */}
+      {companyId && (
       <Card>
         <CardHeader>
           <CardTitle>{filters.length > 0 ? "Search Results" : "Contents"}</CardTitle>
@@ -745,8 +763,12 @@ export default function DocumentManagement() {
               ))}
               {folders.length === 0 && files.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center text-muted-foreground">
-                    {filters.length > 0 ? "No matching files found" : "This folder is empty"}
+                  <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
+                    {filters.length > 0
+                      ? "No matching files found"
+                      : currentFolderId
+                        ? "This folder is empty"
+                        : "No folders yet. Create a folder above to organize and upload documents."}
                   </TableCell>
                 </TableRow>
               )}
@@ -754,6 +776,7 @@ export default function DocumentManagement() {
           </Table>
         </CardContent>
       </Card>
+      )}
 
       {/* Preview Dialog */}
       <Dialog open={isPreviewOpen} onOpenChange={setIsPreviewOpen}>

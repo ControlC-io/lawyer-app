@@ -118,7 +118,7 @@ export default function AcceptInvitation() {
             </CardDescription>
           </CardHeader>
           <CardFooter>
-            <Button onClick={() => navigate("/app")} className="w-full" size="lg">
+            <Button onClick={() => navigate("/")} className="w-full" size="lg">
               Go to Application
             </Button>
           </CardFooter>

@@ -1,7 +1,132 @@
 import { prisma } from '../lib/prisma';
 import fetch from 'node-fetch';
 
+type WorkflowStepRow = Awaited<ReturnType<typeof prisma.workflowStep.findMany>>[number];
+type WorkflowConnectionRow = Awaited<ReturnType<typeof prisma.workflowConnection.findMany>>[number];
+
 export const workflowService = {
+  /**
+   * Create a workflow execution and advance to the first step(s).
+   * Used by both API trigger (external) and start-from-UI (internal).
+   * @param companyId Company ID
+   * @param workflowId Workflow ID
+   * @param options data: optional execution payload; createdBy: user ID when started from UI, null for API
+   * @returns execution ID
+   */
+  async createExecutionAndStart(
+    companyId: string,
+    workflowId: string,
+    options: { data?: Record<string, unknown>; createdBy?: string | null } = {}
+  ): Promise<string> {
+    const { data = {}, createdBy = null } = options;
+
+    const workflow = await prisma.workflow.findFirst({
+      where: { id: workflowId, company_id: companyId },
+      select: { id: true, default_status_id: true },
+    });
+    if (!workflow) {
+      throw new Error('Workflow not found or access denied');
+    }
+
+    const execution = await prisma.workflowExecution.create({
+      data: {
+        workflow_id: workflowId,
+        status: 'pending',
+        started_at: new Date(),
+        created_by: createdBy,
+        company_id: companyId,
+        execution_data: (data as object) || {},
+      },
+    });
+
+    const workflowSteps = await prisma.workflowStep.findMany({
+      where: { workflow_id: workflowId },
+    });
+
+    await prisma.workflowExecutionData.create({
+      data: {
+        execution_id: execution.id,
+        company_id: companyId,
+        values: {},
+      },
+    });
+
+    const executionSteps = workflowSteps
+      .filter((step: WorkflowStepRow) => step.step_type !== 'start' && step.step_type !== 'end')
+      .map((step: WorkflowStepRow) => {
+        const stepConfig = (step.config as Record<string, unknown>) || {};
+        const assignToCreator = stepConfig.assign_to_execution_creator !== false;
+        return {
+          execution_id: execution.id,
+          step_id: step.id,
+          status: 'pending' as const,
+          assigned_to_user_id: assignToCreator ? execution.created_by : step.assigned_to_user_id,
+          assigned_to_group_id: assignToCreator ? null : step.assigned_to_group_id,
+          company_id: companyId,
+        };
+      });
+
+    if (executionSteps.length > 0) {
+      await prisma.workflowExecutionStep.createMany({
+        data: executionSteps,
+      });
+    }
+
+    const startStep = workflowSteps.find((s: WorkflowStepRow) => s.step_type === 'start');
+    if (!startStep) {
+      throw new Error('No start step found in workflow');
+    }
+
+    const startConnections = await prisma.workflowConnection.findMany({
+      where: {
+        workflow_id: workflowId,
+        source_step_id: startStep.id,
+      },
+    });
+
+    if (startConnections.length > 0) {
+      const targetIds = [...new Set(startConnections.map((c: WorkflowConnectionRow) => c.target_step_id))];
+      for (const targetId of targetIds) {
+        const firstStep = workflowSteps.find((s: WorkflowStepRow) => s.id === targetId);
+        if (firstStep && firstStep.step_type !== 'end') {
+          const execStep = await prisma.workflowExecutionStep.findFirst({
+            where: { execution_id: execution.id, step_id: firstStep.id },
+            select: { id: true },
+          });
+          if (!execStep) continue;
+          await prisma.workflowExecution.update({
+            where: { id: execution.id },
+            data: {
+              status: 'running',
+              current_step_id: firstStep.id,
+            },
+          });
+          await prisma.workflowExecutionStep.updateMany({
+            where: {
+              execution_id: execution.id,
+              step_id: firstStep.id,
+            },
+            data: {
+              status: 'running',
+              started_at: new Date(),
+            },
+          });
+          if (firstStep.step_type === 'action' && firstStep.action_type === 'automatic') {
+            this.triggerStepProcessing(execution.id, execStep.id).catch((err) => {
+              console.error('Error triggering step processing:', err);
+            });
+          } else if (firstStep.step_type === 'file') {
+            this.triggerFileProcessing(execution.id, execStep.id, firstStep.id).catch((err) => {
+              console.error('Error triggering file processing:', err);
+            });
+          }
+        }
+      }
+    }
+
+    return execution.id;
+  },
+
   /**
    * Advance workflow to next step(s) after completing current step
    * @param executionId Execution ID
@@ -33,19 +158,19 @@ export const workflowService = {
 
       // Find outgoing connections from current step
       let outgoingConnections = connections.filter(
-        (c) => c.source_step_id === currentStepId
+        (c: WorkflowConnectionRow) => c.source_step_id === currentStepId
       );
 
       // If decision choice is provided, filter by output name
       if (decisionChoice) {
         const matchingConnections = outgoingConnections.filter(
-          (c) => (c.output_name || 'default') === decisionChoice
+          (c: WorkflowConnectionRow) => (c.output_name || 'default') === decisionChoice
         );
 
         // Fallback to default if no match found
         if (matchingConnections.length === 0) {
           outgoingConnections = outgoingConnections.filter(
-            (c) => (c.output_name || 'default') === 'default'
+            (c: WorkflowConnectionRow) => (c.output_name || 'default') === 'default'
           );
         } else {
           outgoingConnections = matchingConnections;
@@ -97,9 +222,9 @@ export const workflowService = {
 
         // Check prerequisites - all incoming connections must be completed
         const incomingConnections = connections.filter(
-          (c) => c.target_step_id === targetStepId
+          (c: WorkflowConnectionRow) => c.target_step_id === targetStepId
         );
-        const requiredSourceIds = incomingConnections.map((c) => c.source_step_id);
+        const requiredSourceIds = incomingConnections.map((c: WorkflowConnectionRow) => c.source_step_id);
 
         const completedSourceSteps = await prisma.workflowExecutionStep.findMany({
           where: {
@@ -110,10 +235,10 @@ export const workflowService = {
           select: { step_id: true },
         });
 
-        const completedStepIds = new Set(completedSourceSteps.map((s) => s.step_id));
+        const completedStepIds = new Set(completedSourceSteps.map((s: { step_id: string }) => s.step_id));
         completedStepIds.add(currentStepId); // Current step is now complete
 
-        const allPrerequisitesMet = requiredSourceIds.every((id) =>
+        const allPrerequisitesMet = requiredSourceIds.every((id: string) =>
           completedStepIds.has(id)
         );
 

@@ -131,6 +131,7 @@ Key variables:
 - `DATABASE_URL`: PostgreSQL connection string
 - `JWT_SECRET`: Secret for JWT token signing
 - `INTERNAL_API_KEY`: Key for database trigger authentication
+- `ENABLE_PUBLIC_SIGNUP`: Set to `"true"` to allow account creation from the Auth page without an invitation; omit or set to any other value to disable (default off)
 - `SENDGRID_API_KEY`: SendGrid API key for emails
 - `MINIO_*`: MinIO storage configuration
 

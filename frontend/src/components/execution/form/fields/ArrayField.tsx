@@ -164,7 +164,7 @@ export const ArrayField = ({
                   </TableHeader>
                   <TableBody>
                     {value.map((item, index) => (
-                      <TableRow key={item._id || index}>
+                      <TableRow key={`${item._id ?? item.id ?? index}-${index}`}>
                         {myChildFields.map((cf) => {
                           const isRequired = getChildFieldRequired(cf.id);
                           return (
@@ -214,7 +214,7 @@ export const ArrayField = ({
           ) : (
             <div className="space-y-3">
               {value.map((item, index) => (
-                <div key={item._id || index} className="border rounded-md p-3 bg-card">
+                <div key={`${item._id ?? item.id ?? index}-${index}`} className="border rounded-md p-3 bg-card">
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-sm font-medium text-muted-foreground">Item {index + 1}</span>
                     {!disabled && (

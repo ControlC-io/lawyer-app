@@ -1,6 +1,7 @@
 import { Response } from 'express';
 import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
+import { workflowService } from '../services/workflow.service';
 
 async function ensureCompanyAccess(req: AuthRequest, companyId: string, requireAdmin = false) {
   const userId = req.user?.id;
@@ -20,24 +21,50 @@ async function ensureCompanyAccess(req: AuthRequest, companyId: string, requireA
 }
 
 export const workflowDefinitionController = {
-  /** GET /api/companies/:companyId/workflows - list workflows, optional categoryId query */
+  /** GET /api/companies/:companyId/workflows - list workflows user has permission to execute */
   async listWorkflows(req: AuthRequest, res: Response) {
     try {
       const { companyId } = req.params;
-      const categoryId = req.query.categoryId as string | undefined;
+      const rawCategoryId = req.query.categoryId as string | undefined;
       if (!companyId) {
         return res.status(400).json({ error: 'Missing company ID', details: 'companyId is required' });
       }
       const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
 
-      const where: { company_id: string; category_id?: string | null } = { company_id: companyId };
-      if (categoryId !== undefined) {
-        where.category_id = categoryId || null;
+      const userId = req.user?.id;
+      if (!userId) {
+        return res.status(401).json({ error: 'Unauthorized' });
       }
 
+      // Get user's group IDs for permission checking
+      const userGroups = await prisma.profileGroupMember.findMany({
+        where: { profile_id: userId },
+        select: { group_id: true },
+      });
+      const userGroupIds = userGroups.map((g) => g.group_id).filter((id): id is string => id !== null);
+
+      // Build the base where clause
+      const baseWhere: { company_id: string; category_id?: string | null } = { company_id: companyId };
+      if (rawCategoryId !== undefined) {
+        baseWhere.category_id = (rawCategoryId === '' || rawCategoryId === 'null') ? null : rawCategoryId;
+      }
+
+      // Fetch workflows that user has permission to execute:
+      // - is_public = true (available to all company users), OR
+      // - user has a direct permission, OR
+      // - user belongs to a group with permission
       const workflows = await prisma.workflow.findMany({
-        where,
+        where: {
+          ...baseWhere,
+          OR: [
+            { is_public: true },
+            { permissions: { some: { user_id: userId } } },
+            ...(userGroupIds.length > 0
+              ? [{ permissions: { some: { group_id: { in: userGroupIds } } } }]
+              : []),
+          ],
+        },
         orderBy: { name: 'asc' },
         include: {
           _count: { select: { steps: true } },
@@ -86,6 +113,52 @@ export const workflowDefinitionController = {
     } catch (error) {
       console.error('getWorkflow error:', error);
       return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
+  /** POST /api/companies/:companyId/workflows/:workflowId/start - start execution from UI (only is_active is checked, not api_enabled) */
+  async startWorkflow(req: AuthRequest, res: Response) {
+    try {
+      const { companyId, workflowId } = req.params;
+      if (!companyId || !workflowId) {
+        return res.status(400).json({ error: 'Missing company ID or workflow ID' });
+      }
+      const access = await ensureCompanyAccess(req, companyId);
+      if (access.error) return res.status(access.error.status).json(access.error.body);
+      const userId = req.user?.id;
+      if (!userId) {
+        return res.status(401).json({ error: 'Unauthorized', details: 'Authentication required' });
+      }
+
+      const workflow = await prisma.workflow.findFirst({
+        where: { id: workflowId, company_id: companyId },
+        select: { id: true, is_active: true },
+      });
+      if (!workflow) {
+        return res.status(404).json({ error: 'Workflow not found or access denied' });
+      }
+      if (workflow.is_active === false) {
+        return res.status(403).json({
+          error: 'Workflow is not active',
+          details: 'This workflow cannot be started because it is inactive',
+        });
+      }
+
+      const executionId = await workflowService.createExecutionAndStart(companyId, workflowId, {
+        data: {},
+        createdBy: userId,
+      });
+
+      return res.json({
+        success: true,
+        execution_id: executionId,
+        status: 'started',
+      });
+    } catch (error) {
+      console.error('startWorkflow error:', error);
+      return res.status(500).json({
+        error: error instanceof Error ? error.message : 'Unknown error occurred',
+      });
     }
   },
 
@@ -174,17 +247,67 @@ export const workflowDefinitionController = {
       const access = await ensureCompanyAccess(req, companyId, true);
       if (access.error) return res.status(access.error.status).json(access.error.body);
 
-      const result = await prisma.workflow.deleteMany({
+      const workflow = await prisma.workflow.findFirst({
         where: { id: workflowId, company_id: companyId },
+        select: { id: true },
       });
-
-      if (result.count === 0) {
+      if (!workflow) {
         return res.status(404).json({ error: 'Workflow not found', details: 'Workflow not found or access denied' });
       }
+
+      await prisma.$transaction(async (tx) => {
+        await tx.workflow.updateMany({
+          where: { id: workflowId, company_id: companyId },
+          data: { default_status_id: null },
+        });
+        await tx.workflowExecutionLog.deleteMany({
+          where: { execution: { workflow_id: workflowId } },
+        });
+        await tx.workflowExecutionData.deleteMany({
+          where: { execution: { workflow_id: workflowId } },
+        });
+        await tx.agentUsage.deleteMany({
+          where: { execution: { workflow_id: workflowId } },
+        });
+        await tx.workflowExecutionStep.deleteMany({
+          where: { execution: { workflow_id: workflowId } },
+        });
+        await tx.workflowExecution.updateMany({
+          where: { workflow_id: workflowId },
+          data: { current_step_id: null },
+        });
+        await tx.workflowExecution.deleteMany({
+          where: { workflow_id: workflowId },
+        });
+        await tx.workflowConnection.deleteMany({
+          where: { workflow_id: workflowId },
+        });
+        await tx.workflowStep.deleteMany({
+          where: { workflow_id: workflowId },
+        });
+        await tx.workflowStatus.deleteMany({
+          where: { workflow_id: workflowId },
+        });
+        await tx.workflowFile.deleteMany({
+          where: { workflow_id: workflowId },
+        });
+        await tx.workflowPermission.deleteMany({
+          where: { workflow_id: workflowId },
+        });
+        const result = await tx.workflow.deleteMany({
+          where: { id: workflowId, company_id: companyId },
+        });
+        if (result.count === 0) {
+          throw new Error('Workflow not found');
+        }
+      });
 
       return res.status(204).send();
     } catch (error) {
       console.error('deleteWorkflow error:', error);
+      if (error instanceof Error && error.message === 'Workflow not found') {
+        return res.status(404).json({ error: 'Workflow not found', details: 'Workflow not found or access denied' });
+      }
       return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
     }
   },

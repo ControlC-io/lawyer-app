@@ -11,7 +11,7 @@ import crypto from 'crypto';
 export const workflowController = {
   /**
    * POST /api/workflows/:workflowId/trigger
-   * Trigger a workflow execution (was: trigger-workflow)
+   * Trigger a workflow execution via external API (requires api_enabled on workflow).
    */
   async triggerWorkflow(req: AuthRequest, res: Response) {
     try {
@@ -33,18 +33,9 @@ export const workflowController = {
         });
       }
 
-      // Get workflow and verify permissions
       const workflow = await prisma.workflow.findFirst({
-        where: {
-          id: workflowId,
-          company_id: companyId,
-        },
-        select: {
-          id: true,
-          name: true,
-          api_enabled: true,
-          default_status_id: true,
-        },
+        where: { id: workflowId, company_id: companyId },
+        select: { id: true, api_enabled: true },
       });
 
       if (!workflow) {
@@ -59,113 +50,14 @@ export const workflowController = {
         });
       }
 
-      // Create execution
-      const execution = await prisma.workflowExecution.create({
-        data: {
-          workflow_id: workflowId,
-          status: 'pending',
-          started_at: new Date(),
-          created_by: null, // API calls don't have user context
-          company_id: companyId,
-          execution_data: data || {},
-        },
+      const executionId = await workflowService.createExecutionAndStart(companyId, workflowId, {
+        data: data || {},
+        createdBy: null,
       });
-
-      // Get workflow steps
-      const workflowSteps = await prisma.workflowStep.findMany({
-        where: { workflow_id: workflowId },
-      });
-
-      // Create execution data record
-      await prisma.workflowExecutionData.create({
-        data: {
-          execution_id: execution.id,
-          company_id: companyId,
-          values: {},
-        },
-      });
-
-      // Create execution steps (excluding start and end)
-      const executionSteps = workflowSteps
-        .filter((step) => step.step_type !== 'start' && step.step_type !== 'end')
-        .map((step) => {
-          const stepConfig = (step.config as any) || {};
-          const assignToCreator = stepConfig.assign_to_execution_creator !== false;
-
-          return {
-            execution_id: execution.id,
-            step_id: step.id,
-            status: 'pending' as any,
-            assigned_to_user_id: assignToCreator ? execution.created_by : step.assigned_to_user_id,
-            assigned_to_group_id: assignToCreator ? null : step.assigned_to_group_id,
-            company_id: companyId,
-          };
-        });
-
-      if (executionSteps.length > 0) {
-        await prisma.workflowExecutionStep.createMany({
-          data: executionSteps,
-        });
-      }
-
-      // Start execution - find start step and first connected step
-      const startStep = workflowSteps.find((s) => s.step_type === 'start');
-      if (!startStep) {
-        return res.status(500).json({ error: 'No start step found in workflow' });
-      }
-
-      const startConnections = await prisma.workflowConnection.findMany({
-        where: {
-          workflow_id: workflowId,
-          source_step_id: startStep.id,
-        },
-      });
-
-      if (startConnections.length > 0) {
-        const targetIds = [...new Set(startConnections.map((c) => c.target_step_id))];
-
-        for (const targetId of targetIds) {
-          const firstStep = workflowSteps.find((s) => s.id === targetId);
-
-          if (firstStep && firstStep.step_type !== 'end') {
-            // Update execution to running
-            await prisma.workflowExecution.update({
-              where: { id: execution.id },
-              data: {
-                status: 'running',
-                current_step_id: firstStep.id,
-              },
-            });
-
-            // Set corresponding execution step to running
-            await prisma.workflowExecutionStep.updateMany({
-              where: {
-                execution_id: execution.id,
-                step_id: firstStep.id,
-              },
-              data: {
-                status: 'running',
-                started_at: new Date(),
-              },
-            });
-
-            // Trigger automatic processing if needed
-            if (firstStep.step_type === 'action' && firstStep.action_type === 'automatic') {
-              workflowService.triggerStepProcessing(execution.id, firstStep.id).catch((error) => {
-                console.error('Error triggering step processing:', error);
-              });
-            } else if (firstStep.step_type === 'file') {
-              workflowService.triggerFileProcessing(execution.id, firstStep.id, firstStep.id).catch((error) => {
-                console.error('Error triggering file processing:', error);
-              });
-            }
-          }
-        }
-      }
 
       return res.json({
         success: true,
-        execution_id: execution.id,
+        execution_id: executionId,
         status: 'started',
       });
     } catch (error) {
@@ -795,6 +687,13 @@ export const workflowController = {
             }
           });
 
+          const childFieldIdToName: Record<string, string> = {};
+          childFields.forEach((childField: any) => {
+            if (childField.name && childField.id) {
+              childFieldIdToName[childField.id] = childField.name;
+            }
+          });
+
           const newItems: any[] = [];
           for (const itemData of value) {
             const newItem: Record<string, any> = {};
@@ -805,7 +704,8 @@ export const workflowController = {
                 continue;
               }
 
-              const childFieldId = childFieldNameToId[itemKey];
+              // Support both field name (API contract) and field id (frontend may send id)
+              const childFieldId = childFieldNameToId[itemKey] ?? (childFieldIdToName[itemKey] ? itemKey : null);
               if (childFieldId) {
                 newItem[childFieldId] = itemValue;
               }
@@ -819,14 +719,10 @@ export const workflowController = {
             newItems.push(newItem);
           }
 
-          // Get current array value and append
-          const currentArrayValue = currentValues[fieldId]?.value;
-          let updatedArray: any[] = Array.isArray(currentArrayValue) ? [...currentArrayValue] : [];
-          updatedArray.push(...newItems);
-
+          // Replace array with the sent value (do not append, to avoid duplicates)
           transformedValues[fieldId] = {
             ...currentValues[fieldId],
-            value: updatedArray,
+            value: newItems,
           };
         } else {
           // Regular field update

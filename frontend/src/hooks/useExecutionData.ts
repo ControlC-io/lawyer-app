@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useRef, useEffect } from "react";
+import { useRef, useEffect, useMemo } from "react";
 import { api } from "@/lib/api";
 
 // Polling interval for auto-refresh (in milliseconds)
@@ -82,10 +82,14 @@ export const useExecutionData = (id?: string, companyId?: string | null, apiKey?
       }
     : undefined;
 
-  const executionSteps = rawExecution?.execution_steps?.map((s: any) => ({
-    ...s,
-    workflow_steps: s.step ?? s.workflow_steps,
-  }));
+  const executionSteps = useMemo(
+    () =>
+      rawExecution?.execution_steps?.map((s: any) => ({
+        ...s,
+        workflow_steps: s.step ?? s.workflow_steps,
+      })),
+    [rawExecution?.execution_steps]
+  );
 
   const connections = rawExecution?.workflow?.connections ?? [];
 

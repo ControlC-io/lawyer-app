@@ -23,11 +23,34 @@ describe('Auth Endpoints', () => {
     },
   };
 
+  const originalEnablePublicSignup = process.env.ENABLE_PUBLIC_SIGNUP;
+
   beforeEach(() => {
     jest.clearAllMocks();
+    process.env.ENABLE_PUBLIC_SIGNUP = 'true';
+  });
+
+  afterAll(() => {
+    process.env.ENABLE_PUBLIC_SIGNUP = originalEnablePublicSignup;
   });
 
   describe('POST /api/auth/register', () => {
+    it('should return 403 when public signup is disabled', async () => {
+      process.env.ENABLE_PUBLIC_SIGNUP = 'false';
+
+      const response = await request(app)
+        .post('/api/auth/register')
+        .send({
+          email: 'new@example.com',
+          password: 'password123',
+          full_name: 'New User',
+        });
+
+      expect(response.status).toBe(403);
+      expect(response.body.message).toBe('Public signup is disabled');
+      expect(prisma.user.create).not.toHaveBeenCalled();
+    });
+
     it('should register a new user successfully', async () => {
       (prisma.user.findUnique as jest.Mock).mockResolvedValue(null);
       (prisma.user.create as jest.Mock).mockResolvedValue(mockUser);

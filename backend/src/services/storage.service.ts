@@ -1,13 +1,45 @@
 import * as Minio from 'minio';
 import { Readable } from 'stream';
 
-const minioClient = new Minio.Client({
+const internalMinioClient = new Minio.Client({
   endPoint: process.env.MINIO_ENDPOINT || 'localhost',
-  port: parseInt(process.env.MINIO_PORT || '9000'),
+  port: parseInt(process.env.MINIO_PORT || '9000', 10),
   useSSL: process.env.MINIO_USE_SSL === 'true',
   accessKey: process.env.MINIO_ACCESS_KEY || 'minioadmin',
   secretKey: process.env.MINIO_SECRET_KEY || 'minioadmin',
 });
+
+function createPublicClient(url?: string | null): Minio.Client | null {
+  if (!url) return null;
+  try {
+    const parsed = new URL(url);
+    const useSSL = parsed.protocol === 'https:';
+    const port = parsed.port
+      ? parseInt(parsed.port, 10)
+      : useSSL
+      ? 443
+      : 80;
+
+    return new Minio.Client({
+      endPoint: parsed.hostname,
+      port,
+      useSSL,
+      accessKey: process.env.MINIO_ACCESS_KEY || 'minioadmin',
+      secretKey: process.env.MINIO_SECRET_KEY || 'minioadmin',
+    });
+  } catch (error) {
+    console.error('Invalid public MinIO endpoint provided:', error);
+    return null;
+  }
+}
+
+const publicMinioClient =
+  createPublicClient(process.env.MINIO_PUBLIC_URL) ||
+  createPublicClient(process.env.MINIO_EXTERNAL_ENDPOINT);
+
+const parsedMaxAge = parseInt(process.env.MINIO_SIGNED_URL_MAX_AGE || '604800', 10);
+const maxSignedUrlAge =
+  Number.isFinite(parsedMaxAge) && parsedMaxAge > 0 ? parsedMaxAge : 604800;
 
 const bucketName = process.env.MINIO_BUCKET_NAME || 'floowly';
 const documentsBucket = 'documents';
@@ -16,16 +48,16 @@ export const storageService = {
   async init() {
     try {
       // Create main bucket
-      const exists = await minioClient.bucketExists(bucketName);
+      const exists = await internalMinioClient.bucketExists(bucketName);
       if (!exists) {
-        await minioClient.makeBucket(bucketName, 'us-east-1');
+        await internalMinioClient.makeBucket(bucketName, 'us-east-1');
         console.log(`Bucket "${bucketName}" created.`);
       }
 
       // Create documents bucket (for file uploads)
-      const docsExists = await minioClient.bucketExists(documentsBucket);
+      const docsExists = await internalMinioClient.bucketExists(documentsBucket);
       if (!docsExists) {
-        await minioClient.makeBucket(documentsBucket, 'us-east-1');
+        await internalMinioClient.makeBucket(documentsBucket, 'us-east-1');
         console.log(`Bucket "${documentsBucket}" created.`);
       }
     } catch (error) {
@@ -54,7 +86,7 @@ export const storageService = {
         metadata['Content-Type'] = contentType;
       }
 
-      const result = await minioClient.putObject(
+      const result = await internalMinioClient.putObject(
         bucket,
         path,
         file,
@@ -80,7 +112,7 @@ export const storageService = {
    */
   async downloadFile(bucket: string, path: string): Promise<Readable> {
     try {
-      const stream = await minioClient.getObject(bucket, path);
+      const stream = await internalMinioClient.getObject(bucket, path);
       return stream;
     } catch (error) {
       console.error('Error downloading file from MinIO:', error);
@@ -92,16 +124,21 @@ export const storageService = {
    * Generate a presigned URL for file access
    * @param bucket Bucket name
    * @param path File path
-   * @param expiresIn Expiration time in seconds (default: 1 year)
+   * @param expiresIn Expiration time in seconds (clamped to configured max)
    * @returns Signed URL
    */
   async getSignedUrl(
     bucket: string,
     path: string,
-    expiresIn: number = 31536000 // 1 year default
+    expiresIn: number = maxSignedUrlAge
   ): Promise<string> {
     try {
-      const url = await minioClient.presignedGetObject(bucket, path, expiresIn);
+      const clampedExpiry = Math.min(
+        Math.max(1, Math.floor(expiresIn)),
+        maxSignedUrlAge
+      );
+      const clientForSigning = publicMinioClient ?? internalMinioClient;
+      const url = await clientForSigning.presignedGetObject(bucket, path, clampedExpiry);
       return url;
     } catch (error) {
       console.error('Error generating signed URL:', error);
@@ -116,7 +153,7 @@ export const storageService = {
    */
   async deleteFile(bucket: string, path: string): Promise<void> {
     try {
-      await minioClient.removeObject(bucket, path);
+      await internalMinioClient.removeObject(bucket, path);
     } catch (error) {
       console.error('Error deleting file from MinIO:', error);
       throw new Error(`Failed to delete file: ${(error as Error).message}`);
@@ -135,7 +172,7 @@ export const storageService = {
   ): Promise<Array<{ name: string; size: number; lastModified: Date }>> {
     try {
       const files: Array<{ name: string; size: number; lastModified: Date }> = [];
-      const stream = minioClient.listObjects(bucket, prefix, true);
+      const stream = internalMinioClient.listObjects(bucket, prefix, true);
 
       return new Promise((resolve, reject) => {
         stream.on('data', (obj) => {
@@ -165,7 +202,7 @@ export const storageService = {
    */
   async fileExists(bucket: string, path: string): Promise<boolean> {
     try {
-      await minioClient.statObject(bucket, path);
+      await internalMinioClient.statObject(bucket, path);
       return true;
     } catch (error) {
       return false;
@@ -185,7 +222,7 @@ export const storageService = {
     contentType?: string;
   }> {
     try {
-      const stat = await minioClient.statObject(bucket, path);
+      const stat = await internalMinioClient.statObject(bucket, path);
       return {
         size: stat.size,
         lastModified: stat.lastModified,
@@ -199,7 +236,7 @@ export const storageService = {
   },
 
   getClient() {
-    return minioClient;
+    return internalMinioClient;
   },
 
   getBucketName() {

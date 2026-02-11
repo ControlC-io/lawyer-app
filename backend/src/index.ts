@@ -1,5 +1,5 @@
 import { app } from './app';
-import { storageService } from './services/storage';
+import { storageService } from './services/storage.service';
 
 const port = process.env.PORT || 3001;
 

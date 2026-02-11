@@ -25,10 +25,15 @@ MINIO_USE_SSL=false
 MINIO_ACCESS_KEY=minioadmin
 MINIO_SECRET_KEY=minioadmin
 MINIO_BUCKET_NAME=floowly
+MINIO_PUBLIC_URL=http://localhost:9000
+MINIO_EXTERNAL_ENDPOINT=
+MINIO_SIGNED_URL_MAX_AGE=604800
 
 # Backend Authentication
 JWT_SECRET=your-jwt-secret-key-change-in-production
 INTERNAL_API_KEY=internal-trigger-key-change-in-production
+# Set to "true" to allow public signup (account creation without invitation); default off
+# ENABLE_PUBLIC_SIGNUP=false
 
 # Email (SendGrid)
 SENDGRID_API_KEY=your-sendgrid-api-key

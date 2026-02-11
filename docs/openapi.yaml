@@ -39,6 +39,8 @@ paths:
                 $ref: '#/components/schemas/AuthResponse'
         400:
           description: User already exists
+        403:
+          description: Public signup is disabled (ENABLE_PUBLIC_SIGNUP is not set to "true")
 
   /auth/login:
     post:
@@ -95,6 +97,24 @@ paths:
           description: Unauthorized or current password invalid
 
   # Public Endpoints
+  /public/config:
+    get:
+      summary: Get public config (no auth)
+      description: Returns client-side config such as whether public signup is enabled. Used by the Auth page.
+      tags: [Public]
+      responses:
+        200:
+          description: Public config
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [signupEnabled]
+                properties:
+                  signupEnabled:
+                    type: boolean
+                    description: Whether new users can create an account without an invitation
+
   /public/feedback:
     post:
       summary: Send feedback
@@ -292,16 +312,18 @@ paths:
                     type: string
         401:
           description: Missing company authorization
+        403:
+          description: This workflow does not allow API triggers (api_enabled is false)
         404:
           description: Workflow not found
 
   /workflows/executions/{executionId}:
     get:
       summary: Get execution data
-      description: Retrieve all data and steps for a specific execution.
+      description: Retrieve all data and steps for a specific execution. JWT required.
       tags: [Workflows]
       security:
-        - ApiKeyAuth: []
+        - BearerAuth: []
       parameters:
         - name: executionId
           in: path
@@ -686,6 +708,10 @@ paths:
       responses:
         200:
           description: File step processed
+        400:
+          description: Missing workflow_step_id or invalid config (e.g. source file not configured)
+        404:
+          description: Workflow step, execution, or execution step not found
 
   # User / Me Endpoints
   /me:
@@ -2216,6 +2242,7 @@ paths:
   /companies/{companyId}/workflows:
     get:
       summary: List workflows
+      description: List workflows the user has permission to execute (public, or user/group permission). Optional filter by category.
       tags: [Companies]
       security:
         - BearerAuth: []
@@ -2226,6 +2253,14 @@ paths:
           schema:
             type: string
             format: uuid
+        - name: categoryId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+            nullable: true
+          description: Filter by workflow category ID (empty string or "null" for uncategorized)
       responses:
         200:
           description: List of workflows
@@ -2249,6 +2284,53 @@ paths:
       responses:
         201:
           description: Workflow created
+  /companies/{companyId}/workflows/{workflowId}/start:
+    post:
+      summary: Start workflow execution from UI
+      description: Start a new execution for this workflow. Only is_active is checked (not api_enabled). JWT required.
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: workflowId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        200:
+          description: Execution started
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  execution_id:
+                    type: string
+                    format: uuid
+                  status:
+                    type: string
+                    example: started
+        400:
+          description: Missing company ID or workflow ID
+        401:
+          description: Unauthorized
+        403:
+          description: Workflow is not active
+        404:
+          description: Workflow not found or access denied
+        500:
+          description: Internal error
+
   /companies/{companyId}/workflows/{workflowId}:
     get:
       summary: Get workflow

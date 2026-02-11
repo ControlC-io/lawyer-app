@@ -1,8 +1,8 @@
 import { useState, useRef, useMemo } from "react";
 import { MessageSquare, Send } from "lucide-react";
 import { toast } from "sonner";
-import ReactQuill from "react-quill";
-import "react-quill/dist/quill.snow.css";
+import ReactQuill from "react-quill-new";
+import "react-quill-new/dist/quill.snow.css";
 import {
   Dialog,
   DialogContent,

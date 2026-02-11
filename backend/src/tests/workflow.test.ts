@@ -8,6 +8,8 @@ import { aiService } from '../services/ai.service';
 jest.mock('../lib/prisma', () => ({
   prisma: {
     company: { findUnique: jest.fn() },
+    user: { findUnique: jest.fn() },
+    userCompany: { findFirst: jest.fn() },
     workflow: { findFirst: jest.fn(), findUnique: jest.fn(), create: jest.fn() },
     workflowExecution: { create: jest.fn(), findUnique: jest.fn(), findFirst: jest.fn(), update: jest.fn(), updateMany: jest.fn() },
     workflowExecutionData: { create: jest.fn(), findFirst: jest.fn(), update: jest.fn() },
@@ -25,10 +27,13 @@ jest.mock('../services/workflow.service', () => ({
   workflowService: {
     getExecutionDataSnapshot: jest.fn(),
     advanceWorkflow: jest.fn(),
+    createExecutionAndStart: jest.fn().mockResolvedValue('exec-123'),
     triggerStepProcessing: jest.fn().mockResolvedValue(undefined),
     triggerFileProcessing: jest.fn().mockResolvedValue(undefined),
   }
 }));
+
+jest.mock('jsonwebtoken', () => ({ verify: jest.fn() }));
 
 // Mock AI Service
 jest.mock('../services/ai.service', () => ({
@@ -58,6 +63,7 @@ describe('Workflow Endpoints', () => {
 
   describe('POST /api/workflows/:workflowId/trigger', () => {
     it('should trigger workflow successfully', async () => {
+      (workflowService.createExecutionAndStart as jest.Mock).mockResolvedValue('exec-123');
       (prisma.company.findUnique as jest.Mock).mockResolvedValue(mockCompany);
       (prisma.workflow.findFirst as jest.Mock).mockResolvedValue({
         id: 'wf-123',
@@ -120,12 +126,9 @@ describe('Workflow Endpoints', () => {
         name: 'Test',
         api_enabled: true,
       });
-      (prisma.workflowStep.findMany as jest.Mock).mockResolvedValue([
-        { id: 'step-1', step_type: 'action' },
-      ]);
-      (prisma.workflowExecution.create as jest.Mock).mockResolvedValue({ id: 'exec-123' });
-      (prisma.workflowConnection.findMany as jest.Mock).mockResolvedValue([]);
-      (prisma.workflowExecutionData.create as jest.Mock).mockResolvedValue({});
+      (workflowService.createExecutionAndStart as jest.Mock).mockRejectedValueOnce(
+        new Error('No start step found in workflow')
+      );
       const response = await request(app)
         .post('/api/workflows/wf-123/trigger')
         .set(mockAuthHeaders)
@@ -135,54 +138,43 @@ describe('Workflow Endpoints', () => {
     });
 
     it('should trigger and call triggerStepProcessing when first step is automatic', async () => {
-      (workflowService.triggerStepProcessing as jest.Mock).mockResolvedValue(undefined);
       (prisma.workflow.findFirst as jest.Mock).mockResolvedValue({
         id: 'wf-123',
         name: 'Test',
         api_enabled: true,
       });
-      (prisma.workflowStep.findMany as jest.Mock).mockResolvedValue([
-        { id: 'step-start', step_type: 'start' },
-        { id: 'step-1', step_type: 'action', action_type: 'automatic', name: 'Auto' },
-      ]);
-      (prisma.workflowExecution.create as jest.Mock).mockResolvedValue({ id: 'exec-123' });
-      (prisma.workflowConnection.findMany as jest.Mock)
-        .mockResolvedValueOnce([{ source_step_id: 'step-start', target_step_id: 'step-1' }])
-        .mockResolvedValue([]);
-      (prisma.workflowExecutionData.create as jest.Mock).mockResolvedValue({});
-      (prisma.workflowExecutionStep.createMany as jest.Mock).mockResolvedValue({ count: 1 });
+      (workflowService.createExecutionAndStart as jest.Mock).mockResolvedValue('exec-123');
       const response = await request(app)
         .post('/api/workflows/wf-123/trigger')
         .set(mockAuthHeaders)
         .send({ data: {} });
       expect(response.status).toBe(200);
       expect(response.body.execution_id).toBe('exec-123');
-      expect(workflowService.triggerStepProcessing).toHaveBeenCalledWith('exec-123', 'step-1');
+      expect(workflowService.createExecutionAndStart).toHaveBeenCalledWith(
+        'company-123',
+        'wf-123',
+        { data: {}, createdBy: null }
+      );
     });
 
-    it('should trigger and call triggerFileProcessing when first step is file', async () => {
-      (workflowService.triggerFileProcessing as jest.Mock).mockResolvedValue(undefined);
+    it('should trigger workflow and delegate to service', async () => {
       (prisma.workflow.findFirst as jest.Mock).mockResolvedValue({
         id: 'wf-123',
         name: 'Test',
         api_enabled: true,
       });
-      (prisma.workflowStep.findMany as jest.Mock).mockResolvedValue([
-        { id: 'step-start', step_type: 'start' },
-        { id: 'step-file', step_type: 'file', name: 'File Step' },
-      ]);
-      (prisma.workflowExecution.create as jest.Mock).mockResolvedValue({ id: 'exec-123' });
-      (prisma.workflowConnection.findMany as jest.Mock)
-        .mockResolvedValueOnce([{ source_step_id: 'step-start', target_step_id: 'step-file' }])
-        .mockResolvedValue([]);
-      (prisma.workflowExecutionData.create as jest.Mock).mockResolvedValue({});
-      (prisma.workflowExecutionStep.createMany as jest.Mock).mockResolvedValue({ count: 1 });
+      (workflowService.createExecutionAndStart as jest.Mock).mockResolvedValue('exec-123');
       const response = await request(app)
         .post('/api/workflows/wf-123/trigger')
         .set(mockAuthHeaders)
-        .send({ data: {} });
+        .send({ data: { key: 'value' } });
       expect(response.status).toBe(200);
-      expect(workflowService.triggerFileProcessing).toHaveBeenCalledWith('exec-123', 'step-file', 'step-file');
+      expect(response.body.execution_id).toBe('exec-123');
+      expect(workflowService.createExecutionAndStart).toHaveBeenCalledWith(
+        'company-123',
+        'wf-123',
+        { data: { key: 'value' }, createdBy: null }
+      );
     });
 
     it('should return 200 when start step exists but has no connections', async () => {
@@ -191,22 +183,68 @@ describe('Workflow Endpoints', () => {
         name: 'Test',
         api_enabled: true,
       });
-      (prisma.workflowStep.findMany as jest.Mock).mockResolvedValue([
-        { id: 'step-start', step_type: 'start' },
-        { id: 'step-1', step_type: 'action' },
-      ]);
-      (prisma.workflowExecution.create as jest.Mock).mockResolvedValue({ id: 'exec-123' });
-      (prisma.workflowConnection.findMany as jest.Mock).mockResolvedValue([]);
-      (prisma.workflowExecutionData.create as jest.Mock).mockResolvedValue({});
-      (prisma.workflowExecutionStep.createMany as jest.Mock).mockResolvedValue({ count: 1 });
+      (workflowService.createExecutionAndStart as jest.Mock).mockResolvedValue('exec-123');
       const response = await request(app)
         .post('/api/workflows/wf-123/trigger')
         .set(mockAuthHeaders)
         .send({ data: {} });
       expect(response.status).toBe(200);
       expect(response.body.execution_id).toBe('exec-123');
-      expect(workflowService.triggerStepProcessing).not.toHaveBeenCalled();
-      expect(workflowService.triggerFileProcessing).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('POST /api/companies/:companyId/workflows/:workflowId/start', () => {
+    const jwt = require('jsonwebtoken');
+    const mockUser = { id: 'user-1', email: 'user@example.com' };
+
+    beforeEach(() => {
+      jwt.verify.mockReturnValue({ userId: 'user-1' });
+      (prisma.user.findUnique as jest.Mock).mockResolvedValue(mockUser);
+      (prisma.userCompany.findFirst as jest.Mock).mockResolvedValue({ id: 'uc-1', company_id: 'company-123', role: 'user' });
+      (prisma.workflow.findFirst as jest.Mock).mockResolvedValue({ id: 'wf-123', company_id: 'company-123', is_active: true });
+      (workflowService.createExecutionAndStart as jest.Mock).mockResolvedValue('exec-123');
+    });
+
+    it('should start workflow from UI and return execution id', async () => {
+      const response = await request(app)
+        .post('/api/companies/company-123/workflows/wf-123/start')
+        .set('Authorization', 'Bearer token')
+        .send({});
+      expect(response.status).toBe(200);
+      expect(response.body.success).toBe(true);
+      expect(response.body.execution_id).toBe('exec-123');
+      expect(workflowService.createExecutionAndStart).toHaveBeenCalledWith(
+        'company-123',
+        'wf-123',
+        { data: {}, createdBy: 'user-1' }
+      );
+    });
+
+    it('should return 401 when no auth', async () => {
+      const response = await request(app)
+        .post('/api/companies/company-123/workflows/wf-123/start')
+        .send({});
+      expect(response.status).toBe(401);
+    });
+
+    it('should return 404 when workflow not found', async () => {
+      (prisma.workflow.findFirst as jest.Mock).mockResolvedValue(null);
+      const response = await request(app)
+        .post('/api/companies/company-123/workflows/wf-123/start')
+        .set('Authorization', 'Bearer token')
+        .send({});
+      expect(response.status).toBe(404);
+      expect(response.body.error).toBe('Workflow not found or access denied');
+    });
+
+    it('should return 403 when workflow is inactive', async () => {
+      (prisma.workflow.findFirst as jest.Mock).mockResolvedValue({ id: 'wf-123', company_id: 'company-123', is_active: false });
+      const response = await request(app)
+        .post('/api/companies/company-123/workflows/wf-123/start')
+        .set('Authorization', 'Bearer token')
+        .send({});
+      expect(response.status).toBe(403);
+      expect(response.body.error).toBe('Workflow is not active');
     });
   });
 

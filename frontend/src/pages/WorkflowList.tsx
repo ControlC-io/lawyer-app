@@ -152,6 +152,13 @@ type StatusFormData = {
   color: string;
 };
 
+type PendingStatus = {
+  tempId: string;
+  name: string;
+  color: string;
+  order: number;
+};
+
 export default function WorkflowList() {
   const navigate = useNavigate();
   const companyId = useCompanyId();
@@ -223,6 +230,8 @@ export default function WorkflowList() {
   const [draggedStatusId, setDraggedStatusId] = useState<string | null>(null);
   const [dragOverStatusIndex, setDragOverStatusIndex] = useState<number | null>(null);
   const [defaultStatusId, setDefaultStatusId] = useState<string | null>(null);
+  const [pendingStatuses, setPendingStatuses] = useState<PendingStatus[]>([]);
+  const [editingPendingStatusId, setEditingPendingStatusId] = useState<string | null>(null);
 
   useEffect(() => {
     if (companyId) {
@@ -446,11 +455,10 @@ export default function WorkflowList() {
       return;
     }
     try {
-      const params = { categoryId: currentCategoryId ?? null };
-      const workflowsWithCounts = await api.get<any[]>(
-        `/api/companies/${companyId}/workflows`,
-        { params }
-      );
+      const search = new URLSearchParams();
+      search.set("categoryId", currentCategoryId === null ? "" : currentCategoryId);
+      const url = `/api/companies/${companyId}/workflows?${search.toString()}`;
+      const workflowsWithCounts = await api.get<any[]>(url);
       setWorkflows(workflowsWithCounts || []);
     } catch (error) {
       console.error("Error fetching workflows:", error);
@@ -509,8 +517,43 @@ export default function WorkflowList() {
         if (data?.id) {
           await createWorkflowDataStructure(data.id);
           await createWorkflowPermissions(data.id);
+          // Create any statuses that were added during creation
+          const pendingCount = pendingStatuses.length;
+          let firstStatusId: string | null = null;
+          for (let i = 0; i < pendingCount; i++) {
+            const status = await api.post<{ id: string }>(
+              `/api/companies/${companyId}/workflows/${data.id}/statuses`,
+              {
+                name: pendingStatuses[i].name,
+                color: pendingStatuses[i].color,
+                order: i,
+              }
+            );
+            if (i === 0 && status?.id) firstStatusId = status.id;
+          }
+          if (firstStatusId) {
+            await api.patch(`/api/companies/${companyId}/workflows/${data.id}`, {
+              default_status_id: firstStatusId,
+            });
+          }
+          setPendingStatuses([]);
           queryClient.invalidateQueries({ queryKey: ["workflows"] });
-          toast.success("Workflow created successfully");
+          toast.success(
+            pendingCount > 0
+              ? "Workflow and statuses created successfully"
+              : "Workflow created successfully"
+          );
+          setDialogOpen(false);
+          setEditingWorkflow(null);
+          setPermissionType("public");
+          setFormData({ name: "", description: "", is_public: true, api_enabled: false });
+          setDataStructureFields([]);
+          setSelectedUsers([]);
+          setSelectedGroups([]);
+          setSelectedCategoryId(null);
+          setSelectedIcon(null);
+          fetchWorkflows();
+          fetchAllWorkflows();
           navigate(`/workflow/${data.id}`);
           return;
         }
@@ -826,6 +869,8 @@ export default function WorkflowList() {
       setSelectedGroups([]);
       setSelectedCategoryId(categoryToUse); // Default to current category (captured at open time)
       setSelectedIcon(null);
+      setPendingStatuses([]);
+      setEditingPendingStatusId(null);
       setIsFieldDialogOpen(false);
       setEditingFieldId(null);
       setFieldFormData({
@@ -1235,6 +1280,7 @@ export default function WorkflowList() {
   // Workflow Status Handlers
   const handleAddStatus = () => {
     setEditingStatusId(null);
+    setEditingPendingStatusId(null);
     setStatusFormData({
       name: "",
       color: "#3b82f6",
@@ -1244,11 +1290,30 @@ export default function WorkflowList() {
 
   const handleEditStatus = (status: WorkflowStatus) => {
     setEditingStatusId(status.id);
+    setEditingPendingStatusId(null);
     setStatusFormData({
       name: status.name,
       color: status.color,
     });
     setIsStatusDialogOpen(true);
+  };
+
+  const handleEditPendingStatus = (pending: PendingStatus) => {
+    setEditingStatusId(null);
+    setEditingPendingStatusId(pending.tempId);
+    setStatusFormData({
+      name: pending.name,
+      color: pending.color,
+    });
+    setIsStatusDialogOpen(true);
+  };
+
+  const handleDeletePendingStatus = (tempId: string) => {
+    setPendingStatuses((prev) => {
+      const next = prev.filter((p) => p.tempId !== tempId);
+      return next.map((p, i) => ({ ...p, order: i }));
+    });
+    toast.success("Status removed");
   };
 
   const handleDeleteStatus = async (statusId: string) => {
@@ -1268,13 +1333,39 @@ export default function WorkflowList() {
   const handleSubmitStatus = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!editingWorkflow) {
-      toast.error("No workflow selected");
+    if (!statusFormData.name.trim()) {
+      toast.error("Status name is required");
       return;
     }
 
-    if (!statusFormData.name.trim()) {
-      toast.error("Status name is required");
+    // Creating new workflow: store statuses locally until workflow is saved
+    if (!editingWorkflow) {
+      if (editingPendingStatusId) {
+        setPendingStatuses((prev) =>
+          prev.map((p) =>
+            p.tempId === editingPendingStatusId
+              ? { ...p, name: statusFormData.name.trim(), color: statusFormData.color }
+              : p
+          )
+        );
+        toast.success("Status updated");
+      } else {
+        const newOrder = pendingStatuses.length;
+        setPendingStatuses((prev) => [
+          ...prev,
+          {
+            tempId: crypto.randomUUID(),
+            name: statusFormData.name.trim(),
+            color: statusFormData.color,
+            order: newOrder,
+          },
+        ]);
+        toast.success("Status added");
+      }
+      setIsStatusDialogOpen(false);
+      setEditingStatusId(null);
+      setEditingPendingStatusId(null);
+      setStatusFormData({ name: "", color: "#3b82f6" });
       return;
     }
 
@@ -1332,43 +1423,45 @@ export default function WorkflowList() {
 
     if (!draggedStatusId) return;
 
-    const draggedIndex = workflowStatuses.findIndex(s => s.id === draggedStatusId);
-    if (draggedIndex === -1 || draggedIndex === targetIndex) {
-      setDraggedStatusId(null);
-      setDragOverStatusIndex(null);
-      return;
-    }
-
-    // Reorder statuses
-    const reordered = [...workflowStatuses];
-    const [removed] = reordered.splice(draggedIndex, 1);
-    reordered.splice(targetIndex, 0, removed);
-
-    // Update order values
-    const updatedStatuses = reordered.map((status, index) => ({
-      ...status,
-      order: index,
-    }));
-
-    setWorkflowStatuses(updatedStatuses);
-
-    if (!companyId || !editingWorkflow) return;
-    try {
-      await Promise.all(
-        updatedStatuses.map((status) =>
-          api.patch(
-            `/api/companies/${companyId}/workflows/${editingWorkflow.id}/statuses/${status.id}`,
-            { order: status.order }
-          )
-        )
-      );
-    } catch (error) {
-      console.error("Error updating status order:", error);
-      toast.error("Failed to update status order");
-      // Revert on error
-      if (editingWorkflow) {
-        await fetchWorkflowStatuses(editingWorkflow.id);
+    if (editingWorkflow) {
+      const draggedIndex = workflowStatuses.findIndex((s) => s.id === draggedStatusId);
+      if (draggedIndex === -1 || draggedIndex === targetIndex) {
+        setDraggedStatusId(null);
+        setDragOverStatusIndex(null);
+        return;
       }
+      const reordered = [...workflowStatuses];
+      const [removed] = reordered.splice(draggedIndex, 1);
+      reordered.splice(targetIndex, 0, removed);
+      const updatedStatuses = reordered.map((status, index) => ({ ...status, order: index }));
+      setWorkflowStatuses(updatedStatuses);
+      if (companyId) {
+        try {
+          await Promise.all(
+            updatedStatuses.map((status) =>
+              api.patch(
+                `/api/companies/${companyId}/workflows/${editingWorkflow.id}/statuses/${status.id}`,
+                { order: status.order }
+              )
+            )
+          );
+        } catch (error) {
+          console.error("Error updating status order:", error);
+          toast.error("Failed to update status order");
+          await fetchWorkflowStatuses(editingWorkflow.id);
+        }
+      }
+    } else {
+      const draggedIndex = pendingStatuses.findIndex((p) => p.tempId === draggedStatusId);
+      if (draggedIndex === -1 || draggedIndex === targetIndex) {
+        setDraggedStatusId(null);
+        setDragOverStatusIndex(null);
+        return;
+      }
+      const reordered = [...pendingStatuses];
+      const [removed] = reordered.splice(draggedIndex, 1);
+      reordered.splice(targetIndex, 0, removed);
+      setPendingStatuses(reordered.map((p, i) => ({ ...p, order: i })));
     }
 
     setDraggedStatusId(null);
@@ -2577,7 +2670,7 @@ export default function WorkflowList() {
                     </Button>
                   </div>
 
-                  {workflowStatuses.length === 0 ? (
+                  {(editingWorkflow ? workflowStatuses.length === 0 : pendingStatuses.length === 0) ? (
                     <div className="text-center py-12 border-2 border-dashed rounded-lg bg-muted/30">
                       <div className="flex flex-col items-center gap-3">
                         <div className="w-12 h-12 rounded-full bg-muted flex items-center justify-center">
@@ -2585,7 +2678,9 @@ export default function WorkflowList() {
                         </div>
                         <div>
                           <p className="font-medium text-sm">No statuses yet</p>
-                          <p className="text-sm text-muted-foreground">Add your first status to get started</p>
+                          <p className="text-sm text-muted-foreground">
+                            {editingWorkflow ? "Add status options for this workflow" : "Add statuses now; they will be created when you save the workflow"}
+                          </p>
                         </div>
                         <Button
                           type="button"
@@ -2599,7 +2694,7 @@ export default function WorkflowList() {
                         </Button>
                       </div>
                     </div>
-                  ) : (
+                  ) : editingWorkflow ? (
                     <div className="space-y-2">
                       {workflowStatuses.map((status, index) => (
                         <div
@@ -2668,14 +2763,70 @@ export default function WorkflowList() {
                         </div>
                       ))}
                     </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {pendingStatuses.map((pending, index) => (
+                        <div
+                          key={pending.tempId}
+                          draggable
+                          onDragStart={(e) => handleStatusDragStart(e, pending.tempId)}
+                          onDragOver={(e) => handleStatusDragOver(e, index)}
+                          onDragLeave={handleStatusDragLeave}
+                          onDrop={(e) => handleStatusDrop(e, index)}
+                          onDragEnd={handleStatusDragEnd}
+                          className={`group relative flex items-center gap-3 p-4 rounded-lg border bg-card hover:bg-accent/50 transition-colors cursor-move ${dragOverStatusIndex === index && draggedStatusId !== pending.tempId
+                            ? "border-primary border-2"
+                            : ""
+                            } ${draggedStatusId === pending.tempId ? "opacity-50" : ""}`}
+                        >
+                          <GripVertical className="h-5 w-5 text-muted-foreground flex-shrink-0" />
+                          <div
+                            className="w-4 h-4 rounded-full flex-shrink-0 border-2 border-background shadow-sm"
+                            style={{ backgroundColor: pending.color }}
+                          />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <h4 className="font-semibold text-sm">{pending.name}</h4>
+                              {index === 0 && (
+                                <Badge variant="secondary" className="text-xs flex items-center gap-1">
+                                  <Star className="h-3 w-3 fill-yellow-500 text-yellow-500" />
+                                  Default
+                                </Badge>
+                              )}
+                            </div>
+                            <p className="text-xs text-muted-foreground">Order: {index + 1}</p>
+                          </div>
+                          <div className="flex items-center gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8"
+                              onClick={() => handleEditPendingStatus(pending)}
+                            >
+                              <Edit className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-destructive hover:text-destructive"
+                              onClick={() => handleDeletePendingStatus(pending.tempId)}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   )}
 
                   <Dialog open={isStatusDialogOpen} onOpenChange={setIsStatusDialogOpen}>
                     <DialogContent className="max-w-md">
                       <DialogHeader>
-                        <DialogTitle>{editingStatusId ? "Edit" : "Add"} Status</DialogTitle>
+                        <DialogTitle>{editingStatusId || editingPendingStatusId ? "Edit" : "Add"} Status</DialogTitle>
                         <DialogDescription>
-                          {editingStatusId ? "Update" : "Add"} a status option for this workflow
+                          {editingStatusId || editingPendingStatusId ? "Update" : "Add"} a status option for this workflow
                         </DialogDescription>
                       </DialogHeader>
                       <form onSubmit={handleSubmitStatus} className="space-y-4">

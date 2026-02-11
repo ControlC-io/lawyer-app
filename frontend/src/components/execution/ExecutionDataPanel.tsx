@@ -491,13 +491,47 @@ export const ExecutionDataPanel = ({
       }
     });
 
+    // Build array child field id -> name map so we send items with names (API contract)
+    const allFieldsForSave = getAllFields();
+    const arrayChildIdToName: Record<string, Record<string, string>> = {};
+    allFieldsForSave
+      .filter((f: any) => (f.field_type || f.type) === "array" && !f.parent_item_id)
+      .forEach((arrayField: any) => {
+        const parentId = arrayField.id;
+        arrayChildIdToName[parentId] = {};
+        allFieldsForSave
+          .filter((cf: any) => cf.parent_item_id === parentId)
+          .forEach((cf: any) => {
+            if (cf?.id) {
+              arrayChildIdToName[parentId][cf.id] = String(cf.name || cf.label || cf.id);
+            }
+          });
+      });
+
     // Build data keyed by field name for PUT /api/workflows/executions/:executionId/data
     const dataByFieldName: Record<string, any> = {};
     Object.values(updatesByExecutionData).forEach((fieldUpdates) => {
       Object.entries(fieldUpdates).forEach(([fieldId, newValue]) => {
         const info = findFieldDefinition(fieldId);
         if (info?.def?.name) {
-          dataByFieldName[info.def.name] = newValue;
+          const fieldType = info.def.field_type || info.def.type;
+          if (fieldType === "array" && Array.isArray(newValue)) {
+            const childMap = arrayChildIdToName[fieldId] || {};
+            dataByFieldName[info.def.name] = newValue.map((item: any) => {
+              if (!item || typeof item !== "object") return item;
+              const out: Record<string, any> = {};
+              for (const [k, v] of Object.entries(item)) {
+                if (k === "_id") {
+                  out._id = v;
+                  continue;
+                }
+                out[childMap[k] ?? k] = v;
+              }
+              return out;
+            });
+          } else {
+            dataByFieldName[info.def.name] = newValue;
+          }
         }
       });
     });
@@ -1908,21 +1942,27 @@ export const ExecutionDataPanel = ({
                             const saved = await handleFormSubmit(runningStep);
                             if (saved) {
                               const comment = form.decisionComments[`decision-${runningStep.id}`] || "";
-                              navigation.makeDecisionMutation.mutate({
-                                stepId: runningStep.id,
-                                choice: outputName,
-                                comment: comment.trim() || undefined
-                              });
-                              form.setDecisionComments(prev => {
-                                const u = {
-                                  ...prev
-                                };
-                                delete u[`decision-${runningStep.id}`];
-                                return u;
-                              });
+                              if (isDecisionStep) {
+                                navigation.makeDecisionMutation.mutate({
+                                  stepId: runningStep.id,
+                                  choice: outputName,
+                                  comment: comment.trim() || undefined
+                                });
+                                form.setDecisionComments(prev => {
+                                  const u = {
+                                    ...prev
+                                  };
+                                  delete u[`decision-${runningStep.id}`];
+                                  return u;
+                                });
+                              } else {
+                                navigation.completeStepMutation.mutate({
+                                  stepExecutionId: runningStep.id
+                                });
+                              }
                             }
-                          }} className={cn(isAgentSuggestedChoice && "relative ring-4 ring-amber-400 ring-offset-2 ring-offset-background shadow-lg after:content-['Agent'] after:absolute after:-top-2 after:-right-2 after:rounded after:bg-amber-500 after:text-white after:text-[10px] after:px-1.5 after:py-0.5 after:leading-none after:shadow-md")} disabled={!canCompleteStep || navigation.makeDecisionMutation.isPending || form.updateValueMutation.isPending || aiSubmitBlocked}>
-                            {navigation.makeDecisionMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                          }} className={cn(isAgentSuggestedChoice && "relative ring-4 ring-amber-400 ring-offset-2 ring-offset-background shadow-lg after:content-['Agent'] after:absolute after:-top-2 after:-right-2 after:rounded after:bg-amber-500 after:text-white after:text-[10px] after:px-1.5 after:py-0.5 after:leading-none after:shadow-md")} disabled={!canCompleteStep || navigation.makeDecisionMutation.isPending || navigation.completeStepMutation.isPending || form.updateValueMutation.isPending || aiSubmitBlocked}>
+                            {navigation.makeDecisionMutation.isPending || navigation.completeStepMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                             {buttonLabel}
                             <ArrowRight className="ml-2 h-4 w-4" />
                           </Button>;

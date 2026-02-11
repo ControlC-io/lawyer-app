@@ -46,6 +46,9 @@ Thumbs.db
 # Temporary and scratch files
 temp/
 tmp/
+
+# Generated seed data (large; regenerate with scripts/extract-seed-data.js)
+database/seed-data.sql
 *.tmp
 *.temp
 

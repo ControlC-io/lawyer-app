@@ -71,40 +71,44 @@ function calculateSmartPath(
   steps: WorkflowStep[],
   laneOffsetIndex: number = 0
 ): { path: string; endAngle: number; labelPos: { x: number; y: number } } {
-  const dx = end.x - start.x;
+  // Ensure all input coordinates are valid numbers
+  const safeStart = { x: ensureNumber(start.x), y: ensureNumber(start.y) };
+  const safeEnd = { x: ensureNumber(end.x), y: ensureNumber(end.y) };
+  
+  const dx = safeEnd.x - safeStart.x;
 
   // Use Bezier for forward connections (standard flow)
   if (dx >= -20) {
     const curvature = Math.min(Math.max(Math.abs(dx) * 0.5, 60), 300);
-    const cp1 = { x: start.x + curvature, y: start.y };
-    const cp2 = { x: end.x - curvature, y: end.y };
-    const path = `M ${start.x} ${start.y} C ${cp1.x} ${cp1.y}, ${cp2.x} ${cp2.y}, ${end.x} ${end.y}`;
-    const angle = (Math.atan2(end.y - cp2.y, end.x - cp2.x) * 180) / Math.PI;
+    const cp1 = { x: safeStart.x + curvature, y: safeStart.y };
+    const cp2 = { x: safeEnd.x - curvature, y: safeEnd.y };
+    const path = `M ${safeStart.x} ${safeStart.y} C ${cp1.x} ${cp1.y}, ${cp2.x} ${cp2.y}, ${safeEnd.x} ${safeEnd.y}`;
+    const angle = (Math.atan2(safeEnd.y - cp2.y, safeEnd.x - cp2.x) * 180) / Math.PI;
 
     // Calculate midpoint for label (t=0.5)
     const t = 0.5;
-    const labelX = Math.pow(1 - t, 3) * start.x + 3 * Math.pow(1 - t, 2) * t * cp1.x + 3 * (1 - t) * Math.pow(t, 2) * cp2.x + Math.pow(t, 3) * end.x;
-    const labelY = Math.pow(1 - t, 3) * start.y + 3 * Math.pow(1 - t, 2) * t * cp1.y + 3 * (1 - t) * Math.pow(t, 2) * cp2.y + Math.pow(t, 3) * end.y;
+    const labelX = Math.pow(1 - t, 3) * safeStart.x + 3 * Math.pow(1 - t, 2) * t * cp1.x + 3 * (1 - t) * Math.pow(t, 2) * cp2.x + Math.pow(t, 3) * safeEnd.x;
+    const labelY = Math.pow(1 - t, 3) * safeStart.y + 3 * Math.pow(1 - t, 2) * t * cp1.y + 3 * (1 - t) * Math.pow(t, 2) * cp2.y + Math.pow(t, 3) * safeEnd.y;
 
     return { path, endAngle: angle, labelPos: { x: labelX, y: labelY } };
   }
 
   // For backward connections, use orthogonal routing that avoids nodes
 
-  const xMin = end.x;
-  const xMax = start.x;
+  const xMin = safeEnd.x;
+  const xMax = safeStart.x;
 
   // Find obstacles in the horizontal range
   const obstacles = steps.filter(s => {
-    const sX = s.position_x; // Center X
+    const sX = ensureNumber(s.position_x); // Center X
     return sX > xMin - 64 && sX < xMax + 64;
   });
 
   // Calculate a safe Y level
-  let maxY = Math.max(start.y, end.y);
+  let maxY = Math.max(safeStart.y, safeEnd.y);
 
   obstacles.forEach(s => {
-    const bottomY = s.position_y + 80; // 64 (half height) + 16 margin
+    const bottomY = ensureNumber(s.position_y) + 80; // 64 (half height) + 16 margin
     if (bottomY > maxY) {
       maxY = bottomY;
     }
@@ -118,12 +122,12 @@ function calculateSmartPath(
   const horizontalOffset = 40 + ((laneOffsetIndex % 5) * 10);
 
   const points = [
-    start,
-    { x: start.x + horizontalOffset, y: start.y },
-    { x: start.x + horizontalOffset, y: laneY },
-    { x: end.x - horizontalOffset, y: laneY },
-    { x: end.x - horizontalOffset, y: end.y },
-    end
+    safeStart,
+    { x: safeStart.x + horizontalOffset, y: safeStart.y },
+    { x: safeStart.x + horizontalOffset, y: laneY },
+    { x: safeEnd.x - horizontalOffset, y: laneY },
+    { x: safeEnd.x - horizontalOffset, y: safeEnd.y },
+    safeEnd
   ];
 
   // Calculate label position
@@ -136,17 +140,23 @@ function calculateSmartPath(
   return { path, endAngle: 0, labelPos: { x: labelX, y: labelY } };
 }
 
+// Helper to ensure a value is a valid number
+const ensureNumber = (value: any, fallback: number = 0): number => {
+  const num = typeof value === 'number' ? value : parseFloat(String(value));
+  return isNaN(num) || !isFinite(num) ? fallback : num;
+};
+
 // Helper functions for position calculation (moved outside component to be used in pre-calc)
 const getStepCenter = (step: WorkflowStep, draggingStep: string | null, draggingPos: { x: number, y: number } | null, livePositions: Map<string, { x: number, y: number }>) => {
   // Use live position if dragging, otherwise use stored position
   if (draggingStep === step.id && draggingPos) {
-    return draggingPos;
+    return { x: ensureNumber(draggingPos.x), y: ensureNumber(draggingPos.y) };
   }
   const livePos = livePositions.get(step.id);
   if (livePos) {
-    return livePos;
+    return { x: ensureNumber(livePos.x), y: ensureNumber(livePos.y) };
   }
-  return { x: step.position_x, y: step.position_y };
+  return { x: ensureNumber(step.position_x), y: ensureNumber(step.position_y) };
 };
 
 const getStepHalfWidth = (stepType: string) => {
@@ -631,8 +641,11 @@ export function Canvas({
       if (!sourceStep || !targetStep) return;
 
       // We need to use the raw position for layout stability, not dragging position
-      const start = getOutputPosition(sourceStep, conn.output_name, { x: sourceStep.position_x, y: sourceStep.position_y });
-      const end = getInputPosition(targetStep, { x: targetStep.position_x, y: targetStep.position_y });
+      // Ensure positions are valid numbers
+      const sourceCenter = { x: ensureNumber(sourceStep.position_x), y: ensureNumber(sourceStep.position_y) };
+      const targetCenter = { x: ensureNumber(targetStep.position_x), y: ensureNumber(targetStep.position_y) };
+      const start = getOutputPosition(sourceStep, conn.output_name, sourceCenter);
+      const end = getInputPosition(targetStep, targetCenter);
 
       if (end.x - start.x < -20) {
         indices.set(conn.id, backwardCounter++);

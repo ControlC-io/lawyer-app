@@ -30,7 +30,8 @@ const ExecutionDetail = () => {
     execution,
     executionSteps,
     executionData,
-    executionLogs
+    executionLogs,
+    connections,
   } = useExecutionData(id, companyId, apiKey);
 
   const [selectedStepForLogs, setSelectedStepForLogs] = useState<string | null>(null);
@@ -40,39 +41,65 @@ const ExecutionDetail = () => {
   const [isTimelineCollapsed, setIsTimelineCollapsed] = useState(false);
   const [isCanvasDialogOpen, setIsCanvasDialogOpen] = useState(false);
 
-  // Set default selected step to first running step
-  // Only select if execution is not completed and no step is currently selected
-  // Also update selection if current selection is no longer valid (step doesn't exist)
-  // If there are running steps, always prefer them over completed steps
+  // When set, user has explicitly chosen this step – effect must never override with running step until they click "Return to active"
+  const userChosenStepIdRef = useRef<string | null>(null);
+
+  // Set default selected step to first running step only when none selected and user hasn't picked one
+  // Only fix selection if it's invalid (selected step no longer exists)
   useEffect(() => {
     if (executionSteps && executionSteps.length > 0 && execution?.status !== "completed") {
       const currentStep = executionSteps.find((s: any) => s.id === viewingHistoricalStep);
       const firstRunningStep = executionSteps.find((s: any) => s.status === "running");
 
-      if (!viewingHistoricalStep) {
-        // No step selected - select first running step
-        if (firstRunningStep) {
-          setViewingHistoricalStep(firstRunningStep.id);
+      // User explicitly chose a step – keep it; never override with running step while this ref is set
+      if (userChosenStepIdRef.current != null) {
+        const chosenExists = executionSteps.some((s: any) => s.id === userChosenStepIdRef.current);
+        if (chosenExists) {
+          setViewingHistoricalStep(userChosenStepIdRef.current);
+          return;
         }
-      } else if (!currentStep && firstRunningStep) {
-        // Current selection is invalid (step doesn't exist) - select first running step
+        if (!viewingHistoricalStep) return; // user just clicked, state not applied yet
+        userChosenStepIdRef.current = null;
+      }
+
+      if (!viewingHistoricalStep && firstRunningStep) {
         setViewingHistoricalStep(firstRunningStep.id);
-      } else if (currentStep && currentStep.status !== "running" && firstRunningStep) {
-        // Current selection is a completed step, but there are running steps - switch to first running step
-        // This ensures we always show running steps when they exist
+      } else if (viewingHistoricalStep && !currentStep && firstRunningStep) {
         setViewingHistoricalStep(firstRunningStep.id);
       }
-      // If currentStep is a running step, keep it
-    } else if (execution?.status === "completed" && viewingHistoricalStep) {
-      // Clear selection when execution is completed
-      setViewingHistoricalStep(null);
+    } else if (execution?.status === "completed") {
+      if (userChosenStepIdRef.current != null && executionSteps?.some((s: any) => s.id === userChosenStepIdRef.current)) {
+        setViewingHistoricalStep(userChosenStepIdRef.current);
+      } else if (viewingHistoricalStep && userChosenStepIdRef.current == null) {
+        setViewingHistoricalStep(null);
+      }
     }
-  }, [executionSteps, execution?.status]);
+  }, [executionSteps, execution?.status, viewingHistoricalStep]);
 
   // Refs for panel imperative API
   const timelinePanelRef = useRef<ResizablePrimitive.ImperativePanelHandle>(null);
   const middlePanelRef = useRef<ResizablePrimitive.ImperativePanelHandle>(null);
   const fileViewerPanelRef = useRef<ResizablePrimitive.ImperativePanelHandle>(null);
+
+  // Panel size helpers (defined early so useEffect can use them before any early return)
+  const getTimelinePanelSize = () => {
+    if (isTimelineCollapsed) return 3;
+    if (isFileViewerOpen) return 20;
+    return 25;
+  };
+  const getMiddlePanelSize = () => {
+    if (isTimelineCollapsed && isFileViewerOpen) return 47;
+    if (isTimelineCollapsed && !isFileViewerOpen) return 97;
+    if (isFileViewerOpen && !isTimelineCollapsed) return 50;
+    return 75;
+  };
+  const getFileViewerSize = () => {
+    if (isFileViewerOpen) {
+      if (isTimelineCollapsed) return 50;
+      return 30;
+    }
+    return 0;
+  };
 
   const handleFileView = async (fileUrl: string, fileName: string, filePath: string) => {
     setViewedFile({ url: fileUrl, name: fileName, path: filePath });
@@ -263,30 +290,6 @@ const ExecutionDetail = () => {
   // Filter to only show completed and running steps (exclude pending steps)
   const visibleSteps = executionSteps.filter((step: any) => step.status !== "pending");
 
-  // Calculate panel sizes based on state and screen size
-  const getTimelinePanelSize = () => {
-    if (isTimelineCollapsed) return 3;
-    if (isFileViewerOpen) return 20;
-    return 25;
-  };
-
-  const getMiddlePanelSize = () => {
-    if (isTimelineCollapsed && isFileViewerOpen) return 47;
-    if (isTimelineCollapsed && !isFileViewerOpen) return 97;
-    if (isFileViewerOpen && !isTimelineCollapsed) return 50;
-    return 75;
-  };
-
-  const getFileViewerSize = () => {
-    if (isFileViewerOpen) {
-      if (isTimelineCollapsed) {
-        return 50;
-      }
-      return 30;
-    }
-    return 0;
-  };
-
   // Determine the current step's workflow_step.id to highlight
   const getCurrentStepWorkflowStepId = (): string | null => {
     if (!executionSteps) return null;
@@ -357,7 +360,10 @@ const ExecutionDetail = () => {
             visibleSteps={visibleSteps}
             logs={executionLogs}
             viewingHistoricalStep={viewingHistoricalStep}
-            onStepClick={setViewingHistoricalStep}
+            onStepClick={(stepId) => {
+              userChosenStepIdRef.current = stepId;
+              setViewingHistoricalStep(stepId);
+            }}
             onLogsClick={setSelectedStepForLogs}
             isCollapsed={isTimelineCollapsed}
             onToggleCollapse={toggleTimeline}
@@ -415,7 +421,10 @@ const ExecutionDetail = () => {
                         <HistoricalStepView
                           step={step}
                           executionData={executionData}
-                          onReturnToActive={() => setViewingHistoricalStep(null)}
+                          onReturnToActive={() => {
+                            userChosenStepIdRef.current = null;
+                            setViewingHistoricalStep(null);
+                          }}
                           onFileView={handleFileView}
                           isExecutionCompleted={execution?.status === "completed"}
                         />

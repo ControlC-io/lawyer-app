@@ -2,7 +2,8 @@ import { Router } from 'express';
 import { workflowDefinitionController } from '../controllers/workflowDefinition.controller';
 import { asyncHandler } from '../middleware/validation';
 
-const router = Router();
+// mergeParams: true so that when mounted at /:companyId/workflows, req.params.companyId is available
+const router = Router({ mergeParams: true });
 
 /** GET /api/companies/:companyId/workflows - list workflows */
 router.get('/', asyncHandler(workflowDefinitionController.listWorkflows));
@@ -22,6 +23,8 @@ router.delete('/:workflowId/permissions/:permissionId', asyncHandler(workflowDef
 
 /** GET /api/companies/:companyId/workflows/:workflowId - get one workflow */
 router.get('/:workflowId', asyncHandler(workflowDefinitionController.getWorkflow));
+/** POST /api/companies/:companyId/workflows/:workflowId/start - start execution from UI (JWT; only is_active checked) */
+router.post('/:workflowId/start', asyncHandler(workflowDefinitionController.startWorkflow));
 /** PATCH /api/companies/:companyId/workflows/:workflowId */
 router.patch('/:workflowId', asyncHandler(workflowDefinitionController.updateWorkflow));
 /** DELETE /api/companies/:companyId/workflows/:workflowId */

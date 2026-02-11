@@ -36,13 +36,20 @@ export function WorkflowCanvasDialog({
   useEffect(() => {
     const stepsList = workflowData?.steps ?? [];
     setSteps(
-      stepsList.map((step: Record<string, unknown>) => {
+      (stepsList as Record<string, unknown>[]).map((step: Record<string, unknown>) => {
         const stepConfig =
           typeof step.config === "object" && step.config !== null
             ? (step.config as Record<string, unknown>)
             : {};
+        const posX = Number(step.position_x);
+        const posY = Number(step.position_y);
         return {
           ...step,
+          id: String(step.id ?? ""),
+          name: String(step.name ?? ""),
+          step_type: (step.step_type as WorkflowStep["step_type"]) ?? "action",
+          position_x: Number.isFinite(posX) ? posX : 0,
+          position_y: Number.isFinite(posY) ? posY : 0,
           action_type: (step.action_type as string) || "manual",
           decision_node_type: (step.decision_node_type as string) || "Human",
           config: {
@@ -60,10 +67,10 @@ export function WorkflowCanvasDialog({
   useEffect(() => {
     const connList = workflowData?.connections ?? [];
     setConnections(
-      connList.map((conn: Record<string, unknown>) => ({
-        id: conn.id,
-        source_step_id: conn.source_step_id,
-        target_step_id: conn.target_step_id,
+      (connList as Record<string, unknown>[]).map((conn: Record<string, unknown>) => ({
+        id: String(conn.id ?? ""),
+        source_step_id: String(conn.source_step_id ?? ""),
+        target_step_id: String(conn.target_step_id ?? ""),
         output_name: (conn.output_name as string) || "default",
         config: (conn.config as Record<string, unknown>) || {
           color: "hsl(var(--primary))",
@@ -90,12 +97,13 @@ export function WorkflowCanvasDialog({
                 steps={steps}
                 connections={connections}
                 selectedStep={null}
-                onSelectStep={() => {}} // No-op in read-only mode
-                onUpdateStep={() => {}} // No-op in read-only mode
-                onDeleteStep={() => {}} // No-op in read-only mode
-                onAddConnection={() => {}} // No-op in read-only mode
-                onUpdateConnection={() => {}} // No-op in read-only mode
-                onDeleteConnection={() => {}} // No-op in read-only mode
+                onSelectStep={() => {}}
+                onUpdateStep={() => {}}
+                onDeleteStep={() => {}}
+                onDuplicateStep={() => {}}
+                onAddConnection={() => {}}
+                onUpdateConnection={() => {}}
+                onDeleteConnection={() => {}}
                 readOnly={true}
                 highlightedStepId={highlightedStepId}
               />

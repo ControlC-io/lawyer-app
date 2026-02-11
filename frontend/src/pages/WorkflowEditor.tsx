@@ -382,8 +382,13 @@ export default function WorkflowEditor() {
       const stepsData = workflowData?.steps || [];
       const loadedSteps = stepsData.map((step: any) => {
         const stepConfig = typeof step.config === "object" && step.config !== null ? step.config : {};
+        // Convert position values to numbers - Prisma Decimal types may come as strings or objects
+        const posX = typeof step.position_x === 'object' ? Number(step.position_x) : parseFloat(step.position_x);
+        const posY = typeof step.position_y === 'object' ? Number(step.position_y) : parseFloat(step.position_y);
         return {
           ...step,
+          position_x: isNaN(posX) ? 0 : posX,
+          position_y: isNaN(posY) ? 0 : posY,
           action_type: step.action_type || "manual",
           decision_node_type: step.decision_node_type || "Human",
           config: {
@@ -408,19 +413,27 @@ export default function WorkflowEditor() {
         // Restore steps (merge saved positions/configs with loaded data to preserve IDs)
         const restoredSteps = savedEditorState.steps.map((savedStep: WorkflowStep) => {
           const loadedStep = loadedSteps.find(ls => ls.id === savedStep.id);
+          // Ensure positions are valid numbers from sessionStorage
+          const savedPosX = parseFloat(String(savedStep.position_x));
+          const savedPosY = parseFloat(String(savedStep.position_y));
           if (loadedStep) {
             // Merge: use saved positions and configs, but keep loaded IDs and other DB fields
             return {
               ...loadedStep,
-              position_x: savedStep.position_x,
-              position_y: savedStep.position_y,
+              position_x: isNaN(savedPosX) ? loadedStep.position_x : savedPosX,
+              position_y: isNaN(savedPosY) ? loadedStep.position_y : savedPosY,
               name: savedStep.name,
               config: savedStep.config,
               action_type: savedStep.action_type,
               decision_node_type: savedStep.decision_node_type,
             };
           }
-          return savedStep; // New step that wasn't saved yet
+          // New step that wasn't saved yet - ensure valid positions
+          return {
+            ...savedStep,
+            position_x: isNaN(savedPosX) ? 0 : savedPosX,
+            position_y: isNaN(savedPosY) ? 0 : savedPosY,
+          };
         });
         // Add any new steps from DB that weren't in saved state
         loadedSteps.forEach(loadedStep => {

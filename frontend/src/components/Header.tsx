@@ -68,8 +68,8 @@ export function Header() {
 
   // Mapping of URL segments to translation keys and correct navigation paths
   const segmentMap: Record<string, { labelKey: string; path?: string }> = {
-    app: { labelKey: "sidebar.executions", path: "/executions" },
-    executions: { labelKey: "sidebar.executions", path: "/executions" },
+    app: { labelKey: "sidebar.executions", path: "/" },
+    executions: { labelKey: "sidebar.executions", path: "/" },
     workflows: { labelKey: "sidebar.workflows", path: "/workflows" },
     workflow: { labelKey: "sidebar.workflows", path: "/workflows" },
     data: { labelKey: "sidebar.data", path: "/data" },
@@ -86,7 +86,7 @@ export function Header() {
     <header className="sticky top-0 z-20 flex h-14 items-center gap-4 border-b bg-background px-4 lg:px-6">
       <SidebarTrigger className="-ml-1" />
       <div className="flex-1 flex items-center gap-2 text-sm text-muted-foreground">
-        <Link to="/app" className="hover:text-foreground transition-colors">
+        <Link to="/" className="hover:text-foreground transition-colors">
           <Home className="h-4 w-4" />
         </Link>
         {pathnames.map((name, index) => {

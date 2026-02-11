@@ -5,6 +5,12 @@ import { asyncHandler } from '../middleware/validation';
 const router = Router();
 
 /**
+ * GET /api/public/config
+ * Public config (signupEnabled, etc.) - no auth required
+ */
+router.get('/config', asyncHandler(publicController.getConfig));
+
+/**
  * POST /api/public/feedback
  * Send feedback (no auth required)
  */

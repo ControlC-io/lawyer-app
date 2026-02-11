@@ -67,7 +67,7 @@ export const useExecutionForm = (
       const res = await api.post<{ signedUrl?: string }>("/api/files/signed-url", {
         bucket: DOCUMENTS_BUCKET,
         path: sanitizedPath,
-        expiresIn: 31536000,
+        expiresIn: 604800, // 7 days (matches MinIO/S3 maximum)
       });
       return res?.signedUrl ?? null;
     } catch (error) {
@@ -136,9 +136,13 @@ export const useExecutionForm = (
 
         for (const field of fields) {
           const fieldType = field.field_type || field.type;
-          if (fieldType === "file") {
-            const fileValue = values[field.id]?.value;
-            if (fileValue) {
+          if (fieldType === "file" || fieldType === "signature") {
+            const rawValue = values[field.id];
+            const fileValue =
+              rawValue && typeof rawValue === "object" && "value" in rawValue
+                ? (rawValue as { value?: string }).value
+                : rawValue;
+            if (fileValue && typeof fileValue === "string") {
               const cacheKey = `${eds.id}-${field.id}`;
 
               // Generate signed URL (will be cached by state)

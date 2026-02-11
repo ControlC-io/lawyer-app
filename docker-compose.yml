@@ -17,6 +17,7 @@ services:
       - MINIO_BUCKET_NAME=floowly
       - JWT_SECRET=your-jwt-secret-key-change-in-production
       - INTERNAL_API_KEY=internal-trigger-key-change-in-production
+      - ENABLE_PUBLIC_SIGNUP=${ENABLE_PUBLIC_SIGNUP:-}
       - SENDGRID_API_KEY=${SENDGRID_API_KEY:-}
       - FROM_EMAIL=noreply@floowly.app
       - APP_URL=http://localhost

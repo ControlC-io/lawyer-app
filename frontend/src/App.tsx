@@ -26,7 +26,6 @@ import ApiConfigurations from "./pages/ApiConfigurations";
 import AgentConfigurations from "./pages/AgentConfigurations";
 import NoOrganization from "./pages/NoOrganization";
 import { ExternalForm } from "./pages/ExternalForm";
-import LandingPage from "./pages/LandingPage";
 import Data from "./pages/Data";
 import GlobalVariables from "./pages/GlobalVariables";
 
@@ -42,7 +41,6 @@ const App = () => (
           <LanguageProvider>
             <AuthProvider>
           <Routes>
-            <Route path="/" element={<LandingPage />} />
             <Route path="/auth" element={<Auth />} />
             <Route path="/no-organization" element={<NoOrganization />} />
             <Route path="/accept-invitation" element={<AcceptInvitation />} />
@@ -58,6 +56,7 @@ const App = () => (
                         <Header />
                         <main className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
                           <Routes>
+                            <Route index element={<WorkflowExecutions />} />
                             <Route path="/app" element={<WorkflowExecutions />} />
                             <Route path="/executions" element={<WorkflowExecutions />} />
                             <Route path="/executions/:id" element={<ExecutionDetail />} />
