@@ -44,9 +44,10 @@ jobs:
             VERSION="sha-${GITHUB_SHA::7}"
           fi
           OWNER="${{ github.repository_owner }}"
+          OWNER_LOWER=$(echo "$OWNER" | tr '[:upper:]' '[:lower:]')
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "owner=${OWNER}" >> "$GITHUB_OUTPUT"
-          echo "Version: ${VERSION}, Owner: ${OWNER}"
+          echo "owner=${OWNER_LOWER}" >> "$GITHUB_OUTPUT"
+          echo "Version: ${VERSION}, Owner: ${OWNER_LOWER}"
 
       - name: Build and push backend image
         uses: docker/build-push-action@v6
