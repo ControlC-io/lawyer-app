@@ -127,11 +127,21 @@ For production with HTTPS (Let's Encrypt) on a single domain (e.g. `automate.flo
    docker compose -f docker-compose.yml -f docker-compose.prod.yml exec nginx nginx -s reload
    ```
 
-4. **Renewal (e.g. cron weekly)**:
+4. **Renewal (cron weekly)**:
+
+   Use the provided script (run from the droplet, or via cron):
 
    ```bash
-   docker compose -f docker-compose.yml -f docker-compose.prod.yml run --rm certbot renew && docker compose -f docker-compose.yml -f docker-compose.prod.yml exec nginx nginx -s reload
+   ./scripts/renew-cert.sh
    ```
+
+   To run it weekly (Sundays at midnight), add to crontab (`crontab -e`). Replace `/path/to/Floowly` with the actual project path on the droplet (e.g. `/root/Floowly`):
+
+   ```cron
+   0 0 * * 0 /path/to/Floowly/scripts/renew-cert.sh >> /var/log/floowly-cert-renew.log 2>&1
+   ```
+
+   Create the log file (optional) so cron can append: `sudo touch /var/log/floowly-cert-renew.log`
 
 5. **Files used**: `docker-compose.prod.yml` (production overrides, SSL volumes, certbot), `infrastructure/nginx/nginx.prod.conf` (HTTP→HTTPS redirect, ACME challenge, HTTPS proxy). Domain is set to `automate.floowly.app` in both; for another domain, edit those files and set `DOMAIN=your.domain` when running the script.
 

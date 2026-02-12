@@ -13,6 +13,17 @@ services:
     command: npm run preview -w frontend -- --port 3000 --host 0.0.0.0
     volumes: []
 
+  # Localhost-only: use SSH tunnel for GUI (e.g. psql, TablePlus). ssh -L 5432:127.0.0.1:5432 user@droplet
+  db:
+    ports:
+      - "127.0.0.1:5432:5432"
+
+  # Localhost-only: use SSH tunnel for MinIO Console. ssh -L 9001:127.0.0.1:9001 user@droplet → http://localhost:9001
+  minio:
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+
   nginx:
     ports:
       - "80:80"
