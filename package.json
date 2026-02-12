@@ -20,7 +20,9 @@
     "build": "npm run build --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "test:coverage": "npm run test:coverage --workspaces --if-present",
-    "db:seed": "sh scripts/seed-from-dump.sh"
+    "db:seed": "sh scripts/seed-from-dump.sh",
+    "prod:first-startup": "sh scripts/first-startup-prod.sh",
+    "prod:start": "docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d"
   },
   "overrides": {
     "esbuild": "0.25.12"

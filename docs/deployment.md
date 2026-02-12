@@ -101,6 +101,40 @@ Expected response:
 - Console: http://localhost:9001
 - API: http://localhost:9000
 
+### Production with HTTPS (Droplet / DigitalOcean)
+
+For production with HTTPS (Let's Encrypt) on a single domain (e.g. `automate.floowly.app`):
+
+1. **First-time startup** (creates dummy cert, starts stack, optionally obtains real cert):
+
+   ```bash
+   # From project root. Ensure .env exists (copy from .env.sample and edit).
+   ./scripts/first-startup-prod.sh
+   ```
+
+   To obtain a real certificate in the same run, set your email:
+
+   ```bash
+   CERTBOT_EMAIL=your@email.com ./scripts/first-startup-prod.sh
+   ```
+
+2. **What the script does**: Runs `docker compose -f docker-compose.yml -f docker-compose.prod.yml` with the `init` profile to create a dummy SSL cert so nginx can start, then brings up all services. If `CERTBOT_EMAIL` is set, it runs Certbot to get a Let's Encrypt certificate and reloads nginx.
+
+3. **Manual certificate (if you didn't use CERTBOT_EMAIL)**:
+
+   ```bash
+   docker compose -f docker-compose.yml -f docker-compose.prod.yml run --rm certbot certonly --webroot -w /var/www/certbot -d automate.floowly.app --email your@email.com --agree-tos --no-eff-email
+   docker compose -f docker-compose.yml -f docker-compose.prod.yml exec nginx nginx -s reload
+   ```
+
+4. **Renewal (e.g. cron weekly)**:
+
+   ```bash
+   docker compose -f docker-compose.yml -f docker-compose.prod.yml run --rm certbot renew && docker compose -f docker-compose.yml -f docker-compose.prod.yml exec nginx nginx -s reload
+   ```
+
+5. **Files used**: `docker-compose.prod.yml` (production overrides, SSL volumes, certbot), `infrastructure/nginx/nginx.prod.conf` (HTTP→HTTPS redirect, ACME challenge, HTTPS proxy). Domain is set to `automate.floowly.app` in both; for another domain, edit those files and set `DOMAIN=your.domain` when running the script.
+
 ### Production Deployment
 
 #### Security Checklist

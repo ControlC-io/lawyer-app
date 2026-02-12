@@ -1,0 +1,57 @@
+# Production override: HTTPS (Let's Encrypt), nginx prod config, production commands.
+# Usage: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+# First run: use scripts/first-startup-prod.sh to create dummy cert and start, then obtain real cert.
+
+services:
+  backend:
+    command: npm run start -w backend
+    environment:
+      - NODE_ENV=production
+
+  # Serve built frontend (no dev server, no host mounts)
+  frontend:
+    command: npm run preview -w frontend -- --port 3000 --host 0.0.0.0
+    volumes: []
+
+  nginx:
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./infrastructure/nginx/nginx.prod.conf:/etc/nginx/nginx.conf:ro
+      - letsencrypt:/etc/letsencrypt:ro
+      - certbot_webroot:/var/www/certbot:ro
+
+  # One-off: obtain or renew certificates. Not started with up -d.
+  # Obtain: docker compose -f docker-compose.yml -f docker-compose.prod.yml run --rm certbot certonly --webroot -w /var/www/certbot -d automate.floowly.app --email your@email.com --agree-tos --no-eff-email
+  # Renew:  docker compose -f docker-compose.yml -f docker-compose.prod.yml run --rm certbot renew
+  certbot:
+    image: certbot/certbot
+    volumes:
+      - letsencrypt:/etc/letsencrypt
+      - certbot_webroot:/var/www/certbot
+    # Default command for one-off runs; override when running certonly/renew
+
+  # One-time setup: creates dummy SSL cert so nginx can start before real cert exists.
+  # Run: docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile init run --rm init-cert
+  init-cert:
+    image: alpine:3.19
+    volumes:
+      - letsencrypt:/etc/letsencrypt
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        apk add --no-cache openssl
+        mkdir -p /etc/letsencrypt/live/automate.floowly.app
+        openssl req -x509 -nodes -newkey rsa:2048 \
+          -keyout /etc/letsencrypt/live/automate.floowly.app/privkey.pem \
+          -out /etc/letsencrypt/live/automate.floowly.app/fullchain.pem \
+          -subj "/CN=automate.floowly.app" -days 1
+        echo "Dummy certificate created."
+    profiles:
+      - init
+
+volumes:
+  letsencrypt:
+  certbot_webroot:
