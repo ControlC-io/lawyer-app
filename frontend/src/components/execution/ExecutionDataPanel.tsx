@@ -1094,15 +1094,16 @@ export const ExecutionDataPanel = ({
           // ArrayField props
           fieldConfig={fieldConfig}
           childFields={getAllFields()}
-          renderChild={(childField, childValue, onChildChange, hideLabel, required) => {
+          renderChild={(childField, childValue, onChildChange, hideLabel, required, readonly) => {
             // Use required from configuration if provided, otherwise fallback to field's own required property
             const isRequired = required !== undefined ? required : (childField.required || false);
+            const isDisabled = disabled || !!readonly;
             return (
               <FieldRenderer
                 field={childField}
                 value={childValue}
                 onChange={onChildChange}
-                disabled={disabled}
+                disabled={isDisabled}
                 required={isRequired}
                 labelPosition={hideLabel ? "hidden" : "top"}
                 dynamicOptions={form.dynamicOptions[childField.id]}
@@ -1364,14 +1365,15 @@ export const ExecutionDataPanel = ({
                 }} onViewFile={onFileView} isUploading={form.uploadingFiles[fieldUuid]} signedUrl={form.signedUrls[`${execRow.id}-${fieldUuid}`]} signedUrls={form.multipleFilesSignedUrls[`${execRow.id}-${fieldUuid}`]}
                 // ArrayField props
                 fieldConfig={fieldConfig}
-                childFields={getAllFields()} renderChild={(childField, childValue, onChildChange, hideLabel, required) => {
+                childFields={getAllFields()} renderChild={(childField, childValue, onChildChange, hideLabel, required, readonly) => {
                   // Logic for child fields in array
                   // We don't have separate editingValues for array children in the hook structure shown
                   // The ArrayField component manages the array structure and calls onChange with the new array
                   // So we just need to render the field input
                   // Use required from configuration if provided, otherwise fallback to field's own required property
                   const isRequired = required !== undefined ? required : (childField.required || false);
-                  return <FieldRenderer field={childField} value={childValue} onChange={onChildChange} disabled={disabled}
+                  const isDisabled = disabled || !!readonly;
+                  return <FieldRenderer field={childField} value={childValue} onChange={onChildChange} disabled={isDisabled}
                     required={isRequired}
                     labelPosition={hideLabel ? "hidden" : "top"}
                     // Recursively pass props
@@ -2115,7 +2117,7 @@ export const ExecutionDataPanel = ({
                   onUpload={file => form.handleFileUpload(field.id, file)} onViewFile={onFileView} isUploading={form.uploadingFiles[field.id]} signedUrl={form.signedUrls[`${eds.id}-${field.id}`]} signedUrls={form.multipleFilesSignedUrls[`${eds.id}-${field.id}`]}
                   // ArrayField props
                   fieldConfig={fieldConfig}
-                  childFields={getAllFields()} renderChild={(cf, cv, onChildChange, hideLabel, required) => <FieldRenderer field={cf} value={cv} onChange={onChildChange || (() => { })} disabled={true}
+                  childFields={getAllFields()} renderChild={(cf, cv, onChildChange, hideLabel, required, _readonly) => <FieldRenderer field={cf} value={cv} onChange={onChildChange || (() => { })} disabled={true}
                     required={required}
                     labelPosition={hideLabel ? "hidden" : "top"}
                     // Recursively pass dynamic options props

@@ -36,7 +36,10 @@ interface FieldRendererProps {
   // Field configuration from form settings
   fieldConfig?: {
     compact_mode?: boolean;
-    array_child_fields?: Record<string, { shown: boolean; required: boolean }>;
+    array_child_fields?: Record<string, { shown: boolean; required: boolean; readonly?: boolean }>;
+    array_enable_duplicate?: boolean;
+    array_enable_add_item?: boolean;
+    array_enable_delete?: boolean;
   };
 }
 
@@ -136,6 +139,9 @@ export const FieldRenderer = (props: FieldRendererProps) => {
         renderChild={otherProps.renderChild}
         compactMode={otherProps.fieldConfig?.compact_mode}
         arrayChildFieldsConfig={otherProps.fieldConfig?.array_child_fields}
+        enableDuplicate={otherProps.fieldConfig?.array_enable_duplicate !== false}
+        enableAddItem={otherProps.fieldConfig?.array_enable_add_item !== false}
+        enableDelete={otherProps.fieldConfig?.array_enable_delete !== false}
       />;
 
     case "html":

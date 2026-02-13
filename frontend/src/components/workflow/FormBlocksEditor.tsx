@@ -39,7 +39,10 @@ interface FieldConfig {
   allowed_file_types?: string[];
   allow_ai_extraction?: boolean;
   compact_mode?: boolean; // For array fields: display in table format with labels only in header
-  array_child_fields?: Record<string, { shown: boolean; required: boolean }>; // For array fields: configuration for child fields
+  array_child_fields?: Record<string, { shown: boolean; required: boolean; readonly?: boolean }>; // For array fields: configuration for child fields
+  array_enable_duplicate?: boolean; // For array fields: show duplicate row button (default true)
+  array_enable_add_item?: boolean; // For array fields: show add item button (default true)
+  array_enable_delete?: boolean; // For array fields: show delete row button (default true)
 }
 
 interface FormBlocksEditorProps {
@@ -121,6 +124,9 @@ export function FormBlocksEditor({ step, dataStructureItems, onUpdate, fullDataS
       allowed_file_types: [],
       allow_ai_extraction: false,
       compact_mode: false,
+      array_enable_duplicate: true,
+      array_enable_add_item: true,
+      array_enable_delete: true,
     };
   };
 
@@ -908,6 +914,37 @@ function FieldSettingsDialog({
                 </label>
               </div>
 
+              {/* Array row actions: duplicate, add item, delete */}
+              <div className="space-y-2 pt-2">
+                <Label className="text-sm font-medium">Row actions</Label>
+                <p className="text-xs text-muted-foreground">
+                  Enable or disable duplication, add item, and row deletion in the form
+                </p>
+                <div className="flex flex-wrap gap-4">
+                  <label className="flex items-center gap-2 text-sm cursor-pointer">
+                    <Checkbox
+                      checked={fieldConfig.array_enable_duplicate !== false}
+                      onCheckedChange={(checked) => onUpdate({ array_enable_duplicate: !!checked })}
+                    />
+                    <span>Enable row duplication</span>
+                  </label>
+                  <label className="flex items-center gap-2 text-sm cursor-pointer">
+                    <Checkbox
+                      checked={fieldConfig.array_enable_add_item !== false}
+                      onCheckedChange={(checked) => onUpdate({ array_enable_add_item: !!checked })}
+                    />
+                    <span>Enable add item</span>
+                  </label>
+                  <label className="flex items-center gap-2 text-sm cursor-pointer">
+                    <Checkbox
+                      checked={fieldConfig.array_enable_delete !== false}
+                      onCheckedChange={(checked) => onUpdate({ array_enable_delete: !!checked })}
+                    />
+                    <span>Enable row deletion</span>
+                  </label>
+                </div>
+              </div>
+
               {/* Array Child Fields Configuration */}
               {fullDataStructure && (() => {
                 const childFields = fullDataStructure.filter((f: any) => f.parent_item_id === fieldId);
@@ -925,11 +962,11 @@ function FieldSettingsDialog({
                   <div className="space-y-3">
                     <Label className="text-sm font-medium">Child Fields Configuration</Label>
                     <p className="text-xs text-muted-foreground">
-                      Select which child fields should be shown and marked as required in array items
+                      Select which child fields to show, require, or make read-only in array items
                     </p>
                     <div className="space-y-2 border rounded-md p-3 bg-muted/20">
                       {childFields.map((childField: any) => {
-                        const childConfig = arrayChildFields[childField.id] || { shown: true, required: false };
+                        const childConfig = arrayChildFields[childField.id] || { shown: true, required: false, readonly: false };
                         return (
                           <div key={childField.id} className="flex items-center justify-between gap-4 p-2 bg-background rounded border">
                             <div className="flex-1 min-w-0">
@@ -972,6 +1009,23 @@ function FieldSettingsDialog({
                                   }}
                                 />
                                 <span className="text-xs">Required</span>
+                              </label>
+                              <label className="flex items-center gap-2 text-sm cursor-pointer">
+                                <Checkbox
+                                  checked={!!childConfig.readonly}
+                                  disabled={!childConfig.shown}
+                                  onCheckedChange={(checked) => {
+                                    const updated = {
+                                      ...arrayChildFields,
+                                      [childField.id]: {
+                                        ...childConfig,
+                                        readonly: !!checked,
+                                      },
+                                    };
+                                    onUpdate({ array_child_fields: updated });
+                                  }}
+                                />
+                                <span className="text-xs">Read only</span>
                               </label>
                             </div>
                           </div>
@@ -1165,6 +1219,9 @@ function FormPreviewDialog({ blocks, dataStructureItems, formFields, fullDataStr
       allowed_file_types: [],
       allow_ai_extraction: false,
       compact_mode: false,
+      array_enable_duplicate: true,
+      array_enable_add_item: true,
+      array_enable_delete: true,
     };
   };
 
@@ -1233,15 +1290,16 @@ function FormPreviewDialog({ blocks, dataStructureItems, formFields, fullDataStr
         isUploading={false}
         // For array fields
         childFields={fullDataStructure || []}
-        renderChild={(childField, childValue, onChildChange, hideLabel, required) => {
+        renderChild={(childField, childValue, onChildChange, hideLabel, required, readonly) => {
           // Use required from configuration if provided, otherwise fallback to field's own required property
           const isRequired = required !== undefined ? required : (childField.required || false);
+          const isDisabled = disabled || !!readonly;
           return (
             <FieldRenderer
               field={childField}
               value={childValue}
               onChange={onChildChange}
-              disabled={disabled}
+              disabled={isDisabled}
               required={isRequired}
               labelPosition={hideLabel ? "hidden" : "top"}
             />

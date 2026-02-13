@@ -12,9 +12,12 @@ interface ArrayFieldProps {
   disabled?: boolean;
   labelPosition?: "top" | "side";
   childFields: any[];
-  renderChild?: (field: any, value: any, onChange: (val: any) => void, hideLabel?: boolean, required?: boolean) => React.ReactNode;
+  renderChild?: (field: any, value: any, onChange: (val: any) => void, hideLabel?: boolean, required?: boolean, readonly?: boolean) => React.ReactNode;
   compactMode?: boolean; // From form field config
-  arrayChildFieldsConfig?: Record<string, { shown: boolean; required: boolean }>; // Configuration for which child fields to show and require
+  arrayChildFieldsConfig?: Record<string, { shown: boolean; required: boolean; readonly?: boolean }>; // Configuration for which child fields to show, require, or make read-only
+  enableDuplicate?: boolean; // Show duplicate row button (default true)
+  enableAddItem?: boolean; // Show add item button (default true)
+  enableDelete?: boolean; // Show delete row button (default true)
 }
 
 export const ArrayField = ({
@@ -26,8 +29,12 @@ export const ArrayField = ({
   childFields,
   renderChild,
   compactMode = false,
-  arrayChildFieldsConfig
+  arrayChildFieldsConfig,
+  enableDuplicate = true,
+  enableAddItem = true,
+  enableDelete = true,
 }: ArrayFieldProps) => {
+  const showRowActions = !disabled && (enableDuplicate || enableDelete);
   const [expandedItems, setExpandedItems] = useState<Record<number, boolean>>({});
 
   const getMyChildFields = () => {
@@ -64,6 +71,15 @@ export const ArrayField = ({
     // Fallback to field's own required property if no config
     const childField = childFields.find(f => f.id === childFieldId);
     return childField?.required || false;
+  };
+
+  // Helper to get read-only status for a child field (column)
+  const getChildFieldReadonly = (childFieldId: string): boolean => {
+    if (arrayChildFieldsConfig) {
+      const config = arrayChildFieldsConfig[childFieldId];
+      return config ? !!config.readonly : false;
+    }
+    return false;
   };
 
   const handleAddItem = () => {
@@ -122,7 +138,7 @@ export const ArrayField = ({
     <div className="space-y-2">
       <div className="flex items-center justify-between">
         <Label className="text-sm font-medium">{field.label || field.name || field.id}</Label>
-        {!disabled && (
+        {!disabled && enableAddItem && (
           <Button
             type="button"
             variant="outline"
@@ -159,7 +175,7 @@ export const ArrayField = ({
                           </TableHead>
                         );
                       })}
-                      {!disabled && <TableHead className="w-[100px] px-2 py-1.5"></TableHead>}
+                      {showRowActions && <TableHead className="w-[100px] px-2 py-1.5"></TableHead>}
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -167,6 +183,7 @@ export const ArrayField = ({
                       <TableRow key={`${item._id ?? item.id ?? index}-${index}`}>
                         {myChildFields.map((cf) => {
                           const isRequired = getChildFieldRequired(cf.id);
+                          const isReadonly = getChildFieldReadonly(cf.id);
                           return (
                             <TableCell key={cf.id} className="align-top px-2 py-1.5">
                               {renderChild && renderChild(
@@ -174,34 +191,39 @@ export const ArrayField = ({
                                 item[cf.id], 
                                 (val) => handleUpdateItem(index, cf.id, val),
                                 isCompactMode, // Hide labels in compact mode (they're in the table header)
-                                isRequired
+                                isRequired,
+                                isReadonly
                               )}
                             </TableCell>
                           );
                         })}
-                        {!disabled && (
+                        {showRowActions && (
                           <TableCell className="px-2 py-1.5">
                             <div className="flex items-center justify-center gap-1">
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8 text-muted-foreground hover:text-foreground"
-                                onClick={() => handleDuplicateItem(index)}
-                                title="Duplicate row"
-                              >
-                                <Copy className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8 text-destructive hover:text-destructive"
-                                onClick={() => handleRemoveItem(index)}
-                                title="Delete row"
-                              >
-                                <X className="h-4 w-4" />
-                              </Button>
+                              {enableDuplicate && (
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                                  onClick={() => handleDuplicateItem(index)}
+                                  title="Duplicate row"
+                                >
+                                  <Copy className="h-4 w-4" />
+                                </Button>
+                              )}
+                              {enableDelete && (
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8 text-destructive hover:text-destructive"
+                                  onClick={() => handleRemoveItem(index)}
+                                  title="Delete row"
+                                >
+                                  <X className="h-4 w-4" />
+                                </Button>
+                              )}
                             </div>
                           </TableCell>
                         )}
@@ -217,34 +239,39 @@ export const ArrayField = ({
                 <div key={`${item._id ?? item.id ?? index}-${index}`} className="border rounded-md p-3 bg-card">
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-sm font-medium text-muted-foreground">Item {index + 1}</span>
-                    {!disabled && (
+                    {(enableDuplicate || enableDelete) && !disabled && (
                       <div className="flex items-center gap-1">
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 text-muted-foreground hover:text-foreground"
-                          onClick={() => handleDuplicateItem(index)}
-                          title="Duplicate item"
-                        >
-                          <Copy className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 text-destructive hover:text-destructive"
-                          onClick={() => handleRemoveItem(index)}
-                          title="Delete item"
-                        >
-                          <X className="h-4 w-4" />
-                        </Button>
+                        {enableDuplicate && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                            onClick={() => handleDuplicateItem(index)}
+                            title="Duplicate item"
+                          >
+                            <Copy className="h-4 w-4" />
+                          </Button>
+                        )}
+                        {enableDelete && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-destructive hover:text-destructive"
+                            onClick={() => handleRemoveItem(index)}
+                            title="Delete item"
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        )}
                       </div>
                     )}
                   </div>
                   <div className="space-y-4">
                     {myChildFields.map((cf) => {
                       const isRequired = getChildFieldRequired(cf.id);
+                      const isReadonly = getChildFieldReadonly(cf.id);
                       return (
                         <div key={cf.id}>
                           {renderChild && renderChild(
@@ -252,7 +279,8 @@ export const ArrayField = ({
                             item[cf.id], 
                             (val) => handleUpdateItem(index, cf.id, val),
                             false, // Don't hide labels in non-compact mode
-                            isRequired
+                            isRequired,
+                            isReadonly
                           )}
                         </div>
                       );
