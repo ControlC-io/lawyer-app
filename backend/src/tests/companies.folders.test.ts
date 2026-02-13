@@ -18,15 +18,24 @@ jest.mock('../lib/prisma', () => ({
       deleteMany: jest.fn(),
     },
     profileGroupMember: { findMany: jest.fn() },
-    file: { findMany: jest.fn() },
+    file: { findMany: jest.fn(), findFirst: jest.fn(), delete: jest.fn() },
     filesMetadataValue: { findMany: jest.fn() },
   },
 }));
 
 jest.mock('jsonwebtoken', () => ({ verify: jest.fn() }));
 
+const mockDeleteFile = jest.fn().mockResolvedValue(undefined);
+jest.mock('../services/storage.service', () => ({
+  storageService: {
+    getDocumentsBucket: () => 'documents',
+    deleteFile: (...args: unknown[]) => mockDeleteFile(...args),
+  },
+}));
+
 jest.mock('../lib/folderAccess', () => ({
   canUserAccessFolder: jest.fn(),
+  getUserFolderPermissionLevel: jest.fn(),
   getUserGroupIdsInCompany: jest.fn(),
 }));
 
@@ -50,6 +59,7 @@ describe('Companies folders and folder permissions', () => {
     });
     (folderAccess.getUserGroupIdsInCompany as jest.Mock).mockResolvedValue([]);
     (folderAccess.canUserAccessFolder as jest.Mock).mockResolvedValue(true);
+    (folderAccess.getUserFolderPermissionLevel as jest.Mock).mockResolvedValue('write');
   });
 
   describe('GET /api/companies/:companyId/folders', () => {
@@ -306,6 +316,54 @@ describe('Companies folders and folder permissions', () => {
         .get(`/api/companies/${companyId}/files/by-metadata`)
         .set(authHeader);
       expect(res.status).toBe(400);
+    });
+  });
+
+  describe('POST /api/companies/:companyId/folders/:folderId/upload', () => {
+    it('returns 403 when user has only read permission', async () => {
+      (folderAccess.getUserFolderPermissionLevel as jest.Mock).mockResolvedValue('read');
+      (prisma.folder.findFirst as jest.Mock).mockResolvedValue({
+        id: folderId,
+        company_id: companyId,
+      });
+      const res = await request(app)
+        .post(`/api/companies/${companyId}/folders/${folderId}/upload`)
+        .set(authHeader)
+        .attach('file', Buffer.from('test'), 'test.txt');
+      expect(res.status).toBe(403);
+      expect(res.body.error).toMatch(/[Ww]rite permission/);
+    });
+  });
+
+  describe('DELETE /api/companies/:companyId/files/:fileId', () => {
+    it('returns 403 when user has only read permission', async () => {
+      (folderAccess.getUserFolderPermissionLevel as jest.Mock).mockResolvedValue('read');
+      (prisma.file.findFirst as jest.Mock).mockResolvedValue({
+        id: 'file-1',
+        folder_id: folderId,
+        company_id: companyId,
+        storage_path: 'companies/c1/f1/x',
+      });
+      const res = await request(app)
+        .delete(`/api/companies/${companyId}/files/file-1`)
+        .set(authHeader);
+      expect(res.status).toBe(403);
+      expect(res.body.error).toMatch(/[Ww]rite permission/);
+    });
+
+    it('returns 204 when user has write permission', async () => {
+      (folderAccess.getUserFolderPermissionLevel as jest.Mock).mockResolvedValue('write');
+      (prisma.file.findFirst as jest.Mock).mockResolvedValue({
+        id: 'file-1',
+        folder_id: folderId,
+        company_id: companyId,
+        storage_path: 'companies/c1/f1/x',
+      });
+      (prisma.file.delete as jest.Mock).mockResolvedValue({});
+      const res = await request(app)
+        .delete(`/api/companies/${companyId}/files/file-1`)
+        .set(authHeader);
+      expect(res.status).toBe(204);
     });
   });
 });

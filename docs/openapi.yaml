@@ -1661,7 +1661,7 @@ paths:
         201:
           description: Document uploaded
         403:
-          description: User does not have access to this folder
+          description: User does not have access to this folder, or write permission required to upload
 
   /companies/{companyId}/folders/{folderId}/permissions:
     get:
@@ -1685,7 +1685,7 @@ paths:
             format: uuid
       responses:
         200:
-          description: List of folder permissions (user or group, permission_type read/write/admin)
+          description: List of folder permissions (user or group). permission_type read = view/download only; write = upload/delete.
           content:
             application/json:
               schema:
@@ -1697,7 +1697,7 @@ paths:
                     folder_id: { type: string, format: uuid }
                     user_id: { type: string, format: uuid, nullable: true }
                     group_id: { type: string, format: uuid, nullable: true }
-                    permission_type: { type: string, enum: [read, write, admin] }
+                    permission_type: { type: string, enum: [read, write] }
                     user: { type: object, nullable: true }
                     group: { type: object, nullable: true }
         400:
@@ -1708,7 +1708,7 @@ paths:
           description: Folder not found
     post:
       summary: Add folder permission
-      description: Add a user or group permission on a root folder. Requires company admin. Provide exactly one of user_id or group_id.
+      description: Add a user or group permission on a root folder. Requires company admin. Provide exactly one of user_id or group_id. read = list/open folder, view and download files only; write = read + upload and delete files.
       tags: [Companies]
       security:
         - BearerAuth: []
@@ -1742,7 +1742,7 @@ paths:
                   description: Group to grant access (use exactly one of user_id or group_id)
                 permission_type:
                   type: string
-                  enum: [read, write, admin]
+                  enum: [read, write]
                   default: read
       responses:
         201:
@@ -1914,7 +1914,7 @@ paths:
   /companies/{companyId}/files/{fileId}:
     delete:
       summary: Delete company file
-      description: Deletes the file. Returns 403 if the user does not have access to the file's folder.
+      description: Deletes the file. Returns 403 if the user does not have access to the file's folder or does not have write permission on that folder.
       tags: [Companies]
       security:
         - BearerAuth: []

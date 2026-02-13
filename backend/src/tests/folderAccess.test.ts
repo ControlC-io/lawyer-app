@@ -2,6 +2,7 @@ import {
   getRootFolderId,
   getUserGroupIdsInCompany,
   canUserAccessFolder,
+  getUserFolderPermissionLevel,
 } from '../lib/folderAccess';
 import { prisma } from '../lib/prisma';
 
@@ -111,7 +112,7 @@ describe('folderAccess', () => {
         parent_folder_id: null,
       });
       (prisma.folderPermission.findMany as jest.Mock).mockResolvedValue([
-        { user_id: 'user-1', group_id: null },
+        { user_id: 'user-1', group_id: null, permission_type: 'read' },
       ]);
       const result = await canUserAccessFolder(
         'user-1',
@@ -129,7 +130,7 @@ describe('folderAccess', () => {
         parent_folder_id: null,
       });
       (prisma.folderPermission.findMany as jest.Mock).mockResolvedValue([
-        { user_id: null, group_id: 'group-1' },
+        { user_id: null, group_id: 'group-1', permission_type: 'read' },
       ]);
       const result = await canUserAccessFolder(
         'user-1',
@@ -147,7 +148,7 @@ describe('folderAccess', () => {
         parent_folder_id: null,
       });
       (prisma.folderPermission.findMany as jest.Mock).mockResolvedValue([
-        { user_id: 'other-user', group_id: 'other-group' },
+        { user_id: 'other-user', group_id: 'other-group', permission_type: 'read' },
       ]);
       const result = await canUserAccessFolder(
         'user-1',
@@ -157,6 +158,123 @@ describe('folderAccess', () => {
         []
       );
       expect(result).toBe(false);
+    });
+  });
+
+  describe('getUserFolderPermissionLevel', () => {
+    it('returns write when user is company admin', async () => {
+      (prisma.folder.findUnique as jest.Mock).mockResolvedValue({
+        id: 'folder-1',
+        parent_folder_id: null,
+      });
+      const result = await getUserFolderPermissionLevel(
+        'user-1',
+        'company-1',
+        'folder-1',
+        true,
+        []
+      );
+      expect(result).toBe('write');
+    });
+
+    it('returns null when root folder cannot be resolved', async () => {
+      (prisma.folder.findUnique as jest.Mock).mockResolvedValue(null);
+      const result = await getUserFolderPermissionLevel(
+        'user-1',
+        'company-1',
+        'missing',
+        false,
+        []
+      );
+      expect(result).toBeNull();
+    });
+
+    it('returns read when root has no permissions (public)', async () => {
+      (prisma.folder.findUnique as jest.Mock).mockResolvedValue({
+        id: 'root-1',
+        parent_folder_id: null,
+      });
+      (prisma.folderPermission.findMany as jest.Mock).mockResolvedValue([]);
+      const result = await getUserFolderPermissionLevel(
+        'user-1',
+        'company-1',
+        'root-1',
+        false,
+        []
+      );
+      expect(result).toBe('read');
+    });
+
+    it('returns read when user has read permission', async () => {
+      (prisma.folder.findUnique as jest.Mock).mockResolvedValue({
+        id: 'root-1',
+        parent_folder_id: null,
+      });
+      (prisma.folderPermission.findMany as jest.Mock).mockResolvedValue([
+        { user_id: 'user-1', group_id: null, permission_type: 'read' },
+      ]);
+      const result = await getUserFolderPermissionLevel(
+        'user-1',
+        'company-1',
+        'root-1',
+        false,
+        []
+      );
+      expect(result).toBe('read');
+    });
+
+    it('returns write when user has write permission', async () => {
+      (prisma.folder.findUnique as jest.Mock).mockResolvedValue({
+        id: 'root-1',
+        parent_folder_id: null,
+      });
+      (prisma.folderPermission.findMany as jest.Mock).mockResolvedValue([
+        { user_id: 'user-1', group_id: null, permission_type: 'write' },
+      ]);
+      const result = await getUserFolderPermissionLevel(
+        'user-1',
+        'company-1',
+        'root-1',
+        false,
+        []
+      );
+      expect(result).toBe('write');
+    });
+
+    it('returns write when user has legacy admin permission', async () => {
+      (prisma.folder.findUnique as jest.Mock).mockResolvedValue({
+        id: 'root-1',
+        parent_folder_id: null,
+      });
+      (prisma.folderPermission.findMany as jest.Mock).mockResolvedValue([
+        { user_id: 'user-1', group_id: null, permission_type: 'admin' },
+      ]);
+      const result = await getUserFolderPermissionLevel(
+        'user-1',
+        'company-1',
+        'root-1',
+        false,
+        []
+      );
+      expect(result).toBe('write');
+    });
+
+    it('returns null when root has permissions but user has none', async () => {
+      (prisma.folder.findUnique as jest.Mock).mockResolvedValue({
+        id: 'root-1',
+        parent_folder_id: null,
+      });
+      (prisma.folderPermission.findMany as jest.Mock).mockResolvedValue([
+        { user_id: 'other-user', group_id: null, permission_type: 'write' },
+      ]);
+      const result = await getUserFolderPermissionLevel(
+        'user-1',
+        'company-1',
+        'root-1',
+        false,
+        []
+      );
+      expect(result).toBeNull();
     });
   });
 });

@@ -1,7 +1,7 @@
 import { Response } from 'express';
 import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
-import { canUserAccessFolder, getUserGroupIdsInCompany } from '../lib/folderAccess';
+import { canUserAccessFolder, getUserFolderPermissionLevel, getUserGroupIdsInCompany } from '../lib/folderAccess';
 import { storageService } from '../services/storage.service';
 import { workflowService } from '../services/workflow.service';
 import multer from 'multer';
@@ -756,6 +756,10 @@ export const filesController = {
       if (!allowed) {
         return res.status(403).json({ error: 'You do not have access to this folder' });
       }
+      const level = await getUserFolderPermissionLevel(userId, companyId, folderId, isCompanyAdmin, userGroupIds);
+      if (level !== 'write') {
+        return res.status(403).json({ error: 'Write permission required to upload in this folder' });
+      }
 
       const sanitized = sanitizeFileName(file.originalname);
       const storagePath = `companies/${companyId}/${folderId}/${Date.now()}_${sanitized}`;
@@ -826,6 +830,10 @@ export const filesController = {
       const allowed = await canUserAccessFolder(userId, companyId, fileRecord.folder_id, isCompanyAdmin, userGroupIds);
       if (!allowed) {
         return res.status(403).json({ error: 'You do not have access to this folder' });
+      }
+      const level = await getUserFolderPermissionLevel(userId, companyId, fileRecord.folder_id, isCompanyAdmin, userGroupIds);
+      if (level !== 'write') {
+        return res.status(403).json({ error: 'Write permission required to delete files in this folder' });
       }
 
       await storageService.deleteFile(storageService.getDocumentsBucket(), fileRecord.storage_path);

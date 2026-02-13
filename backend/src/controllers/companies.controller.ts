@@ -1306,7 +1306,7 @@ export const companiesController = {
     }
   },
 
-  /** Add a folder permission (user or group). Only for root folders. permission_type: read | write | admin */
+  /** Add a folder permission (user or group). Only for root folders. permission_type: read | write (read = view/download only; write = upload/delete). */
   async addFolderPermission(req: AuthRequest, res: Response) {
     try {
       const { companyId, folderId } = req.params;
@@ -1315,7 +1315,7 @@ export const companiesController = {
       if ((user_id && group_id) || (!user_id && !group_id)) {
         return res.status(400).json({ error: 'Provide exactly one of user_id or group_id' });
       }
-      const validTypes = ['read', 'write', 'admin'];
+      const validTypes = ['read', 'write'];
       const type = typeof permission_type === 'string' && validTypes.includes(permission_type) ? permission_type : 'read';
       const access = await ensureCompanyAccess(req, companyId, true);
       if (access.error) return res.status(access.error.status).json(access.error.body);

@@ -33,15 +33,35 @@ export async function canUserAccessFolder(
   isCompanyAdmin: boolean,
   userGroupIds: string[]
 ): Promise<boolean> {
+  const level = await getUserFolderPermissionLevel(userId, companyId, folderId, isCompanyAdmin, userGroupIds);
+  return level !== null;
+}
+
+/**
+ * Get the user's permission level for a folder. Read = list/open/preview/download only; write = read + upload/delete.
+ * Company admins get write. Public roots (no permissions) get read. Legacy 'admin' permission_type is treated as write.
+ */
+export async function getUserFolderPermissionLevel(
+  userId: string,
+  companyId: string,
+  folderId: string,
+  isCompanyAdmin: boolean,
+  userGroupIds: string[]
+): Promise<'read' | 'write' | null> {
   const rootId = await getRootFolderId(folderId);
-  if (!rootId) return false;
-  if (isCompanyAdmin) return true;
+  if (!rootId) return null;
+  if (isCompanyAdmin) return 'write';
   const permissions = await prisma.folderPermission.findMany({
     where: { folder_id: rootId },
-    select: { user_id: true, group_id: true },
+    select: { user_id: true, group_id: true, permission_type: true },
   });
-  if (permissions.length === 0) return true; // public root
-  return permissions.some(
+  if (permissions.length === 0) return 'read'; // public root: read-only for everyone
+  const mine = permissions.filter(
     (p) => p.user_id === userId || (p.group_id != null && userGroupIds.includes(p.group_id))
   );
+  if (mine.length === 0) return null;
+  const hasWrite = mine.some(
+    (p) => p.permission_type === 'write' || p.permission_type === 'admin'
+  );
+  return hasWrite ? 'write' : 'read';
 }

@@ -79,7 +79,7 @@ export default function DocumentManagement() {
   const [isPermissionsDialogOpen, setIsPermissionsDialogOpen] = useState(false);
   const [newPermType, setNewPermType] = useState<"user" | "group">("group");
   const [newPermEntityId, setNewPermEntityId] = useState("");
-  const [newPermLevel, setNewPermLevel] = useState<"read" | "write" | "admin">("read");
+  const [newPermLevel, setNewPermLevel] = useState<"read" | "write">("read");
   const [permissionsLoading, setPermissionsLoading] = useState(false);
   const { toast } = useToast();
 
@@ -1103,14 +1103,13 @@ export default function DocumentManagement() {
                     </div>
                     <div>
                       <Label htmlFor="perm-level" className="text-xs">Access level</Label>
-                      <Select value={newPermLevel} onValueChange={(v: "read" | "write" | "admin") => setNewPermLevel(v)}>
+                      <Select value={newPermLevel} onValueChange={(v: "read" | "write") => setNewPermLevel(v)}>
                         <SelectTrigger id="perm-level" className="mt-1">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="read">Read</SelectItem>
-                          <SelectItem value="write">Write</SelectItem>
-                          <SelectItem value="admin">Admin</SelectItem>
+                          <SelectItem value="read">Read — view and download only</SelectItem>
+                          <SelectItem value="write">Write — upload and delete</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
