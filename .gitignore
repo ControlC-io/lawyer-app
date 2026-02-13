@@ -49,6 +49,9 @@ tmp/
 
 # Generated seed data (large; regenerate with scripts/extract-seed-data.js)
 database/seed-data.sql
+
+# Database dumps (production backups - contain sensitive data)
+dumps/
 *.tmp
 *.temp
 

@@ -68,6 +68,12 @@ The migration process is fully automated within the Docker lifecycle:
 
 Floowly uses **MinIO** for S3-compatible object storage to manage file uploads and assets.
 
+## Get file dump through SCP
+
+```bash
+scp root@[SERVER_IP]:path/to/dump/floowly_dump.sql ./dumps/
+```
+
 ### Integration Details
 
 1. **Source Build**: Due to MinIO's source-only distribution for the community edition, the image is built from source using a multi-stage Dockerfile located at `infrastructure/minio/Dockerfile`.
