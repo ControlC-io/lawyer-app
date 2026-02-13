@@ -145,6 +145,38 @@ For production with HTTPS (Let's Encrypt) on a single domain (e.g. `automate.flo
 
 5. **Files used**: `docker-compose.prod.yml` (production overrides, SSL volumes, certbot), `infrastructure/nginx/nginx.prod.conf` (HTTP→HTTPS redirect, ACME challenge, HTTPS proxy). Domain is set to `automate.floowly.app` in both; for another domain, edit those files and set `DOMAIN=your.domain` when running the script.
 
+### Updating images on the Droplet
+
+After new code is pushed to `main` (or you push a version tag), images are built and pushed to GitHub Container Registry (GHCR). To run the new version on your DigitalOcean Droplet:
+
+**If the Droplet builds from the repo** (default: no `image:` for backend/frontend):
+
+```bash
+# SSH into the droplet, then from the project root (e.g. /root/Floowly):
+git pull origin main
+
+# Rebuild and restart app services only (keeps db, nginx, minio as-is)
+docker compose -f docker-compose.yml -f docker-compose.prod.yml build --no-cache backend frontend
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d backend frontend
+```
+
+**If the Droplet uses pre-built images from GHCR** (you have overridden `backend`/`frontend` with `image: ghcr.io/<owner>/floowly-backend:latest` and same for frontend):
+
+1. Ensure the Droplet can pull from GHCR. For a private repo, create a Personal Access Token (PAT) with `read:packages`, then on the droplet:
+
+   ```bash
+   echo YOUR_GITHUB_PAT | docker login ghcr.io -u YOUR_GITHUB_USERNAME --password-stdin
+   ```
+
+2. Pull and recreate:
+
+   ```bash
+   docker compose -f docker-compose.yml -f docker-compose.prod.yml pull backend frontend
+   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d backend frontend
+   ```
+
+Migrations run automatically when the backend container starts (`npm run start` runs `migrate:deploy` first).
+
 ### Production Deployment
 
 #### Security Checklist
