@@ -2,6 +2,7 @@ import { Response } from 'express';
 import { Prisma } from '@prisma/client';
 import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
+import { canUserAccessFolder, getUserGroupIdsInCompany } from '../lib/folderAccess';
 
 /**
  * Ensure the authenticated user has access to the company (member of company).
@@ -1150,10 +1151,16 @@ export const companiesController = {
       if (!companyId || !folderId) return res.status(400).json({ error: 'Missing company ID or folder ID' });
       const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ error: 'Unauthorized' });
       const folder = await prisma.folder.findFirst({
         where: { id: folderId, company_id: companyId },
       });
       if (!folder) return res.status(404).json({ error: 'Folder not found' });
+      const isCompanyAdmin = access.userCompany.role === 'company_admin';
+      const userGroupIds = await getUserGroupIdsInCompany(userId, companyId);
+      const allowed = await canUserAccessFolder(userId, companyId, folderId, isCompanyAdmin, userGroupIds);
+      if (!allowed) return res.status(404).json({ error: 'Folder not found' });
       return res.json(folder);
     } catch (error) {
       console.error('getFolder error:', error);
@@ -1168,12 +1175,39 @@ export const companiesController = {
       if (!companyId) return res.status(400).json({ error: 'Missing company ID' });
       const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+      const isCompanyAdmin = access.userCompany.role === 'company_admin';
+      const userGroupIds = await getUserGroupIdsInCompany(userId, companyId);
+
+      const isRootList = parentFolderId === undefined || parentFolderId === '';
+      const parentId = isRootList ? null : parentFolderId || null;
+
+      if (!isRootList && parentId) {
+        const parentFolder = await prisma.folder.findFirst({
+          where: { id: parentId, company_id: companyId },
+        });
+        if (!parentFolder) return res.status(404).json({ error: 'Folder not found' });
+        const allowed = await canUserAccessFolder(userId, companyId, parentId, isCompanyAdmin, userGroupIds);
+        if (!allowed) return res.status(403).json({ error: 'You do not have access to this folder' });
+      }
+
       const where: { company_id: string | null; parent_folder_id?: string | null } = { company_id: companyId };
-      if (parentFolderId !== undefined) where.parent_folder_id = parentFolderId === '' ? null : parentFolderId || null;
-      const folders = await prisma.folder.findMany({
+      where.parent_folder_id = parentId;
+      let folders = await prisma.folder.findMany({
         where,
         orderBy: { name: 'asc' },
       });
+
+      if (isRootList && folders.length > 0) {
+        const allowedIds = new Set<string>();
+        for (const folder of folders) {
+          const allowed = await canUserAccessFolder(userId, companyId, folder.id, isCompanyAdmin, userGroupIds);
+          if (allowed) allowedIds.add(folder.id);
+        }
+        folders = folders.filter((f) => allowedIds.has(f.id));
+      }
+
       return res.json(folders);
     } catch (error) {
       console.error('listFolders error:', error);
@@ -1243,6 +1277,101 @@ export const companiesController = {
     }
   },
 
+  /** List folder permissions. Only allowed for root folders (parent_folder_id is null). */
+  async listFolderPermissions(req: AuthRequest, res: Response) {
+    try {
+      const { companyId, folderId } = req.params;
+      if (!companyId || !folderId) return res.status(400).json({ error: 'Missing company ID or folder ID' });
+      const access = await ensureCompanyAccess(req, companyId, true);
+      if (access.error) return res.status(access.error.status).json(access.error.body);
+      const folder = await prisma.folder.findFirst({
+        where: { id: folderId, company_id: companyId },
+        select: { parent_folder_id: true },
+      });
+      if (!folder) return res.status(404).json({ error: 'Folder not found' });
+      if (folder.parent_folder_id != null) {
+        return res.status(400).json({ error: 'Permissions can only be set on root folders' });
+      }
+      const list = await prisma.folderPermission.findMany({
+        where: { folder_id: folderId },
+        include: {
+          user: { select: { id: true, email: true, full_name: true } },
+          group: { select: { id: true, name: true } },
+        },
+      });
+      return res.json(list);
+    } catch (error) {
+      console.error('listFolderPermissions error:', error);
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
+  /** Add a folder permission (user or group). Only for root folders. permission_type: read | write | admin */
+  async addFolderPermission(req: AuthRequest, res: Response) {
+    try {
+      const { companyId, folderId } = req.params;
+      const { user_id, group_id, permission_type } = req.body || {};
+      if (!companyId || !folderId) return res.status(400).json({ error: 'Missing company ID or folder ID' });
+      if ((user_id && group_id) || (!user_id && !group_id)) {
+        return res.status(400).json({ error: 'Provide exactly one of user_id or group_id' });
+      }
+      const validTypes = ['read', 'write', 'admin'];
+      const type = typeof permission_type === 'string' && validTypes.includes(permission_type) ? permission_type : 'read';
+      const access = await ensureCompanyAccess(req, companyId, true);
+      if (access.error) return res.status(access.error.status).json(access.error.body);
+      const folder = await prisma.folder.findFirst({
+        where: { id: folderId, company_id: companyId },
+        select: { parent_folder_id: true },
+      });
+      if (!folder) return res.status(404).json({ error: 'Folder not found' });
+      if (folder.parent_folder_id != null) {
+        return res.status(400).json({ error: 'Permissions can only be set on root folders' });
+      }
+      const perm = await prisma.folderPermission.create({
+        data: {
+          folder_id: folderId,
+          company_id: companyId,
+          user_id: user_id || null,
+          group_id: group_id || null,
+          permission_type: type,
+        },
+        include: {
+          user: { select: { id: true, email: true, full_name: true } },
+          group: { select: { id: true, name: true } },
+        },
+      });
+      return res.status(201).json(perm);
+    } catch (error: unknown) {
+      const e = error as { code?: string };
+      if (e.code === 'P2002') return res.status(400).json({ error: 'This user or group already has a permission on this folder' });
+      console.error('addFolderPermission error:', error);
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
+  /** Delete a folder permission. */
+  async deleteFolderPermission(req: AuthRequest, res: Response) {
+    try {
+      const { companyId, folderId, permissionId } = req.params;
+      if (!companyId || !folderId || !permissionId) return res.status(400).json({ error: 'Missing company ID, folder ID or permission ID' });
+      const access = await ensureCompanyAccess(req, companyId, true);
+      if (access.error) return res.status(access.error.status).json(access.error.body);
+      const folder = await prisma.folder.findFirst({
+        where: { id: folderId, company_id: companyId },
+        select: { parent_folder_id: true },
+      });
+      if (!folder) return res.status(404).json({ error: 'Folder not found' });
+      const result = await prisma.folderPermission.deleteMany({
+        where: { id: permissionId, folder_id: folderId },
+      });
+      if (result.count === 0) return res.status(404).json({ error: 'Permission not found' });
+      return res.status(204).send();
+    } catch (error) {
+      console.error('deleteFolderPermission error:', error);
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
   async listFiles(req: AuthRequest, res: Response) {
     try {
       const { companyId } = req.params;
@@ -1251,15 +1380,21 @@ export const companiesController = {
       if (!companyId) return res.status(400).json({ error: 'Missing company ID' });
       const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+      const isCompanyAdmin = access.userCompany.role === 'company_admin';
+      const userGroupIds = await getUserGroupIdsInCompany(userId, companyId);
+
+      if (folderId !== undefined && folderId !== '') {
+        const allowed = await canUserAccessFolder(userId, companyId, folderId, isCompanyAdmin, userGroupIds);
+        if (!allowed) return res.status(403).json({ error: 'You do not have access to this folder' });
+      }
+
       const where: { company_id: string; folder_id?: string | { in: string[] }; id?: { in: string[] } } = { company_id: companyId };
       if (folderId !== undefined) {
         if (folderId === '') {
-          const rootFolders = await prisma.folder.findMany({
-            where: { company_id: companyId, parent_folder_id: null },
-            select: { id: true },
-          });
-          const rootIds = rootFolders.map((f) => f.id);
-          where.folder_id = rootIds.length > 0 ? { in: rootIds } : { in: [] };
+          // At root: show no files (only folders). Files are shown when viewing a specific folder.
+          where.folder_id = { in: [] };
         } else {
           where.folder_id = folderId;
         }
@@ -1268,12 +1403,27 @@ export const companiesController = {
         const idList = idsParam.split(',').map((s) => s.trim()).filter(Boolean);
         if (idList.length > 0) where.id = { in: idList };
       }
-      const files = await prisma.file.findMany({
+      let files = await prisma.file.findMany({
         where,
         orderBy: { name: 'asc' },
         include: { metadata_values: { include: { metadata: { select: { id: true, name: true } } } } },
       });
-      return res.json(files);
+      // When listing by ids (e.g. metadata search), filter out files in folders the user cannot access
+      if (idsParam && files.length > 0) {
+        const folderIds = [...new Set(files.map((f) => f.folder_id))];
+        const allowedFolderIds = new Set<string>();
+        for (const fid of folderIds) {
+          const allowed = await canUserAccessFolder(userId, companyId, fid, isCompanyAdmin, userGroupIds);
+          if (allowed) allowedFolderIds.add(fid);
+        }
+        files = files.filter((f) => allowedFolderIds.has(f.folder_id));
+      }
+      // BigInt (e.g. size_bytes) is not JSON-serializable; convert to number for the response
+      const serialized = files.map((f) => ({
+        ...f,
+        size_bytes: f.size_bytes != null ? Number(f.size_bytes) : 0,
+      }));
+      return res.json(serialized);
     } catch (error) {
       console.error('listFiles error:', error);
       return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
@@ -1309,7 +1459,7 @@ export const companiesController = {
     }
   },
 
-  /** GET /api/companies/:companyId/files/by-metadata?metadata_id=xxx&value=yyy - returns { fileIds: string[] } */
+  /** GET /api/companies/:companyId/files/by-metadata?metadata_id=xxx&value=yyy - returns { fileIds: string[] } (only files in folders the user can access) */
   async getFileIdsByMetadata(req: AuthRequest, res: Response) {
     try {
       const { companyId } = req.params;
@@ -1318,13 +1468,30 @@ export const companiesController = {
       if (!companyId || !metadataId) return res.status(400).json({ error: 'Missing company ID or metadata_id' });
       const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ error: 'Unauthorized' });
       const where: { company_id: string; metadata_id: string; value?: string } = { company_id: companyId, metadata_id: metadataId };
       if (value !== undefined && value !== '') where.value = value;
       const rows = await prisma.filesMetadataValue.findMany({
         where,
         select: { files_id: true },
       });
-      const fileIds = [...new Set(rows.map((r) => r.files_id))];
+      let fileIds = [...new Set(rows.map((r) => r.files_id))];
+      if (fileIds.length > 0) {
+        const filesWithFolder = await prisma.file.findMany({
+          where: { id: { in: fileIds }, company_id: companyId },
+          select: { id: true, folder_id: true },
+        });
+        const isCompanyAdmin = access.userCompany.role === 'company_admin';
+        const userGroupIds = await getUserGroupIdsInCompany(userId, companyId);
+        const folderIds = [...new Set(filesWithFolder.map((f) => f.folder_id))];
+        const allowedFolderIds = new Set<string>();
+        for (const fid of folderIds) {
+          const allowed = await canUserAccessFolder(userId, companyId, fid, isCompanyAdmin, userGroupIds);
+          if (allowed) allowedFolderIds.add(fid);
+        }
+        fileIds = filesWithFolder.filter((f) => allowedFolderIds.has(f.folder_id)).map((f) => f.id);
+      }
       return res.json({ fileIds });
     } catch (error) {
       console.error('getFileIdsByMetadata error:', error);

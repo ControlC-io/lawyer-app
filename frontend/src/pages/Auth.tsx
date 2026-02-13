@@ -21,7 +21,9 @@ const Auth = () => {
   const initialMode = (searchParams.get("mode") as "signin" | "signup") || "signin";
   const isInvited = !!searchParams.get("email");
 
-  const [signupEnabled, setSignupEnabled] = useState(false);
+  // Default to true so signup link is visible until config loads (avoids flash of missing link on client-side nav)
+  const [signupEnabled, setSignupEnabled] = useState(true);
+  const [configLoaded, setConfigLoaded] = useState(false);
   const [loading, setLoading] = useState(false);
   const [email, setEmail] = useState(initialEmail);
   const [password, setPassword] = useState("");
@@ -40,22 +42,28 @@ const Auth = () => {
   useEffect(() => {
     api
       .get<{ signupEnabled: boolean }>("/api/public/config", { skipAuth: true })
-      .then((data) => setSignupEnabled(data.signupEnabled === true))
-      .catch(() => setSignupEnabled(false));
+      .then((data) => {
+        setSignupEnabled(data.signupEnabled === true);
+        setConfigLoaded(true);
+      })
+      .catch(() => {
+        setConfigLoaded(true);
+        // Keep signupEnabled as-is (true by default) so a failed/slow config request doesn't hide the link
+      });
   }, []);
 
-  // Update email and mode if query params change
+  // Update email and mode if query params change (only force signin when we know signup is disabled)
   useEffect(() => {
     if (searchParams.get("email")) {
       setEmail(searchParams.get("email") || "");
     }
     const m = searchParams.get("mode");
-    if (m === "signup" && !searchParams.get("email") && !signupEnabled) {
+    if (m === "signup" && !searchParams.get("email") && configLoaded && !signupEnabled) {
       setMode("signin");
     } else if (m === "signin" || m === "signup") {
       setMode(m);
     }
-  }, [searchParams, signupEnabled]);
+  }, [searchParams, signupEnabled, configLoaded]);
 
   // Prefill demo form when user or profile is available
   useEffect(() => {

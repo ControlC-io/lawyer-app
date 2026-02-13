@@ -48,6 +48,8 @@ Backend tests live in the Express API (`backend/`) and focus on **API endpoints*
 | `workflow.test.ts` | Trigger, process step, complete step, decision, get execution, update data, rename execution, add logs. |
 | `agents.test.ts` | Get agent, create workflow with AI, validate form with AI, transcribe audio. |
 | `files.test.ts` | Upload execution file (base64/URL), signed URL, process file step. |
+| `folderAccess.test.ts` | Unit tests for `getRootFolderId`, `getUserGroupIdsInCompany`, `canUserAccessFolder` (admin, public root, user/group permission). |
+| `companies.folders.test.ts` | List/get folders (401, 200, 403 when no access); folder permissions GET/POST/DELETE (admin required, root-only); list files (403 when no folder access, 200 with ids); by-metadata (200 with fileIds, 400 when metadata_id missing). |
 | `external.test.ts` | Submit external step (token), send external form link. |
 | `notifications.test.ts` | `POST /api/notifications/assignment` (JWT): 400 missing execution_step_id, 404 step not found, 200 no recipients, 200 with recipients and email, 401 unauthorized. |
 | `public.test.ts` | `POST /api/public/feedback` and `POST /api/public/demo-request`: 400 missing required fields, 200 success, 500 when email service throws. |

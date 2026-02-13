@@ -6,9 +6,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Folder, File, Upload, FolderPlus, ChevronRight, Home, Trash2, Eye, Download, Edit } from "lucide-react";
+import { Folder, File, Upload, FolderPlus, ChevronRight, Home, Trash2, Eye, Download, Edit, Shield, UserPlus, Users } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Badge } from "@/components/ui/badge";
 import { useCompanyId } from "@/hooks/useCompanyId";
 
 interface FolderType {
@@ -40,6 +41,16 @@ interface Profile {
   email: string;
 }
 
+interface FolderPermissionItem {
+  id: string;
+  folder_id: string;
+  user_id: string | null;
+  group_id: string | null;
+  permission_type: string;
+  user?: { id: string; email: string; full_name: string | null } | null;
+  group?: { id: string; name: string } | null;
+}
+
 export default function DocumentManagement() {
   const companyId = useCompanyId();
   const [folders, setFolders] = useState<FolderType[]>([]);
@@ -52,9 +63,6 @@ export default function DocumentManagement() {
   const [isUploadFileOpen, setIsUploadFileOpen] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [permissionType, setPermissionType] = useState<"group" | "user">("group");
-  const [selectedGroupId, setSelectedGroupId] = useState<string>("");
-  const [selectedUserId, setSelectedUserId] = useState<string>("");
   const [previewFile, setPreviewFile] = useState<FileType | null>(null);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [previewSignedUrl, setPreviewSignedUrl] = useState<string | null>(null);
@@ -66,10 +74,18 @@ export default function DocumentManagement() {
   const [isMetadataDialogOpen, setIsMetadataDialogOpen] = useState(false);
   const [selectedFileForMetadata, setSelectedFileForMetadata] = useState<FileType | null>(null);
   const [metadataEntries, setMetadataEntries] = useState<Array<{ key: string; value: string }>>([]);
+  const [folderForPermissions, setFolderForPermissions] = useState<FolderType | null>(null);
+  const [folderPermissionsList, setFolderPermissionsList] = useState<FolderPermissionItem[]>([]);
+  const [isPermissionsDialogOpen, setIsPermissionsDialogOpen] = useState(false);
+  const [newPermType, setNewPermType] = useState<"user" | "group">("group");
+  const [newPermEntityId, setNewPermEntityId] = useState("");
+  const [newPermLevel, setNewPermLevel] = useState<"read" | "write" | "admin">("read");
+  const [permissionsLoading, setPermissionsLoading] = useState(false);
   const { toast } = useToast();
 
   useEffect(() => {
     fetchUsers();
+    fetchGroups();
     fetchMetadataKeys();
   }, [companyId]);
 
@@ -85,19 +101,19 @@ export default function DocumentManagement() {
     fetchFoldersAndFiles();
   }, [currentFolderId, companyId, filters]);
 
-  // Generate signed URL when preview file changes
+  // Generate document URL for preview (proxy through backend so it works without MinIO public URL)
   useEffect(() => {
     const generatePreviewUrl = async () => {
       if (previewFile && isPreviewOpen) {
         try {
-          const { signedUrl } = await api.post<{ signedUrl: string }>("/api/files/signed-url", {
-            bucket: "documents",
-            path: previewFile.storage_path,
-            expiresIn: 3600,
+          const { url } = await api.post<{ url: string }>("/api/files/document-url", {
+            fileId: previewFile.id,
+            download: false,
           });
-          setPreviewSignedUrl(signedUrl);
+          const base = (import.meta.env.VITE_API_URL as string) || window.location.origin;
+          setPreviewSignedUrl(url.startsWith("http") ? url : `${base.replace(/\/$/, "")}${url}`);
         } catch (error) {
-          console.error("Error generating signed URL for preview:", error);
+          console.error("Error generating document URL for preview:", error);
           setPreviewSignedUrl(null);
         }
       } else {
@@ -117,6 +133,85 @@ export default function DocumentManagement() {
       setUsers(data || []);
     } catch {
       toast({ title: "Error", description: "Failed to fetch users", variant: "destructive" });
+    }
+  };
+
+  const fetchGroups = async () => {
+    if (!companyId) return;
+    try {
+      const data = await api.get<Group[]>(`/api/companies/${companyId}/groups`);
+      setGroups(data || []);
+    } catch {
+      toast({ title: "Error", description: "Failed to fetch groups", variant: "destructive" });
+    }
+  };
+
+  const openPermissionsDialog = async (folder: FolderType) => {
+    if (!companyId) return;
+    setFolderForPermissions(folder);
+    setIsPermissionsDialogOpen(true);
+    setFolderPermissionsList([]);
+    setNewPermEntityId("");
+    setPermissionsLoading(true);
+    try {
+      const list = await api.get<FolderPermissionItem[]>(
+        `/api/companies/${companyId}/folders/${folder.id}/permissions`
+      );
+      setFolderPermissionsList(list || []);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to load permissions";
+      toast({ title: "Error", description: msg, variant: "destructive" });
+      setIsPermissionsDialogOpen(false);
+    } finally {
+      setPermissionsLoading(false);
+    }
+  };
+
+  const fetchFolderPermissions = async () => {
+    if (!companyId || !folderForPermissions) return;
+    try {
+      const list = await api.get<FolderPermissionItem[]>(
+        `/api/companies/${companyId}/folders/${folderForPermissions.id}/permissions`
+      );
+      setFolderPermissionsList(list || []);
+    } catch {
+      toast({ title: "Error", description: "Failed to refresh permissions", variant: "destructive" });
+    }
+  };
+
+  const handleAddFolderPermission = async () => {
+    if (!companyId || !folderForPermissions) return;
+    const body = newPermType === "user"
+      ? { user_id: newPermEntityId, permission_type: newPermLevel }
+      : { group_id: newPermEntityId, permission_type: newPermLevel };
+    if (!body.user_id && !body.group_id) {
+      toast({ title: "Select a user or group", variant: "destructive" });
+      return;
+    }
+    try {
+      await api.post(
+        `/api/companies/${companyId}/folders/${folderForPermissions.id}/permissions`,
+        body
+      );
+      toast({ title: "Success", description: "Permission added" });
+      setNewPermEntityId("");
+      fetchFolderPermissions();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to add permission";
+      toast({ title: "Error", description: msg, variant: "destructive" });
+    }
+  };
+
+  const handleRemoveFolderPermission = async (permissionId: string) => {
+    if (!companyId || !folderForPermissions) return;
+    try {
+      await api.delete(
+        `/api/companies/${companyId}/folders/${folderForPermissions.id}/permissions/${permissionId}`
+      );
+      toast({ title: "Success", description: "Permission removed" });
+      fetchFolderPermissions();
+    } catch {
+      toast({ title: "Error", description: "Failed to remove permission", variant: "destructive" });
     }
   };
 
@@ -331,20 +426,18 @@ export default function DocumentManagement() {
 
   const handleDownload = async (file: FileType) => {
     try {
-      const { signedUrl } = await api.post<{ signedUrl: string }>("/api/files/signed-url", {
-        bucket: "documents",
-        path: file.storage_path,
-        expiresIn: 3600,
+      const { url } = await api.post<{ url: string }>("/api/files/document-url", {
+        fileId: file.id,
+        download: true,
       });
-      const res = await fetch(signedUrl);
-      const blob = await res.blob();
-      const url = window.URL.createObjectURL(blob);
+      const base = (import.meta.env.VITE_API_URL as string) || window.location.origin;
+      const fullUrl = url.startsWith("http") ? url : `${base.replace(/\/$/, "")}${url}`;
       const a = document.createElement("a");
-      a.href = url;
+      a.href = fullUrl;
       a.download = file.name;
+      a.rel = "noopener noreferrer";
       document.body.appendChild(a);
       a.click();
-      window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
       toast({ title: "Success", description: "File downloaded successfully" });
     } catch (error: unknown) {
@@ -686,16 +779,32 @@ export default function DocumentManagement() {
                   <TableCell>—</TableCell>
                   <TableCell>{new Date(folder.created_at).toLocaleDateString()}</TableCell>
                   <TableCell className="text-right">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDeleteFolder(folder.id);
-                      }}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                    <div className="flex gap-1 justify-end items-center">
+                      {currentFolderId === null && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openPermissionsDialog(folder);
+                          }}
+                          title="Manage access"
+                          className="text-muted-foreground hover:text-primary"
+                        >
+                          <Shield className="h-4 w-4" />
+                        </Button>
+                      )}
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteFolder(folder.id);
+                        }}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}
@@ -881,6 +990,139 @@ export default function DocumentManagement() {
             <Button onClick={handleSaveMetadata} className="flex-1">
               Save Metadata
             </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Folder permissions (root folders only) */}
+      <Dialog open={isPermissionsDialogOpen} onOpenChange={setIsPermissionsDialogOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Shield className="h-5 w-5 text-primary" />
+              Folder access
+            </DialogTitle>
+            <DialogDescription>
+              <span className="font-medium text-foreground">{folderForPermissions?.name}</span>
+              {" — "}
+              Root folders are public by default. Add users or groups below to grant explicit access.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-6">
+            {permissionsLoading ? (
+              <div className="py-8 text-center text-muted-foreground text-sm">Loading permissions…</div>
+            ) : (
+              <>
+                <div className="space-y-2">
+                  <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Current access</Label>
+                  {folderPermissionsList.length === 0 ? (
+                    <p className="text-sm text-muted-foreground py-3 rounded-lg bg-muted/50 border border-dashed border-border text-center">
+                      No restrictions — folder is public to everyone in the company.
+                    </p>
+                  ) : (
+                    <ul className="rounded-lg border bg-card divide-y">
+                      {folderPermissionsList.map((perm) => {
+                        const label = perm.user
+                          ? (perm.user.full_name || perm.user.email)
+                          : perm.group
+                            ? perm.group.name
+                          : "—";
+                        const sub = perm.user ? perm.user.email : "Group";
+                        return (
+                          <li key={perm.id} className="flex items-center justify-between gap-3 px-3 py-2.5">
+                            <div className="flex items-center gap-2 min-w-0">
+                              {perm.user ? (
+                                <UserPlus className="h-4 w-4 text-muted-foreground shrink-0" />
+                              ) : (
+                                <Users className="h-4 w-4 text-muted-foreground shrink-0" />
+                              )}
+                              <div className="min-w-0">
+                                <p className="text-sm font-medium truncate">{label}</p>
+                                <p className="text-xs text-muted-foreground truncate">{sub}</p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <Badge variant="secondary" className="capitalize font-normal">
+                                {perm.permission_type}
+                              </Badge>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                                onClick={() => handleRemoveFolderPermission(perm.id)}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </div>
+
+                <div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+                  <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Grant access</Label>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      variant={newPermType === "group" ? "default" : "outline"}
+                      size="sm"
+                      onClick={() => { setNewPermType("group"); setNewPermEntityId(""); }}
+                    >
+                      <Users className="h-3.5 w-3 mr-1.5" />
+                      Group
+                    </Button>
+                    <Button
+                      type="button"
+                      variant={newPermType === "user" ? "default" : "outline"}
+                      size="sm"
+                      onClick={() => { setNewPermType("user"); setNewPermEntityId(""); }}
+                    >
+                      <UserPlus className="h-3.5 w-3 mr-1.5" />
+                      User
+                    </Button>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="sm:col-span-2">
+                      <Label htmlFor="perm-entity" className="text-xs">Select {newPermType === "group" ? "group" : "user"}</Label>
+                      <Select value={newPermEntityId} onValueChange={setNewPermEntityId}>
+                        <SelectTrigger id="perm-entity" className="mt-1">
+                          <SelectValue placeholder={newPermType === "group" ? "Choose a group…" : "Choose a user…"} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {newPermType === "group"
+                            ? groups.map((g) => <SelectItem key={g.id} value={g.id}>{g.name}</SelectItem>)
+                            : users.map((u) => (
+                                <SelectItem key={u.id} value={u.id}>
+                                  {u.full_name || u.email}
+                                </SelectItem>
+                              ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label htmlFor="perm-level" className="text-xs">Access level</Label>
+                      <Select value={newPermLevel} onValueChange={(v: "read" | "write" | "admin") => setNewPermLevel(v)}>
+                        <SelectTrigger id="perm-level" className="mt-1">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="read">Read</SelectItem>
+                          <SelectItem value="write">Write</SelectItem>
+                          <SelectItem value="admin">Admin</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="flex items-end">
+                      <Button onClick={handleAddFolderPermission} className="w-full" disabled={!newPermEntityId}>
+                        Add access
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         </DialogContent>
       </Dialog>

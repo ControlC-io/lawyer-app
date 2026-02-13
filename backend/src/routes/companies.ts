@@ -84,6 +84,9 @@ router.get('/:companyId/folders/:folderId', asyncHandler(companiesController.get
 router.post('/:companyId/folders', asyncHandler(companiesController.createFolder));
 router.patch('/:companyId/folders/:folderId', asyncHandler(companiesController.updateFolder));
 router.delete('/:companyId/folders/:folderId', asyncHandler(companiesController.deleteFolder));
+router.get('/:companyId/folders/:folderId/permissions', asyncHandler(companiesController.listFolderPermissions));
+router.post('/:companyId/folders/:folderId/permissions', asyncHandler(companiesController.addFolderPermission));
+router.delete('/:companyId/folders/:folderId/permissions/:permissionId', asyncHandler(companiesController.deleteFolderPermission));
 router.get('/:companyId/files', asyncHandler(companiesController.listFiles));
 router.post('/:companyId/files', asyncHandler(companiesController.createFile));
 router.get('/:companyId/files/by-metadata', asyncHandler(companiesController.getFileIdsByMetadata));

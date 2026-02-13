@@ -1,11 +1,16 @@
 import { Response } from 'express';
 import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
+import { canUserAccessFolder, getUserGroupIdsInCompany } from '../lib/folderAccess';
 import { storageService } from '../services/storage.service';
 import { workflowService } from '../services/workflow.service';
 import multer from 'multer';
 import fetch from 'node-fetch';
 import crypto from 'crypto';
+import jwt from 'jsonwebtoken';
+
+const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
+const DOCUMENT_TOKEN_EXPIRY = 5 * 60; // 5 minutes
 
 // Configure multer for memory storage
 const upload = multer({ storage: multer.memoryStorage() });
@@ -352,6 +357,100 @@ export const filesController = {
   },
 
   /**
+   * POST /api/files/document-url
+   * Get a short-lived URL to stream a company document (for preview/download).
+   * Auth: JWT required. User must have access to the file's company.
+   */
+  async getDocumentUrl(req: AuthRequest, res: Response) {
+    try {
+      const userId = req.user?.id;
+      if (!userId) {
+        return res.status(401).json({ error: 'Unauthorized', details: 'Authentication required' });
+      }
+      const { fileId, download } = req.body;
+      if (!fileId || typeof fileId !== 'string') {
+        return res.status(400).json({ error: 'Missing fileId' });
+      }
+      const fileRecord = await prisma.file.findFirst({
+        where: { id: fileId },
+        select: { storage_path: true, company_id: true, folder_id: true },
+      });
+      if (!fileRecord || !fileRecord.company_id) {
+        return res.status(404).json({ error: 'File not found' });
+      }
+      const userCompany = await prisma.userCompany.findFirst({
+        where: { user_id: userId, company_id: fileRecord.company_id },
+      });
+      if (!userCompany) {
+        return res.status(403).json({ error: 'Forbidden', details: 'No access to this file' });
+      }
+      const isCompanyAdmin = userCompany.role === 'company_admin';
+      const userGroupIds = await getUserGroupIdsInCompany(userId, fileRecord.company_id);
+      const allowed = await canUserAccessFolder(userId, fileRecord.company_id, fileRecord.folder_id, isCompanyAdmin, userGroupIds);
+      if (!allowed) {
+        return res.status(403).json({ error: 'You do not have access to this folder' });
+      }
+      const token = jwt.sign(
+        {
+          path: fileRecord.storage_path,
+          download: Boolean(download),
+        },
+        JWT_SECRET,
+        { expiresIn: DOCUMENT_TOKEN_EXPIRY }
+      );
+      const url = `/api/files/document?token=${encodeURIComponent(token)}`;
+      return res.json({ url });
+    } catch (error) {
+      console.error('Error creating document URL:', error);
+      return res.status(500).json({
+        error: 'Failed to create document URL',
+        details: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  },
+
+  /**
+   * GET /api/files/document?token=...
+   * Stream a document using a short-lived JWT (no auth header; for img/iframe/download).
+   */
+  async streamDocument(req: AuthRequest, res: Response) {
+    try {
+      const token = req.query.token as string;
+      if (!token) {
+        return res.status(400).json({ error: 'Missing token' });
+      }
+      let payload: { path: string; download?: boolean; exp?: number };
+      try {
+        payload = jwt.verify(token, JWT_SECRET) as { path: string; download?: boolean; exp?: number };
+      } catch {
+        return res.status(401).json({ error: 'Invalid or expired token' });
+      }
+      const path = payload.path;
+      if (!path || typeof path !== 'string') {
+        return res.status(400).json({ error: 'Invalid token payload' });
+      }
+      const bucket = storageService.getDocumentsBucket();
+      const stream = await storageService.downloadFile(bucket, path);
+      const stat = await storageService.getFileStat(bucket, path).catch(() => null);
+      const contentType = stat?.contentType || 'application/octet-stream';
+      const filename = path.split('/').pop()?.replace(/^\d+_/, '') || 'download';
+      res.setHeader('Content-Type', contentType);
+      if (payload.download) {
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      }
+      stream.pipe(res);
+    } catch (error) {
+      console.error('Error streaming document:', error);
+      if (!res.headersSent) {
+        return res.status(500).json({
+          error: 'Failed to stream document',
+          details: error instanceof Error ? error.message : 'Unknown error',
+        });
+      }
+    }
+  },
+
+  /**
    * POST /api/workflows/executions/:executionId/steps/:stepId/process-file
    * Process a file step (was: process-file-step)
    */
@@ -651,6 +750,13 @@ export const filesController = {
         return res.status(404).json({ error: 'Folder not found', details: 'Folder not found or access denied' });
       }
 
+      const isCompanyAdmin = userCompany.role === 'company_admin';
+      const userGroupIds = await getUserGroupIdsInCompany(userId, companyId);
+      const allowed = await canUserAccessFolder(userId, companyId, folderId, isCompanyAdmin, userGroupIds);
+      if (!allowed) {
+        return res.status(403).json({ error: 'You do not have access to this folder' });
+      }
+
       const sanitized = sanitizeFileName(file.originalname);
       const storagePath = `companies/${companyId}/${folderId}/${Date.now()}_${sanitized}`;
 
@@ -713,6 +819,13 @@ export const filesController = {
       });
       if (!fileRecord) {
         return res.status(404).json({ error: 'File not found', details: 'File not found or access denied' });
+      }
+
+      const isCompanyAdmin = userCompany.role === 'company_admin';
+      const userGroupIds = await getUserGroupIdsInCompany(userId, companyId);
+      const allowed = await canUserAccessFolder(userId, companyId, fileRecord.folder_id, isCompanyAdmin, userGroupIds);
+      if (!allowed) {
+        return res.status(403).json({ error: 'You do not have access to this folder' });
       }
 
       await storageService.deleteFile(storageService.getDocumentsBucket(), fileRecord.storage_path);

@@ -50,6 +50,26 @@ router.post(
 );
 
 /**
+ * POST /api/files/document-url
+ * Get a short-lived URL to stream a company document (preview/download).
+ * Auth: JWT required.
+ */
+router.post(
+  '/document-url',
+  authMiddleware,
+  asyncHandler(filesController.getDocumentUrl)
+);
+
+/**
+ * GET /api/files/document?token=...
+ * Stream a document (no auth; token is short-lived JWT).
+ */
+router.get(
+  '/document',
+  asyncHandler(filesController.streamDocument)
+);
+
+/**
  * POST /api/workflows/executions/:executionId/steps/:stepId/process-file
  * Process a file step
  * Auth: Internal API Key or API Key

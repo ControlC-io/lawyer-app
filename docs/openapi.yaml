@@ -1509,6 +1509,12 @@ paths:
   /companies/{companyId}/folders:
     get:
       summary: List folders
+      description: |
+        Returns folders for the given parent. User must belong to the company.
+        **Access:** Only folders the user can access are returned. Company admins see all folders.
+        For root (no parent_folder_id or empty), only root folders are listed and filtered by permission
+        (public roots or roots where the user has a user/group permission). For a non-root parent,
+        returns 403 if the user cannot access that parent; otherwise returns its children.
       tags: [Companies]
       security:
         - BearerAuth: []
@@ -1519,9 +1525,18 @@ paths:
           schema:
             type: string
             format: uuid
+        - name: parent_folder_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: Omit or empty for root folders; set to a folder ID to list its children.
       responses:
         200:
-          description: List of folders
+          description: List of folders (filtered by access)
+        403:
+          description: User does not have access to the requested parent folder
     post:
       summary: Create folder
       tags: [Companies]
@@ -1545,6 +1560,7 @@ paths:
   /companies/{companyId}/folders/{folderId}:
     get:
       summary: Get folder
+      description: Returns folder details. Returns 404 if the folder does not exist or the user has no access (same as not found).
       tags: [Companies]
       security:
         - BearerAuth: []
@@ -1564,6 +1580,8 @@ paths:
       responses:
         200:
           description: Folder details
+        404:
+          description: Folder not found or user has no access
     patch:
       summary: Update folder
       tags: [Companies]
@@ -1640,12 +1658,15 @@ paths:
                   type: string
                   format: binary
       responses:
-        200:
+        201:
           description: Document uploaded
+        403:
+          description: User does not have access to this folder
 
-  /companies/{companyId}/files:
+  /companies/{companyId}/folders/{folderId}/permissions:
     get:
-      summary: List company files
+      summary: List folder permissions
+      description: Lists permissions for a root folder only. Permissions can only be set on root folders. Requires company admin.
       tags: [Companies]
       security:
         - BearerAuth: []
@@ -1656,9 +1677,152 @@ paths:
           schema:
             type: string
             format: uuid
+        - name: folderId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
       responses:
         200:
-          description: List of files
+          description: List of folder permissions (user or group, permission_type read/write/admin)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id: { type: string, format: uuid }
+                    folder_id: { type: string, format: uuid }
+                    user_id: { type: string, format: uuid, nullable: true }
+                    group_id: { type: string, format: uuid, nullable: true }
+                    permission_type: { type: string, enum: [read, write, admin] }
+                    user: { type: object, nullable: true }
+                    group: { type: object, nullable: true }
+        400:
+          description: Permissions can only be set on root folders
+        403:
+          description: Company admin required
+        404:
+          description: Folder not found
+    post:
+      summary: Add folder permission
+      description: Add a user or group permission on a root folder. Requires company admin. Provide exactly one of user_id or group_id.
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: folderId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                user_id:
+                  type: string
+                  format: uuid
+                  description: User to grant access (use exactly one of user_id or group_id)
+                group_id:
+                  type: string
+                  format: uuid
+                  description: Group to grant access (use exactly one of user_id or group_id)
+                permission_type:
+                  type: string
+                  enum: [read, write, admin]
+                  default: read
+      responses:
+        201:
+          description: Permission created
+        400:
+          description: Provide exactly one of user_id or group_id; or permission already exists
+        403:
+          description: Company admin required
+        404:
+          description: Folder not found
+  /companies/{companyId}/folders/{folderId}/permissions/{permissionId}:
+    delete:
+      summary: Delete folder permission
+      description: Remove a permission from a root folder. Requires company admin.
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: folderId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: permissionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        204:
+          description: Permission deleted
+        403:
+          description: Company admin required
+        404:
+          description: Permission or folder not found
+
+  /companies/{companyId}/files:
+    get:
+      summary: List company files
+      description: |
+        Returns files in a folder or by a list of IDs. User must belong to the company.
+        **Access:** When folder_id is set, returns 403 if the user cannot access that folder.
+        When ids is set (e.g. after metadata search), only files in folders the user can access are returned.
+        Company admins can access all folders.
+      tags: [Companies]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: folder_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: List files in this folder. Omit or empty for root (returns no files; use folders to browse).
+        - name: ids
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Comma-separated file IDs (e.g. from by-metadata). Only files in accessible folders are returned.
+      responses:
+        200:
+          description: List of files (filtered by folder access when using ids)
+        403:
+          description: User does not have access to this folder
     post:
       summary: Create file record
       tags: [Companies]
@@ -1682,6 +1846,9 @@ paths:
   /companies/{companyId}/files/by-metadata:
     get:
       summary: Get file IDs by metadata
+      description: |
+        Returns file IDs matching the given metadata key (and optional value). Used for metadata search.
+        **Access:** Only file IDs for files in folders the user can access are returned. Company admins see all matches.
       tags: [Companies]
       security:
         - BearerAuth: []
@@ -1692,9 +1859,31 @@ paths:
           schema:
             type: string
             format: uuid
+        - name: metadata_id
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: value
+          in: query
+          required: false
+          schema:
+            type: string
       responses:
         200:
-          description: List of file IDs
+          description: Object with fileIds array (only files in accessible folders)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [fileIds]
+                properties:
+                  fileIds:
+                    type: array
+                    items:
+                      type: string
+                      format: uuid
   /companies/{companyId}/files/{fileId}/metadata:
     put:
       summary: Update file metadata
@@ -1725,6 +1914,7 @@ paths:
   /companies/{companyId}/files/{fileId}:
     delete:
       summary: Delete company file
+      description: Deletes the file. Returns 403 if the user does not have access to the file's folder.
       tags: [Companies]
       security:
         - BearerAuth: []
@@ -1742,8 +1932,12 @@ paths:
             type: string
             format: uuid
       responses:
-        200:
+        204:
           description: File deleted
+        403:
+          description: User does not have access to the file's folder
+        404:
+          description: File not found
 
   /companies/{companyId}/agent-permissions:
     get:
