@@ -23,6 +23,7 @@ const nodeStyles = {
   start: {
     bg: "bg-emerald-100",
     borderColor: "border-emerald-400",
+    ringColor: "ring-emerald-400",
     textColor: "text-emerald-700",
     shadow: "shadow-emerald-200/50",
     shape: "rounded-full",
@@ -30,6 +31,7 @@ const nodeStyles = {
   end: {
     bg: "bg-rose-100",
     borderColor: "border-rose-400",
+    ringColor: "ring-rose-400",
     textColor: "text-rose-700",
     shadow: "shadow-rose-200/50",
     shape: "rounded-full",
@@ -37,6 +39,7 @@ const nodeStyles = {
   decision: {
     bg: "bg-amber-100",
     borderColor: "border-amber-400",
+    ringColor: "ring-amber-400",
     textColor: "text-amber-700",
     shadow: "shadow-amber-200/50",
     shape: "rounded-lg",
@@ -44,6 +47,7 @@ const nodeStyles = {
   action: {
     bg: "bg-blue-100",
     borderColor: "border-blue-400",
+    ringColor: "ring-blue-400",
     textColor: "text-blue-700",
     shadow: "shadow-blue-200/50",
     shape: "rounded-lg",
@@ -51,6 +55,7 @@ const nodeStyles = {
   edit_form: {
     bg: "bg-violet-100",
     borderColor: "border-violet-400",
+    ringColor: "ring-violet-400",
     textColor: "text-violet-700",
     shadow: "shadow-violet-200/50",
     shape: "rounded-lg",
@@ -58,6 +63,7 @@ const nodeStyles = {
   file: {
     bg: "bg-orange-100",
     borderColor: "border-orange-400",
+    ringColor: "ring-orange-400",
     textColor: "text-orange-700",
     shadow: "shadow-orange-200/50",
     shape: "rounded-lg",
@@ -183,10 +189,10 @@ export function WorkflowNode({
         className={`
           ${style.bg} ${style.shape}
           ${step.step_type === "decision" ? "w-40 h-32" : "w-32 h-32"}
-          border-2 ${isHighlighted ? "border-primary border-4" : style.borderColor} shadow-md
+          border-2 ${isHighlighted ? `${style.borderColor} border-4` : style.borderColor} shadow-md
           flex flex-col items-center justify-center relative
           transition-all duration-300
-          ${isHighlighted ? "ring-4 ring-primary ring-offset-2 animate-pulse" : ""}
+          ${isHighlighted ? `ring-4 ${style.ringColor} ring-offset-2 animate-pulse` : ""}
           ${isSelected ? `ring-2 ring-offset-2 ${style.borderColor} ${style.shadow}` : ""}
           ${!readOnly && !isHighlighted && !isSelected ? "hover:scale-105 hover:shadow-lg" : ""}
         `}

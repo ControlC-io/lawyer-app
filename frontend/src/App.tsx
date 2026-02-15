@@ -26,6 +26,7 @@ import ApiConfigurations from "./pages/ApiConfigurations";
 import AgentConfigurations from "./pages/AgentConfigurations";
 import NoOrganization from "./pages/NoOrganization";
 import { ExternalForm } from "./pages/ExternalForm";
+import CompanyPortal from "./pages/CompanyPortal";
 import Data from "./pages/Data";
 import GlobalVariables from "./pages/GlobalVariables";
 
@@ -45,6 +46,7 @@ const App = () => (
             <Route path="/no-organization" element={<NoOrganization />} />
             <Route path="/accept-invitation" element={<AcceptInvitation />} />
             <Route path="/external/form/:token" element={<ExternalForm />} />
+            <Route path="/portal/:slug" element={<CompanyPortal />} />
             <Route
               path="/*"
               element={

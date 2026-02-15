@@ -1,7 +1,9 @@
 import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { format } from "date-fns";
+import { fr, enUS } from "date-fns/locale";
 import { Badge } from "@/components/ui/badge";
+import { useLanguage } from "@/contexts/LanguageContext";
 import { Card, CardContent } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { PlayCircle, Clock, CheckCircle, XCircle, Pause, User, Users } from "lucide-react";
@@ -85,6 +87,8 @@ const getStatusBadgeClass = (status: string) => {
 // Sub-components
 const KanbanCard = ({ execution, step }: { execution: Execution; step: ExecutionStep }) => {
     const navigate = useNavigate();
+    const { t, language } = useLanguage();
+    const dateLocale = language === "fr" ? fr : enUS;
 
     return (
         <Card
@@ -95,7 +99,7 @@ const KanbanCard = ({ execution, step }: { execution: Execution; step: Execution
                 {/* Workflow Name */}
                 <div>
                     <h4 className="font-semibold text-sm leading-tight text-foreground group-hover:text-primary transition-colors">
-                        {execution.workflows?.name || "Untitled Workflow"}
+                        {execution.workflows?.name || t("executionList.untitledWorkflow")}
                     </h4>
                     {execution.name && (
                         <p className="text-xs text-muted-foreground mt-0.5">
@@ -158,7 +162,7 @@ const KanbanCard = ({ execution, step }: { execution: Execution; step: Execution
                 {execution.started_at && (
                     <div className="pt-0.5 text-[10px] text-muted-foreground flex items-center gap-1">
                         <Clock className="h-2.5 w-2.5 opacity-50" />
-                        {format(new Date(execution.started_at), "MMM d, HH:mm")}
+                        {format(new Date(execution.started_at), "MMM d, HH:mm", { locale: dateLocale })}
                     </div>
                 )}
             </CardContent>

@@ -1,6 +1,9 @@
+import { useState } from "react";
 import { format, isToday, isYesterday, isSameYear } from "date-fns";
+import { fr, enUS } from "date-fns/locale";
 import { useNavigate } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
+import { useLanguage } from "@/contexts/LanguageContext";
 import {
     TableBody,
     TableCell,
@@ -8,6 +11,16 @@ import {
     TableHeader,
     TableRow,
 } from "@/components/ui/table";
+import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { PlayCircle, Clock, CheckCircle, XCircle, Pause, User, Users, ChevronRight, Calendar, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
@@ -35,20 +48,29 @@ interface ExecutionListProps {
 
 export const ExecutionList = ({ executions }: ExecutionListProps) => {
     const navigate = useNavigate();
+    const { t, language } = useLanguage();
     const { isCompanyAdmin } = useAuth();
     const companyId = useCompanyId();
     const queryClient = useQueryClient();
+    const [executionToDelete, setExecutionToDelete] = useState<Execution | null>(null);
+    const dateLocale = language === "fr" ? fr : enUS;
 
-    const handleDeleteExecution = async (e: React.MouseEvent, executionId: string) => {
+    const openDeleteConfirm = (e: React.MouseEvent, execution: Execution) => {
         e.stopPropagation();
-        if (!companyId) return;
+        setExecutionToDelete(execution);
+    };
+
+    const performDelete = async () => {
+        if (!executionToDelete || !companyId) return;
         try {
-            await api.delete(`/api/companies/${companyId}/executions/${executionId}`);
-            toast.success("Execution deleted successfully");
+            await api.delete(`/api/companies/${companyId}/executions/${executionToDelete.id}`);
+            toast.success(t("executionList.deleteSuccess"));
             queryClient.invalidateQueries({ queryKey: ["workflow_executions_extended"] });
         } catch (error) {
             console.error("Error deleting execution:", error);
-            toast.error("Failed to delete execution");
+            toast.error(t("executionList.deleteFailed"));
+        } finally {
+            setExecutionToDelete(null);
         }
     };
 
@@ -84,15 +106,15 @@ export const ExecutionList = ({ executions }: ExecutionListProps) => {
         if (!dateString) return "-";
         const date = new Date(dateString);
         if (isToday(date)) {
-            return format(date, "'Today at' HH:mm");
+            return `${t("executionList.date.todayAt")} ${format(date, "HH:mm", { locale: dateLocale })}`;
         }
         if (isYesterday(date)) {
-            return format(date, "'Yesterday at' HH:mm");
+            return `${t("executionList.date.yesterdayAt")} ${format(date, "HH:mm", { locale: dateLocale })}`;
         }
         if (isSameYear(date, new Date())) {
-            return format(date, "MMM d, HH:mm");
+            return format(date, "MMM d, HH:mm", { locale: dateLocale });
         }
-        return format(date, "MMM d, yyyy HH:mm");
+        return format(date, "MMM d, yyyy HH:mm", { locale: dateLocale });
     };
 
     if (executions.length === 0) {
@@ -101,8 +123,8 @@ export const ExecutionList = ({ executions }: ExecutionListProps) => {
                 <div className="h-12 w-12 rounded-full bg-muted/20 flex items-center justify-center mb-3">
                     <PlayCircle className="h-6 w-6 opacity-50" />
                 </div>
-                <h3 className="font-medium text-foreground mb-1">No executions found</h3>
-                <p className="text-sm">There are no workflow executions matching your filters.</p>
+                <h3 className="font-medium text-foreground mb-1">{t("executionList.noExecutions")}</h3>
+                <p className="text-sm">{t("executionList.noExecutionsDescription")}</p>
             </div>
         );
     }
@@ -113,10 +135,10 @@ export const ExecutionList = ({ executions }: ExecutionListProps) => {
                 <table className="w-full caption-bottom text-sm">
                     <TableHeader className="sticky top-0 bg-background z-10 border-b-2 border-border shadow-sm">
                         <TableRow className="hover:bg-transparent border-none">
-                            <TableHead className="w-[45%] pl-4 py-3 h-auto font-medium text-muted-foreground">Workflow & Current Step</TableHead>
-                            <TableHead className="w-[20%] py-3 h-auto font-medium text-muted-foreground">Status</TableHead>
-                            <TableHead className="w-[20%] py-3 h-auto font-medium text-muted-foreground">Assignees</TableHead>
-                            <TableHead className="w-[15%] py-3 h-auto font-medium text-muted-foreground text-right pr-6">Started</TableHead>
+                            <TableHead className="w-[45%] pl-4 py-3 h-auto font-medium text-muted-foreground">{t("executionList.workflowAndStep")}</TableHead>
+                            <TableHead className="w-[20%] py-3 h-auto font-medium text-muted-foreground">{t("executionList.status")}</TableHead>
+                            <TableHead className="w-[20%] py-3 h-auto font-medium text-muted-foreground">{t("executionList.assignees")}</TableHead>
+                            <TableHead className="w-[15%] py-3 h-auto font-medium text-muted-foreground text-right pr-6">{t("executionList.started")}</TableHead>
                         </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -129,7 +151,7 @@ export const ExecutionList = ({ executions }: ExecutionListProps) => {
                                 <TableCell className="pl-4 py-3 align-top">
                                     <div className="flex flex-col gap-1.5">
                                         <span className="font-semibold text-foreground group-hover:text-primary transition-colors text-base">
-                                            {execution.workflows?.name || "Untitled Workflow"}
+                                            {execution.workflows?.name || t("executionList.untitledWorkflow")}
                                         </span>
                                         {execution.name && (
                                             <span className="text-xs text-muted-foreground -mt-1">
@@ -196,7 +218,7 @@ export const ExecutionList = ({ executions }: ExecutionListProps) => {
                                                 </Badge>
                                             ))
                                         ) : (
-                                            <span className="text-xs text-muted-foreground italic">Unassigned</span>
+                                            <span className="text-xs text-muted-foreground italic">{t("executionList.unassigned")}</span>
                                         )}
                                     </div>
                                 </TableCell>
@@ -211,13 +233,13 @@ export const ExecutionList = ({ executions }: ExecutionListProps) => {
                                         </div>
                                         <div className="flex items-center gap-2">
                                             <div className="text-[10px] text-primary/0 group-hover:text-primary transition-all flex items-center gap-0.5 opacity-0 group-hover:opacity-100 translate-x-2 group-hover:translate-x-0 duration-300">
-                                                View Details <ChevronRight className="h-3 w-3" />
+                                                {t("executionList.viewDetails")} <ChevronRight className="h-3 w-3" />
                                             </div>
                                             {isCompanyAdmin && (
                                                 <button
-                                                    onClick={(e) => handleDeleteExecution(e, execution.id)}
+                                                    onClick={(e) => openDeleteConfirm(e, execution)}
                                                     className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive"
-                                                    title="Delete execution"
+                                                    title={t("common.delete")}
                                                 >
                                                     <Trash2 className="h-3.5 w-3.5" />
                                                 </button>
@@ -230,6 +252,33 @@ export const ExecutionList = ({ executions }: ExecutionListProps) => {
                     </TableBody>
                 </table>
             </div>
+
+            <AlertDialog open={!!executionToDelete} onOpenChange={(open) => !open && setExecutionToDelete(null)}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>{t("executionList.deleteConfirmTitle")}</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            {t("executionList.deleteConfirmDescription")}
+                            {executionToDelete && (
+                                <> for &quot;{executionToDelete.workflows?.name || t("executionList.untitledWorkflow")}&quot;{executionToDelete.name ? ` (${executionToDelete.name})` : ""}</>
+                            )}
+                            .
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
+                        <AlertDialogAction
+                            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                            onClick={(e) => {
+                                e.preventDefault();
+                                performDelete();
+                            }}
+                        >
+                            {t("common.delete")}
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
         </div>
     );
 };

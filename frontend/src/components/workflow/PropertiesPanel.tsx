@@ -17,6 +17,8 @@ import { useCompanyId } from "@/hooks/useCompanyId";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { FormBlocksEditor } from "./FormBlocksEditor";
+import { FieldRulesEditor } from "./FieldRulesEditor";
+import { FieldValidationsEditor } from "./FieldValidationsEditor";
 import { getIconComponent } from "@/lib/iconUtils";
 import { Folder } from "lucide-react";
 
@@ -29,9 +31,12 @@ interface PropertiesPanelProps {
   onUpdateStep: (step: WorkflowStep) => void;
   onClose: () => void;
   onOutputRenamed?: (stepId: string, oldName: string, newName: string) => void;
+  onOpenDataStructureEditor?: () => void;
+  /** When set (e.g. "form"), open the configuration sub-tab on this tab when step is edit_form. Used to return to Form after closing data structure editor. */
+  initialConfigurationSubTab?: "status" | "form" | "rules" | "validation" | "action";
 }
 
-export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep, onClose, onOutputRenamed }: PropertiesPanelProps) {
+export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep, onClose, onOutputRenamed, onOpenDataStructureEditor, initialConfigurationSubTab }: PropertiesPanelProps) {
   const companyId = useCompanyId();
   const navigate = useNavigate();
   const [outputs, setOutputs] = useState<string[]>(
@@ -804,45 +809,427 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
           </TabsContent>
 
           <TabsContent value="configuration" className="space-y-4 mt-4">
-            {/* Status Assignment - appears above all other configurations */}
-            <div className="space-y-2">
-              <Label htmlFor="step-status">Status</Label>
-              <Select
-                value={step.config.status_id || "none"}
-                onValueChange={(value) => {
-                  onUpdateStep({
-                    ...step,
-                    config: {
-                      ...step.config,
-                      status_id: value === "none" ? null : value,
-                    },
-                  });
-                }}
-              >
-                <SelectTrigger id="step-status">
-                  <SelectValue placeholder="Select status" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">No status</SelectItem>
-                  {workflowStatuses.map((status) => (
-                    <SelectItem key={status.id} value={status.id}>
-                      <div className="flex items-center gap-2">
-                        <div
-                          className="w-3 h-3 rounded-full"
-                          style={{ backgroundColor: status.color }}
-                        />
-                        <span>{status.name}</span>
-                      </div>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground">
-                Assign a status to this step that will be linked when the step is executed
-              </p>
-            </div>
+            {step.step_type === "edit_form" ? (
+              <Tabs defaultValue={initialConfigurationSubTab ?? "status"} className="w-full">
+                <TabsList className="grid w-full grid-cols-5">
+                  <TabsTrigger value="status">Status</TabsTrigger>
+                  <TabsTrigger value="form">Form</TabsTrigger>
+                  <TabsTrigger value="rules">Rules</TabsTrigger>
+                  <TabsTrigger value="validation">Validation</TabsTrigger>
+                  <TabsTrigger value="action">Action</TabsTrigger>
+                </TabsList>
+                <TabsContent value="status" className="space-y-4 mt-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="step-status-form">Status</Label>
+                    <Select
+                      value={step.config.status_id || "none"}
+                      onValueChange={(value) => {
+                        onUpdateStep({
+                          ...step,
+                          config: {
+                            ...step.config,
+                            status_id: value === "none" ? null : value,
+                          },
+                        });
+                      }}
+                    >
+                      <SelectTrigger id="step-status-form">
+                        <SelectValue placeholder="Select status" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">No status</SelectItem>
+                        {workflowStatuses.map((status) => (
+                          <SelectItem key={status.id} value={status.id}>
+                            <div className="flex items-center gap-2">
+                              <div
+                                className="w-3 h-3 rounded-full"
+                                style={{ backgroundColor: status.color }}
+                              />
+                              <span>{status.name}</span>
+                            </div>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">
+                      Assign a status to this step that will be linked when the step is executed
+                    </p>
+                  </div>
+                </TabsContent>
+                <TabsContent value="form" className="space-y-4 mt-4">
+                  {dataStructureItems.length === 0 ? (
+                    <div className="p-4 border border-dashed rounded-md text-center">
+                      <p className="text-sm text-muted-foreground">
+                        No data structures linked to this workflow. Please link a data structure first.
+                      </p>
+                    </div>
+                  ) : (
+                    <FormBlocksEditor
+                      step={step}
+                      dataStructureItems={dataStructureItems}
+                      onUpdate={onUpdateStep}
+                      fullDataStructure={dataStructure || undefined}
+                      onGoToDataStructure={onOpenDataStructureEditor}
+                    />
+                  )}
+                </TabsContent>
+                <TabsContent value="rules" className="space-y-4 mt-4">
+                  {dataStructureItems.length === 0 ? (
+                    <div className="p-4 border border-dashed rounded-md text-center">
+                      <p className="text-sm text-muted-foreground">
+                        No data structures linked to this workflow. Please link a data structure first.
+                      </p>
+                    </div>
+                  ) : (
+                    <FieldRulesEditor
+                      step={step}
+                      dataStructureItems={dataStructureItems}
+                      fullDataStructure={dataStructure || undefined}
+                      onUpdate={onUpdateStep}
+                    />
+                  )}
+                </TabsContent>
+                <TabsContent value="validation" className="space-y-4 mt-4">
+                  {dataStructureItems.length === 0 ? (
+                    <div className="p-4 border border-dashed rounded-md text-center">
+                      <p className="text-sm text-muted-foreground">
+                        No data structures linked to this workflow. Please link a data structure first.
+                      </p>
+                    </div>
+                  ) : (
+                    <FieldValidationsEditor
+                      step={step}
+                      dataStructureItems={dataStructureItems}
+                      fullDataStructure={dataStructure || undefined}
+                      onUpdate={onUpdateStep}
+                    />
+                  )}
 
-            {step.step_type === "action" && (
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-0.5">
+                        <Label>AI Form Validation</Label>
+                        <p className="text-xs text-muted-foreground">
+                          Validate submitted data with an AI rule before allowing submission.
+                        </p>
+                      </div>
+                      <Switch
+                        id="ai-form-validation"
+                        checked={!!step.config.ai_form_validation_enabled}
+                        onCheckedChange={(checked) => {
+                          onUpdateStep({
+                            ...step,
+                            config: {
+                              ...step.config,
+                              ai_form_validation_enabled: checked,
+                            },
+                          });
+                        }}
+                      />
+                    </div>
+
+                    {!!step.config.ai_form_validation_enabled && (
+                      <div className="space-y-2">
+                        <Label htmlFor="ai-form-validation-rule">Validation rule (prompt)</Label>
+                        <p className="text-xs text-muted-foreground">
+                          This prompt is sent to the validator as the user edits the form and again on submission.
+                        </p>
+                        <Textarea
+                          id="ai-form-validation-rule"
+                          value={step.config.ai_form_validation_rule || ""}
+                          onChange={(e) => {
+                            onUpdateStep({
+                              ...step,
+                              config: {
+                                ...step.config,
+                                ai_form_validation_rule: e.target.value,
+                              },
+                            });
+                          }}
+                          placeholder="Describe what makes the submission valid, and what to reject."
+                          className="min-h-[120px]"
+                        />
+                      </div>
+                    )}
+                  </div>
+                </TabsContent>
+                <TabsContent value="action" className="space-y-4 mt-4">
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-0.5">
+                        <Label>Form Actions</Label>
+                        <p className="text-xs text-muted-foreground">
+                          Configure agent actions that can be called from the form
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          const currentActions = step.config.form_actions || [];
+                          const newAction = {
+                            id: crypto.randomUUID(),
+                            agent_id: null,
+                            api_data: [],
+                            additional_comment: "",
+                            data_to_update: []
+                          };
+                          onUpdateStep({
+                            ...step,
+                            config: {
+                              ...step.config,
+                              form_actions: [...currentActions, newAction]
+                            }
+                          });
+                        }}
+                      >
+                        <Plus className="h-4 w-4 mr-2" />
+                        Add Action
+                      </Button>
+                    </div>
+
+                    {(step.config.form_actions || []).length === 0 ? (
+                      <div className="p-4 border border-dashed rounded-md text-center">
+                        <p className="text-sm text-muted-foreground">
+                          No actions configured. Click "Add Action" to add an agent action.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="space-y-4">
+                        {(step.config.form_actions || []).map((action: any, actionIndex: number) => (
+                          <div key={action.id || actionIndex} className="border rounded-lg p-4 space-y-4">
+                            <div className="flex items-center justify-between">
+                              <Label>Action {actionIndex + 1}</Label>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => {
+                                  const currentActions = step.config.form_actions || [];
+                                  const updatedActions = currentActions.filter((a: any, idx: number) => idx !== actionIndex);
+                                  onUpdateStep({
+                                    ...step,
+                                    config: {
+                                      ...step.config,
+                                      form_actions: updatedActions
+                                    }
+                                  });
+                                }}
+                              >
+                                <Trash2 className="h-4 w-4 text-destructive" />
+                              </Button>
+                            </div>
+
+                            <div className="space-y-2">
+                              <Label>Select Agent</Label>
+                              <Select
+                                value={action.agent_id || "none"}
+                                onValueChange={(value) => {
+                                  const currentActions = step.config.form_actions || [];
+                                  const updatedActions = currentActions.map((a: any, idx: number) =>
+                                    idx === actionIndex ? { ...a, agent_id: value === "none" ? null : value } : a
+                                  );
+                                  onUpdateStep({
+                                    ...step,
+                                    config: {
+                                      ...step.config,
+                                      form_actions: updatedActions
+                                    }
+                                  });
+                                }}
+                              >
+                                <SelectTrigger>
+                                  <SelectValue placeholder="Select an agent" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {renderGroupedAgents("action")}
+                                </SelectContent>
+                              </Select>
+                            </div>
+
+                            {action.agent_id && (
+                              <>
+                                <div className="space-y-2">
+                                  <Label>Data to Send</Label>
+                                  <p className="text-xs text-muted-foreground mb-2">
+                                    Select data fields to send to the agent.
+                                  </p>
+                                  <div className="border rounded-md p-3 space-y-2 max-h-60 overflow-y-auto">
+                                    {dataStructureItems.length === 0 && (
+                                      <p className="text-sm text-muted-foreground">No data structure fields defined.</p>
+                                    )}
+                                    {dataStructureItems.map((field) => {
+                                      const currentApiData = action.api_data || [];
+                                      const isSelected = currentApiData.some((d: any) => d.value === `{{${field.id}}}`);
+
+                                      return (
+                                        <div key={field.id} className="flex items-center space-x-2">
+                                          <Switch
+                                            id={`form-action-${actionIndex}-send-${field.id}`}
+                                            checked={isSelected}
+                                            onCheckedChange={(checked) => {
+                                              const currentActions = step.config.form_actions || [];
+                                              const currentAction = currentActions[actionIndex] || {};
+                                              let newApiData = [...(currentAction.api_data || [])];
+
+                                              if (checked) {
+                                                newApiData.push({
+                                                  key: field.name,
+                                                  value: `{{${field.id}}}`,
+                                                  mode: "bind"
+                                                });
+                                              } else {
+                                                newApiData = newApiData.filter((d: any) => d.value !== `{{${field.id}}}`);
+                                              }
+
+                                              const updatedActions = currentActions.map((a: any, idx: number) =>
+                                                idx === actionIndex ? { ...a, api_data: newApiData } : a
+                                              );
+                                              onUpdateStep({
+                                                ...step,
+                                                config: {
+                                                  ...step.config,
+                                                  form_actions: updatedActions
+                                                }
+                                              });
+                                            }}
+                                          />
+                                          <Label htmlFor={`form-action-${actionIndex}-send-${field.id}`} className="cursor-pointer">
+                                            {field.name}
+                                          </Label>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+
+                                <div className="space-y-2">
+                                  <Label>Additional Comment</Label>
+                                  <p className="text-xs text-muted-foreground mb-2">
+                                    Optional comment to send with the webhook request.
+                                  </p>
+                                  <Textarea
+                                    value={action.additional_comment || ""}
+                                    onChange={(e) => {
+                                      const currentActions = step.config.form_actions || [];
+                                      const updatedActions = currentActions.map((a: any, idx: number) =>
+                                        idx === actionIndex ? { ...a, additional_comment: e.target.value } : a
+                                      );
+                                      onUpdateStep({
+                                        ...step,
+                                        config: {
+                                          ...step.config,
+                                          form_actions: updatedActions
+                                        }
+                                      });
+                                    }}
+                                    placeholder="Enter additional comments..."
+                                    className="min-h-[80px]"
+                                  />
+                                </div>
+
+                                <div className="space-y-2">
+                                  <Label>Data to Update</Label>
+                                  <p className="text-xs text-muted-foreground mb-2">
+                                    Select data fields to update from agent response.
+                                  </p>
+                                  <div className="border rounded-md p-3 space-y-2 max-h-60 overflow-y-auto">
+                                    {dataStructureItems.length === 0 && (
+                                      <p className="text-sm text-muted-foreground">No data structure fields defined.</p>
+                                    )}
+                                    {dataStructureItems.map((field) => {
+                                      const currentUpdateData = action.data_to_update || [];
+                                      const isSelected = currentUpdateData.some((d: any) => d.value === field.id);
+
+                                      return (
+                                        <div key={`update-${actionIndex}-${field.id}`} className="flex items-center space-x-2">
+                                          <Switch
+                                            id={`form-action-${actionIndex}-update-${field.id}`}
+                                            checked={isSelected}
+                                            onCheckedChange={(checked) => {
+                                              const currentActions = step.config.form_actions || [];
+                                              const currentAction = currentActions[actionIndex] || {};
+                                              let newUpdateData = [...(currentAction.data_to_update || [])];
+
+                                              if (checked) {
+                                                newUpdateData.push({
+                                                  key: field.name,
+                                                  value: field.id
+                                                });
+                                              } else {
+                                                newUpdateData = newUpdateData.filter((d: any) => d.value !== field.id);
+                                              }
+
+                                              const updatedActions = currentActions.map((a: any, idx: number) =>
+                                                idx === actionIndex ? { ...a, data_to_update: newUpdateData } : a
+                                              );
+                                              onUpdateStep({
+                                                ...step,
+                                                config: {
+                                                  ...step.config,
+                                                  form_actions: updatedActions
+                                                }
+                                              });
+                                            }}
+                                          />
+                                          <Label htmlFor={`form-action-${actionIndex}-update-${field.id}`} className="cursor-pointer">
+                                            {field.name}
+                                          </Label>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </TabsContent>
+              </Tabs>
+            ) : (
+              <>
+                <div className="space-y-2">
+                  <Label htmlFor="step-status">Status</Label>
+                  <Select
+                    value={step.config.status_id || "none"}
+                    onValueChange={(value) => {
+                      onUpdateStep({
+                        ...step,
+                        config: {
+                          ...step.config,
+                          status_id: value === "none" ? null : value,
+                        },
+                      });
+                    }}
+                  >
+                    <SelectTrigger id="step-status">
+                      <SelectValue placeholder="Select status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">No status</SelectItem>
+                      {workflowStatuses.map((status) => (
+                        <SelectItem key={status.id} value={status.id}>
+                          <div className="flex items-center gap-2">
+                            <div
+                              className="w-3 h-3 rounded-full"
+                              style={{ backgroundColor: status.color }}
+                            />
+                            <span>{status.name}</span>
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    Assign a status to this step that will be linked when the step is executed
+                  </p>
+                </div>
+
+                {step.step_type === "action" && (
               <div className="space-y-4">
                 <div className="space-y-2">
                   <Label>Action Type</Label>
@@ -1862,315 +2249,6 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
               </>
             )}
 
-            {step.step_type === "edit_form" && (
-              <div className="space-y-4">
-                {dataStructureItems.length === 0 ? (
-                  <div className="p-4 border border-dashed rounded-md text-center">
-                    <p className="text-sm text-muted-foreground">
-                      No data structures linked to this workflow. Please link a data structure first.
-                    </p>
-                  </div>
-                ) : (
-                  <FormBlocksEditor
-                    step={step}
-                    dataStructureItems={dataStructureItems}
-                    onUpdate={onUpdateStep}
-                    fullDataStructure={dataStructure || undefined}
-                  />
-                )}
-              </div>
-            )}
-
-            {step.step_type === "edit_form" && (
-              <div className="space-y-4 pt-4 border-t">
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <Label>AI Form Validation</Label>
-                    <p className="text-xs text-muted-foreground">
-                      Validate submitted data with an AI rule before allowing submission.
-                    </p>
-                  </div>
-                  <Switch
-                    id="ai-form-validation"
-                    checked={!!step.config.ai_form_validation_enabled}
-                    onCheckedChange={(checked) => {
-                      onUpdateStep({
-                        ...step,
-                        config: {
-                          ...step.config,
-                          ai_form_validation_enabled: checked,
-                        },
-                      });
-                    }}
-                  />
-                </div>
-
-                {!!step.config.ai_form_validation_enabled && (
-                  <div className="space-y-2">
-                    <Label htmlFor="ai-form-validation-rule">Validation rule (prompt)</Label>
-                    <p className="text-xs text-muted-foreground">
-                      This prompt is sent to the validator as the user edits the form and again on submission.
-                    </p>
-                    <Textarea
-                      id="ai-form-validation-rule"
-                      value={step.config.ai_form_validation_rule || ""}
-                      onChange={(e) => {
-                        onUpdateStep({
-                          ...step,
-                          config: {
-                            ...step.config,
-                            ai_form_validation_rule: e.target.value,
-                          },
-                        });
-                      }}
-                      placeholder="Describe what makes the submission valid, and what to reject."
-                      className="min-h-[120px]"
-                    />
-                  </div>
-                )}
-              </div>
-            )}
-
-            {step.step_type === "edit_form" && (
-              <div className="space-y-4 pt-4 border-t">
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <Label>Form Actions</Label>
-                    <p className="text-xs text-muted-foreground">
-                      Configure agent actions that can be called from the form
-                    </p>
-                  </div>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      const currentActions = step.config.form_actions || [];
-                      const newAction = {
-                        id: crypto.randomUUID(),
-                        agent_id: null,
-                        api_data: [],
-                        additional_comment: "",
-                        data_to_update: []
-                      };
-                      onUpdateStep({
-                        ...step,
-                        config: {
-                          ...step.config,
-                          form_actions: [...currentActions, newAction]
-                        }
-                      });
-                    }}
-                  >
-                    <Plus className="h-4 w-4 mr-2" />
-                    Add Action
-                  </Button>
-                </div>
-
-                {(step.config.form_actions || []).length === 0 ? (
-                  <div className="p-4 border border-dashed rounded-md text-center">
-                    <p className="text-sm text-muted-foreground">
-                      No actions configured. Click "Add Action" to add an agent action.
-                    </p>
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    {(step.config.form_actions || []).map((action: any, actionIndex: number) => (
-                      <div key={action.id || actionIndex} className="border rounded-lg p-4 space-y-4">
-                        <div className="flex items-center justify-between">
-                          <Label>Action {actionIndex + 1}</Label>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => {
-                              const currentActions = step.config.form_actions || [];
-                              const updatedActions = currentActions.filter((a: any, idx: number) => idx !== actionIndex);
-                              onUpdateStep({
-                                ...step,
-                                config: {
-                                  ...step.config,
-                                  form_actions: updatedActions
-                                }
-                              });
-                            }}
-                          >
-                            <Trash2 className="h-4 w-4 text-destructive" />
-                          </Button>
-                        </div>
-
-                        <div className="space-y-2">
-                          <Label>Select Agent</Label>
-                          <Select
-                            value={action.agent_id || "none"}
-                            onValueChange={(value) => {
-                              const currentActions = step.config.form_actions || [];
-                              const updatedActions = currentActions.map((a: any, idx: number) =>
-                                idx === actionIndex ? { ...a, agent_id: value === "none" ? null : value } : a
-                              );
-                              onUpdateStep({
-                                ...step,
-                                config: {
-                                  ...step.config,
-                                  form_actions: updatedActions
-                                }
-                              });
-                            }}
-                          >
-                            <SelectTrigger>
-                              <SelectValue placeholder="Select an agent" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {renderGroupedAgents("action")}
-                            </SelectContent>
-                          </Select>
-                        </div>
-
-                        {action.agent_id && (
-                          <>
-                            {/* Data to Send */}
-                            <div className="space-y-2">
-                              <Label>Data to Send</Label>
-                              <p className="text-xs text-muted-foreground mb-2">
-                                Select data fields to send to the agent.
-                              </p>
-                              <div className="border rounded-md p-3 space-y-2 max-h-60 overflow-y-auto">
-                                {dataStructureItems.length === 0 && (
-                                  <p className="text-sm text-muted-foreground">No data structure fields defined.</p>
-                                )}
-                                {dataStructureItems.map((field) => {
-                                  const currentApiData = action.api_data || [];
-                                  const isSelected = currentApiData.some((d: any) => d.value === `{{${field.id}}}`);
-
-                                  return (
-                                    <div key={field.id} className="flex items-center space-x-2">
-                                      <Switch
-                                        id={`form-action-${actionIndex}-send-${field.id}`}
-                                        checked={isSelected}
-                                        onCheckedChange={(checked) => {
-                                          const currentActions = step.config.form_actions || [];
-                                          const currentAction = currentActions[actionIndex] || {};
-                                          let newApiData = [...(currentAction.api_data || [])];
-
-                                          if (checked) {
-                                            newApiData.push({
-                                              key: field.name,
-                                              value: `{{${field.id}}}`,
-                                              mode: "bind"
-                                            });
-                                          } else {
-                                            newApiData = newApiData.filter((d: any) => d.value !== `{{${field.id}}}`);
-                                          }
-
-                                          const updatedActions = currentActions.map((a: any, idx: number) =>
-                                            idx === actionIndex ? { ...a, api_data: newApiData } : a
-                                          );
-                                          onUpdateStep({
-                                            ...step,
-                                            config: {
-                                              ...step.config,
-                                              form_actions: updatedActions
-                                            }
-                                          });
-                                        }}
-                                      />
-                                      <Label htmlFor={`form-action-${actionIndex}-send-${field.id}`} className="cursor-pointer">
-                                        {field.name}
-                                      </Label>
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            </div>
-
-                            {/* Additional Comment */}
-                            <div className="space-y-2">
-                              <Label>Additional Comment</Label>
-                              <p className="text-xs text-muted-foreground mb-2">
-                                Optional comment to send with the webhook request.
-                              </p>
-                              <Textarea
-                                value={action.additional_comment || ""}
-                                onChange={(e) => {
-                                  const currentActions = step.config.form_actions || [];
-                                  const updatedActions = currentActions.map((a: any, idx: number) =>
-                                    idx === actionIndex ? { ...a, additional_comment: e.target.value } : a
-                                  );
-                                  onUpdateStep({
-                                    ...step,
-                                    config: {
-                                      ...step.config,
-                                      form_actions: updatedActions
-                                    }
-                                  });
-                                }}
-                                placeholder="Enter additional comments..."
-                                className="min-h-[80px]"
-                              />
-                            </div>
-
-                            {/* Data to Update */}
-                            <div className="space-y-2">
-                              <Label>Data to Update</Label>
-                              <p className="text-xs text-muted-foreground mb-2">
-                                Select data fields to update from agent response.
-                              </p>
-                              <div className="border rounded-md p-3 space-y-2 max-h-60 overflow-y-auto">
-                                {dataStructureItems.length === 0 && (
-                                  <p className="text-sm text-muted-foreground">No data structure fields defined.</p>
-                                )}
-                                {dataStructureItems.map((field) => {
-                                  const currentUpdateData = action.data_to_update || [];
-                                  const isSelected = currentUpdateData.some((d: any) => d.value === field.id);
-
-                                  return (
-                                    <div key={`update-${actionIndex}-${field.id}`} className="flex items-center space-x-2">
-                                      <Switch
-                                        id={`form-action-${actionIndex}-update-${field.id}`}
-                                        checked={isSelected}
-                                        onCheckedChange={(checked) => {
-                                          const currentActions = step.config.form_actions || [];
-                                          const currentAction = currentActions[actionIndex] || {};
-                                          let newUpdateData = [...(currentAction.data_to_update || [])];
-
-                                          if (checked) {
-                                            newUpdateData.push({
-                                              key: field.name,
-                                              value: field.id
-                                            });
-                                          } else {
-                                            newUpdateData = newUpdateData.filter((d: any) => d.value !== field.id);
-                                          }
-
-                                          const updatedActions = currentActions.map((a: any, idx: number) =>
-                                            idx === actionIndex ? { ...a, data_to_update: newUpdateData } : a
-                                          );
-                                          onUpdateStep({
-                                            ...step,
-                                            config: {
-                                              ...step.config,
-                                              form_actions: updatedActions
-                                            }
-                                          });
-                                        }}
-                                      />
-                                      <Label htmlFor={`form-action-${actionIndex}-update-${field.id}`} className="cursor-pointer">
-                                        {field.name}
-                                      </Label>
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                          </>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-
             {step.step_type === "file" && (
               <div className="space-y-4">
                 <div className="space-y-2">
@@ -2357,6 +2435,8 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
                   </p>
                 </div>
               </div>
+            )}
+              </>
             )}
           </TabsContent>
         </Tabs>

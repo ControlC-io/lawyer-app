@@ -3,6 +3,8 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { format } from "date-fns";
+import { fr, enUS } from "date-fns/locale";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 interface StepLogsDialogProps {
   isOpen: boolean;
@@ -13,6 +15,8 @@ interface StepLogsDialogProps {
 }
 
 export const StepLogsDialog = ({ isOpen, onClose, stepId, steps, logs }: StepLogsDialogProps) => {
+  const { t, language } = useLanguage();
+  const dateLocale = language === "fr" ? fr : enUS;
   const stepName = stepId ? steps?.find(s => s.id === stepId)?.workflow_steps?.name : "";
   const stepLogs = stepId ? logs?.filter((log: any) => log.step_id === stepId) || [] : [];
 
@@ -30,7 +34,7 @@ export const StepLogsDialog = ({ isOpen, onClose, stepId, steps, logs }: StepLog
       <DialogContent className="max-w-4xl max-h-[80vh]">
         <DialogHeader>
           <DialogTitle>
-            {stepName} - Logs
+            {t("executionStepLogs.titleWithStep", { stepName: stepName || "—" })}
           </DialogTitle>
         </DialogHeader>
         <ScrollArea className="h-[60vh] w-full">
@@ -48,7 +52,7 @@ export const StepLogsDialog = ({ isOpen, onClose, stepId, steps, logs }: StepLog
                             {logType.charAt(0).toUpperCase() + logType.slice(1).toLowerCase()}
                           </Badge>
                           <CardTitle className="text-sm text-muted-foreground">
-                            {format(new Date(log.created_at), "PPpp")}
+                            {format(new Date(log.created_at), "PPpp", { locale: dateLocale })}
                           </CardTitle>
                         </div>
                       </div>
@@ -65,7 +69,7 @@ export const StepLogsDialog = ({ isOpen, onClose, stepId, steps, logs }: StepLog
             </div>
           ) : (
             <div className="text-center text-muted-foreground py-8">
-              No logs available for this step
+              {t("executionStepLogs.noLogs")}
             </div>
           )}
         </ScrollArea>

@@ -16,6 +16,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 // Types
 interface AgentCategory {
@@ -57,6 +58,7 @@ interface Company {
 
 export default function AgentConfigurations() {
     const navigate = useNavigate();
+    const { t } = useLanguage();
     const { isSuperAdmin } = useAuth();
     const [activeTab, setActiveTab] = useState("configurations");
     const [loading, setLoading] = useState(true);
@@ -122,7 +124,7 @@ export default function AgentConfigurations() {
             ]);
         } catch (error) {
             console.error("Error fetching data:", error);
-            toast.error("Failed to load data");
+            toast.error(t("agentConfigurations.failedToLoadData"));
         } finally {
             setLoading(false);
         }
@@ -138,7 +140,7 @@ export default function AgentConfigurations() {
             setConfigurations(configsWithType);
         } catch (error: unknown) {
             console.error("Error in fetchConfigurations:", error);
-            toast.error(`Error: ${error instanceof Error ? error.message : "Failed to load configurations"}`);
+            toast.error(`Error: ${error instanceof Error ? error.message : t("agentConfigurations.failedToLoadConfigurations")}`);
         }
     };
 
@@ -221,7 +223,7 @@ export default function AgentConfigurations() {
             setConfigDialogOpen(true);
         } catch (error) {
             console.error("Error opening config dialog:", error);
-            toast.error("Failed to open configuration dialog");
+            toast.error(t("agentConfigurations.failedToOpenDialog"));
         }
     };
 
@@ -240,10 +242,10 @@ export default function AgentConfigurations() {
 
             if (editingConfig) {
                 await api.patch(`/api/agents/configurations/${editingConfig.id}`, payload);
-                toast.success("Configuration updated");
+                toast.success(t("agentConfigurations.configurationUpdated"));
             } else {
                 await api.post(`/api/agents/configurations`, payload);
-                toast.success("Configuration created");
+                toast.success(t("agentConfigurations.configurationCreated"));
             }
             setConfigDialogOpen(false);
             fetchConfigurations();
@@ -253,13 +255,13 @@ export default function AgentConfigurations() {
     };
 
     const handleDeleteConfig = async (id: string) => {
-        if (!confirm("Are you sure?")) return;
+        if (!confirm(t("agentConfigurations.deleteConfirm"))) return;
         try {
             await api.delete(`/api/agents/configurations/${id}`);
-            toast.success("Configuration deleted");
+            toast.success(t("agentConfigurations.configurationDeleted"));
             fetchConfigurations();
         } catch (error: unknown) {
-            toast.error(`Error: ${error instanceof Error ? error.message : "Failed to delete"}`);
+            toast.error(`Error: ${error instanceof Error ? error.message : t("agentConfigurations.failedToDelete")}`);
         }
     };
 
@@ -294,10 +296,10 @@ export default function AgentConfigurations() {
 
             if (editingCategory) {
                 await api.patch(`/api/agents/categories/${editingCategory.id}`, payload);
-                toast.success("Category updated");
+                toast.success(t("agentConfigurations.categoryUpdated"));
             } else {
                 await api.post(`/api/agents/categories`, payload);
-                toast.success("Category created");
+                toast.success(t("agentConfigurations.categoryCreated"));
             }
             setCategoryDialogOpen(false);
             fetchCategories();
@@ -307,13 +309,13 @@ export default function AgentConfigurations() {
     };
 
     const handleDeleteCategory = async (id: string) => {
-        if (!confirm("Are you sure?")) return;
+        if (!confirm(t("agentConfigurations.deleteConfirm"))) return;
         try {
             await api.delete(`/api/agents/categories/${id}`);
-            toast.success("Category deleted");
+            toast.success(t("agentConfigurations.categoryDeleted"));
             fetchCategories();
         } catch (error: unknown) {
-            toast.error(`Error: ${error instanceof Error ? error.message : "Failed to delete"}`);
+            toast.error(`Error: ${error instanceof Error ? error.message : t("agentConfigurations.failedToDelete")}`);
         }
     };
 
@@ -351,10 +353,10 @@ export default function AgentConfigurations() {
                     `/api/companies/${editingPermission.company_id}/agent-permissions/${editingPermission.id}`,
                     { enabled: permissionForm.enabled }
                 );
-                toast.success("Permission updated");
+                toast.success(t("agentConfigurations.permissionUpdated"));
             } else {
                 await api.post(`/api/companies/${permissionForm.company_id}/agent-permissions`, payload);
-                toast.success("Permission created");
+                toast.success(t("agentConfigurations.permissionCreated"));
             }
             setPermissionDialogOpen(false);
             fetchPermissions();
@@ -364,13 +366,13 @@ export default function AgentConfigurations() {
     };
 
     const handleDeletePermission = async (perm: AgentPermission) => {
-        if (!confirm("Are you sure?")) return;
+        if (!confirm(t("agentConfigurations.deleteConfirm"))) return;
         try {
             await api.delete(`/api/companies/${perm.company_id}/agent-permissions/${perm.id}`);
-            toast.success("Permission deleted");
+            toast.success(t("agentConfigurations.permissionDeleted"));
             fetchPermissions();
         } catch (error: unknown) {
-            toast.error(`Error: ${error instanceof Error ? error.message : "Failed to delete"}`);
+            toast.error(`Error: ${error instanceof Error ? error.message : t("agentConfigurations.failedToDelete")}`);
         }
     };
 
@@ -391,10 +393,10 @@ export default function AgentConfigurations() {
                     enabled: !currentEnabled,
                 });
             }
-            toast.success(`Permission ${!currentEnabled ? "enabled" : "disabled"}`);
+            toast.success(t(!currentEnabled ? "agentConfigurations.permissionEnabledDisabled" : "agentConfigurations.permissionDisabled"));
             fetchPermissions();
         } catch (error: unknown) {
-            toast.error(`Error: ${error instanceof Error ? error.message : "Failed to update"}`);
+            toast.error(`Error: ${error instanceof Error ? error.message : t("agentConfigurations.failedToUpdate")}`);
         }
     };
 

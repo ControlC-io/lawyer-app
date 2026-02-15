@@ -11,6 +11,144 @@ import crypto from 'crypto';
 const AI_FORM_VALIDATION_URL = process.env.AI_FORM_VALIDATION_URL || 'https://automation.floowly.app/webhook/7604f736-0ea8-4ec1-9b03-082256e42e0c';
 const AI_FORM_VALIDATION_API_KEY = process.env.FLOOWLY_AI_VALIDATION_API_KEY || '';
 
+// ---------------------------------------------------------------------------
+// Field validation rules (server-side enforcement for external forms)
+// ---------------------------------------------------------------------------
+
+interface FieldValidationRule {
+  id: string;
+  target_field_id: string;
+  validation_type: string;
+  value?: string | number;
+  error_message?: string;
+}
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const URL_RE = /^https?:\/\/.+/i;
+const PHONE_RE = /^\+?[\d\s\-().]{7,20}$/;
+
+function evaluateFieldValidation(
+  rule: FieldValidationRule,
+  fieldValue: unknown,
+): { valid: boolean; message?: string } {
+  if (fieldValue === undefined || fieldValue === null || fieldValue === '') {
+    return { valid: true }; // empty values are handled by required rules
+  }
+  const customMsg = typeof rule.error_message === 'string' ? rule.error_message.trim() : '';
+
+  switch (rule.validation_type) {
+    case 'min_length': {
+      const len = String(fieldValue).length;
+      const min = Number(rule.value ?? 0);
+      if (len < min) return { valid: false, message: customMsg || `Must be at least ${min} characters` };
+      return { valid: true };
+    }
+    case 'max_length': {
+      const len = String(fieldValue).length;
+      const max = Number(rule.value ?? Infinity);
+      if (len > max) return { valid: false, message: customMsg || `Must be at most ${max} characters` };
+      return { valid: true };
+    }
+    case 'regex': {
+      const pattern = String(rule.value ?? '');
+      if (!pattern) return { valid: true };
+      try {
+        if (!new RegExp(pattern).test(String(fieldValue))) {
+          return { valid: false, message: customMsg || 'Does not match the required pattern' };
+        }
+      } catch {
+        return { valid: true };
+      }
+      return { valid: true };
+    }
+    case 'email_format':
+      if (!EMAIL_RE.test(String(fieldValue))) return { valid: false, message: customMsg || 'Must be a valid email address' };
+      return { valid: true };
+    case 'url_format':
+      if (!URL_RE.test(String(fieldValue))) return { valid: false, message: customMsg || 'Must be a valid URL' };
+      return { valid: true };
+    case 'phone_format':
+      if (!PHONE_RE.test(String(fieldValue))) return { valid: false, message: customMsg || 'Must be a valid phone number' };
+      return { valid: true };
+    case 'min_value': {
+      const num = Number(fieldValue);
+      const min = Number(rule.value ?? -Infinity);
+      if (isNaN(num) || num < min) return { valid: false, message: customMsg || `Must be at least ${min}` };
+      return { valid: true };
+    }
+    case 'max_value': {
+      const num = Number(fieldValue);
+      const max = Number(rule.value ?? Infinity);
+      if (isNaN(num) || num > max) return { valid: false, message: customMsg || `Must be at most ${max}` };
+      return { valid: true };
+    }
+    case 'integer_only': {
+      const num = Number(fieldValue);
+      if (isNaN(num) || !Number.isInteger(num)) return { valid: false, message: customMsg || 'Must be a whole number' };
+      return { valid: true };
+    }
+    case 'date_before_today': {
+      const d = new Date(String(fieldValue));
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      if (isNaN(d.getTime()) || d >= today) return { valid: false, message: customMsg || 'Date must be before today' };
+      return { valid: true };
+    }
+    case 'date_after_today': {
+      const d = new Date(String(fieldValue));
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      if (isNaN(d.getTime()) || d < today) return { valid: false, message: customMsg || 'Date must be today or later' };
+      return { valid: true };
+    }
+    case 'date_before': {
+      const d = new Date(String(fieldValue));
+      const target = new Date(String(rule.value ?? ''));
+      if (isNaN(d.getTime()) || isNaN(target.getTime()) || d >= target) return { valid: false, message: customMsg || `Date must be before ${rule.value}` };
+      return { valid: true };
+    }
+    case 'date_after': {
+      const d = new Date(String(fieldValue));
+      const target = new Date(String(rule.value ?? ''));
+      if (isNaN(d.getTime()) || isNaN(target.getTime()) || d <= target) return { valid: false, message: customMsg || `Date must be after ${rule.value}` };
+      return { valid: true };
+    }
+    case 'min_selections': {
+      const count = Array.isArray(fieldValue) ? fieldValue.length : 0;
+      const min = Number(rule.value ?? 0);
+      if (count < min) return { valid: false, message: customMsg || `Select at least ${min} option(s)` };
+      return { valid: true };
+    }
+    case 'max_selections': {
+      const count = Array.isArray(fieldValue) ? fieldValue.length : 0;
+      const max = Number(rule.value ?? Infinity);
+      if (count > max) return { valid: false, message: customMsg || `Select at most ${max} option(s)` };
+      return { valid: true };
+    }
+    default:
+      return { valid: true };
+  }
+}
+
+function runFieldValidations(
+  fieldValidations: FieldValidationRule[],
+  data: Record<string, unknown>,
+): { valid: boolean; errors: Record<string, string[]> } {
+  if (!fieldValidations || fieldValidations.length === 0) return { valid: true, errors: {} };
+
+  const errors: Record<string, string[]> = {};
+  for (const rule of fieldValidations) {
+    const val = data[rule.target_field_id];
+    const result = evaluateFieldValidation(rule, val);
+    if (!result.valid && result.message) {
+      if (!errors[rule.target_field_id]) errors[rule.target_field_id] = [];
+      errors[rule.target_field_id].push(result.message);
+    }
+  }
+
+  return { valid: Object.keys(errors).length === 0, errors };
+}
+
 /**
  * Run AI form validation
  */
@@ -155,6 +293,24 @@ export const externalController = {
       }
 
       const currentStep = stepInfo[0];
+
+      // Field-level validation rules (format, length, range, etc.)
+      const fieldValidations = ((currentStep.step_config as any)?.field_validations ?? []) as FieldValidationRule[];
+      if (fieldValidations.length > 0) {
+        const fieldValResult = runFieldValidations(fieldValidations, data || {});
+        if (!fieldValResult.valid) {
+          const errorMessages = Object.entries(fieldValResult.errors)
+            .map(([, errs]) => errs.join(', '))
+            .join('; ');
+          return res.json({
+            success: false,
+            validation: {
+              is_valid: false,
+              validation_comment: `Field validation failed: ${errorMessages}`,
+            },
+          });
+        }
+      }
 
       // AI Form Validation (optional)
       const aiEnabled = !!(currentStep.step_config as any)?.ai_form_validation_enabled;

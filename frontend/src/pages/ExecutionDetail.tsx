@@ -1,6 +1,7 @@
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, Workflow } from "lucide-react";
+import { useLanguage } from "@/contexts/LanguageContext";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable";
 import * as ResizablePrimitive from "react-resizable-panels";
 import { ExecutionDataPanel } from "@/components/execution/ExecutionDataPanel";
@@ -20,6 +21,7 @@ const ExecutionDetail = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const { t } = useLanguage();
   const companyId = useCompanyId();
   const apiKey = useCompanyApiKey(companyId);
 
@@ -66,6 +68,14 @@ const ExecutionDetail = () => {
         setViewingHistoricalStep(firstRunningStep.id);
       } else if (viewingHistoricalStep && !currentStep && firstRunningStep) {
         setViewingHistoricalStep(firstRunningStep.id);
+      } else if (
+        viewingHistoricalStep &&
+        currentStep?.status === "completed" &&
+        firstRunningStep
+      ) {
+        // User just completed a step (we were on it); switch view to the new open step
+        userChosenStepIdRef.current = null;
+        setViewingHistoricalStep(firstRunningStep.id);
       }
     } else if (execution?.status === "completed") {
       if (userChosenStepIdRef.current != null && executionSteps?.some((s: any) => s.id === userChosenStepIdRef.current)) {
@@ -76,10 +86,31 @@ const ExecutionDetail = () => {
     }
   }, [executionSteps, execution?.status, viewingHistoricalStep]);
 
+  // When the viewed step changes, scroll main content to top so the new step is visible
+  useEffect(() => {
+    if (!viewingHistoricalStep) return;
+    const scrollToTop = () => {
+      const root = mainScrollAreaRef.current;
+      const viewport =
+        (root?.querySelector?.("[data-radix-scroll-area-viewport]") as HTMLElement | null) ??
+        (root?.firstElementChild as HTMLElement | null);
+      if (viewport) {
+        viewport.scrollTop = 0;
+      }
+    };
+    // Run after paint so the new step content is in the DOM
+    const raf = requestAnimationFrame(() => {
+      scrollToTop();
+      requestAnimationFrame(scrollToTop);
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [viewingHistoricalStep]);
+
   // Refs for panel imperative API
   const timelinePanelRef = useRef<ResizablePrimitive.ImperativePanelHandle>(null);
   const middlePanelRef = useRef<ResizablePrimitive.ImperativePanelHandle>(null);
   const fileViewerPanelRef = useRef<ResizablePrimitive.ImperativePanelHandle>(null);
+  const mainScrollAreaRef = useRef<HTMLDivElement>(null);
 
   // Panel size helpers (defined early so useEffect can use them before any early return)
   const getTimelinePanelSize = () => {
@@ -287,8 +318,12 @@ const ExecutionDetail = () => {
     return <div className="p-6">Loading...</div>;
   }
 
-  // Filter to only show completed and running steps (exclude pending steps)
-  const visibleSteps = executionSteps.filter((step: any) => step.status !== "pending");
+  // Filter to only show completed and running steps (exclude pending steps), sorted by creation date ascending
+  const visibleSteps = executionSteps
+    .filter((step: any) => step.status !== "pending")
+    .sort((a: any, b: any) =>
+      new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+    );
 
   // Determine the current step's workflow_step.id to highlight
   const getCurrentStepWorkflowStepId = (): string | null => {
@@ -325,17 +360,17 @@ const ExecutionDetail = () => {
       <div className="flex-shrink-0 p-4 border-b border-border flex items-center justify-between">
         <Button variant="ghost" onClick={() => navigate("/executions")} size="sm">
           <ArrowLeft className="h-4 w-4 mr-2" />
-          Back to Executions
+          {t("executionDetail.backToExecutions")}
         </Button>
         {execution?.workflow_id && (
           <Button
             variant="outline"
             size="sm"
             onClick={() => setIsCanvasDialogOpen(true)}
-            title="View workflow canvas"
+            title={t("executionDetail.viewWorkflowTitle")}
           >
             <Workflow className="h-4 w-4 mr-2" />
-            View Workflow
+            {t("executionDetail.viewWorkflow")}
           </Button>
         )}
       </div>
@@ -409,7 +444,7 @@ const ExecutionDetail = () => {
               }
               return null;
             })()}
-            <ScrollArea className="flex-1 min-w-0 w-full max-w-full overflow-x-hidden">
+            <ScrollArea ref={mainScrollAreaRef} className="flex-1 min-w-0 w-full max-w-full overflow-x-hidden">
               <div className="p-2 sm:p-3 md:p-4 lg:p-6 min-w-0 w-full max-w-full">
                 <div className="w-full min-w-0 max-w-full box-border">
                   {viewingHistoricalStep ? (() => {

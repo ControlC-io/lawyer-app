@@ -10,6 +10,9 @@ import { Separator } from "@/components/ui/separator";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { FileViewer } from "@/components/execution/FileViewer";
 import { cn } from "@/lib/utils";
+import { getFormPagesFromConfig, evaluateFieldRules, validateAllFields, type FieldRule, type FieldValidationRule } from "@/lib/formConfig";
+import { FormPageStepper } from "@/components/execution/FormPageStepper";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 
 interface ExecutionData {
     execution_step_id: string;
@@ -35,6 +38,11 @@ export const ExternalForm = () => {
     const [previewFile, setPreviewFile] = useState<{ url: string; name: string } | null>(null);
     const [signedUrls, setSignedUrls] = useState<Record<string, string>>({}); // fieldId -> signedUrl for single files
     const [signedUrlsMultiple, setSignedUrlsMultiple] = useState<Record<string, Record<number, string>>>({}); // fieldId -> {index -> signedUrl} for multiple files
+    const [formPageIndex, setFormPageIndex] = useState(0);
+
+    useEffect(() => {
+        if (data) setFormPageIndex(0);
+    }, [data?.execution_step_id]);
 
     useEffect(() => {
         if (!token) return;
@@ -115,6 +123,7 @@ export const ExternalForm = () => {
         if (!data) return false;
 
         const formFields = data.step_config?.form_fields || {};
+        const extFieldRules = (data.step_config?.field_rules as FieldRule[] | undefined) ?? [];
         const newErrors: Record<string, string> = {};
         let isValid = true;
 
@@ -124,7 +133,13 @@ export const ExternalForm = () => {
         Object.keys(formFields).forEach(fieldId => {
             const config = formFields[fieldId];
             if (config.shown === false) return;
-            if (!config.required) return;
+
+            // Check visibility via centralized rules
+            if (!evaluateFieldRules(fieldId, "visibility", extFieldRules, formData, true)) return;
+
+            // Check required (fully driven by centralized rules)
+            const isRequired = evaluateFieldRules(fieldId, "required", extFieldRules, formData, false);
+            if (!isRequired) return;
 
             const value = formData[fieldId];
             // Simple validation for required fields
@@ -134,6 +149,17 @@ export const ExternalForm = () => {
                 isValid = false;
             }
         });
+
+        // Field-level validation rules (format, length, range, etc.)
+        const fieldValidations = (data.step_config?.field_validations as FieldValidationRule[] | undefined) ?? [];
+        if (fieldValidations.length > 0) {
+            const validationErrors = validateAllFields(fieldValidations, formData);
+            for (const [fieldId, fieldErrors] of Object.entries(validationErrors)) {
+                const fieldDef = fields.find((f: any) => f.id === fieldId);
+                newErrors[fieldId] = `${fieldDef?.name || "Field"}: ${fieldErrors.join(", ")}`;
+                isValid = false;
+            }
+        }
 
         setErrors(newErrors);
         return isValid;
@@ -241,6 +267,7 @@ export const ExternalForm = () => {
     };
 
     const allFields = getFieldsList();
+    const renderFieldRules = (data?.step_config?.field_rules as FieldRule[] | undefined) ?? [];
 
     // Helper to render fields
     const renderField = (fieldId: string, labelPosition: "top" | "side" = "top") => {
@@ -372,7 +399,7 @@ export const ExternalForm = () => {
                     signedUrls={isMultipleFiles ? signedUrlsForField : undefined}
                     // Basic props
                     disabled={submitting}
-                    required={data.step_config?.form_fields?.[fieldId]?.required}
+                    required={evaluateFieldRules(fieldId, "required", renderFieldRules, formData, false)}
                     labelPosition={labelPosition}
                 // We might need to mock or omit some complex props like dynamicOptions for external view for now
                 // unless we expose those APIs publicly too
@@ -385,31 +412,21 @@ export const ExternalForm = () => {
     };
 
     const formFields = data.step_config?.form_fields || {};
-    const formBlocks = (data.step_config?.form_blocks || []) as Array<{
-        id: string;
-        title?: string;
-        columns: 1 | 2 | 3 | 4;
-        columns_content: string[][];
-        column_names?: string[];
-        label_positions?: ("top" | "side")[];
-        compact?: boolean;
-    }>;
+    const formPages = getFormPagesFromConfig(data.step_config || {});
 
-    // If form_blocks exist, only show fields that are in the blocks
-    // Otherwise, only show fields that are explicitly in formFields (not just all fields)
+    // If form has page/block structure, collect field IDs from pages → blocks; otherwise from formFields
     let visibleFieldIds: string[];
-    
-    if (formBlocks && formBlocks.length > 0) {
-        // Collect all field IDs from blocks
-        const fieldIdsInBlocks = new Set<string>();
-        formBlocks.forEach((block) => {
-            block.columns_content.forEach((column) => {
-                column.forEach((fieldId) => fieldIdsInBlocks.add(fieldId));
+    if (formPages.length > 0 && formPages.some((p) => p.blocks.length > 0)) {
+        const fieldIdsInStructure = new Set<string>();
+        formPages.forEach((page) => {
+            page.blocks.forEach((block) => {
+                block.columns_content.forEach((column) => {
+                    column.forEach((fieldId) => fieldIdsInStructure.add(fieldId));
+                });
             });
         });
-        visibleFieldIds = Array.from(fieldIdsInBlocks);
+        visibleFieldIds = Array.from(fieldIdsInStructure);
     } else {
-        // Only show fields that are explicitly in formFields and not hidden
         visibleFieldIds = Object.keys(formFields).filter(
             (fieldId) => formFields[fieldId]?.shown !== false
         );
@@ -427,8 +444,8 @@ export const ExternalForm = () => {
         .filter((f: any) => visibleFieldIds.includes(f.id))
         .map((f: any) => f.id);
 
-    // If form_blocks exist, use block-based rendering
-    if (formBlocks && formBlocks.length > 0) {
+    // If form has page/block structure, use page → block → fields rendering (same as internal)
+    if (formPages.length > 0 && formPages.some((p) => p.blocks.length > 0)) {
         return (
             <div className="min-h-screen bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
                 <div className="max-w-3xl mx-auto">
@@ -442,60 +459,95 @@ export const ExternalForm = () => {
                             <CardTitle>Fill required fields to continue</CardTitle>
                         </CardHeader>
                         <CardContent className="p-6">
+                            <FormPageStepper
+                                pages={formPages}
+                                currentIndex={formPageIndex}
+                                onPageChange={setFormPageIndex}
+                                getStepLabel={(page, idx) => page.title || `Page ${idx + 1}`}
+                                className="mb-6"
+                            />
                             <form onSubmit={e => e.preventDefault()} className="w-full space-y-6">
-                                {formBlocks.map((block) => (
-                                    <div key={block.id} className={cn(block.compact ? "space-y-2" : "space-y-4")}>
-                                        {/* Block Title */}
-                                        {block.title && (
-                                            <div className={cn(block.compact ? "pt-1 pb-0.5" : "pt-2 pb-1")}>
-                                                <h3 className={cn("font-semibold border-b", block.compact ? "text-sm pb-0.5" : "text-base pb-1")}>{block.title}</h3>
-                                            </div>
-                                        )}
-                                        {/* Block Columns */}
-                                        <div
-                                            className={cn(
-                                                "grid",
-                                                block.compact ? "gap-2" : "gap-4",
-                                                block.columns === 1
-                                                    ? "grid-cols-1"
-                                                    : block.columns === 2
-                                                    ? "grid-cols-1 md:grid-cols-2"
-                                                    : block.columns === 3
-                                                    ? "grid-cols-1 md:grid-cols-2 lg:grid-cols-3"
-                                                    : "grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
-                                            )}
-                                        >
-                                            {block.columns_content.map((column, colIndex) => {
-                                                const columnName = block.column_names?.[colIndex];
-                                                const labelPosition = block.label_positions?.[colIndex] || "top";
-                                                const columnContent = (
-                                                    <div className={cn(block.compact ? "space-y-2" : "space-y-3 sm:space-y-4")}>
-                                                        {column.map((fieldUuid) => renderField(fieldUuid, labelPosition))}
-                                                    </div>
-                                                );
-                                                
-                                                // If column has a name, wrap it in a group with background
-                                                if (columnName) {
-                                                    return (
-                                                        <div key={colIndex} className={cn("border rounded-md bg-muted/20", block.compact ? "p-2" : "p-3")}>
-                                                            <div className={cn("border-b", block.compact ? "mb-1 pb-1" : "mb-2 pb-2")}>
-                                                                <h4 className={cn("font-semibold", block.compact ? "text-xs" : "text-sm")}>{columnName}</h4>
-                                                            </div>
-                                                            {columnContent}
+                                {(() => {
+                                    const currentIndex = Math.min(Math.max(0, formPageIndex), formPages.length - 1);
+                                    const page = formPages[currentIndex];
+                                    if (!page) return null;
+                                    return (
+                                        <div key={page.id} className="space-y-4">
+                                            {page.blocks.map((block) => (
+                                                <div key={block.id} className={cn(block.compact ? "space-y-2" : "space-y-4")}>
+                                                    {block.title && (
+                                                        <div className={cn(block.compact ? "pt-1 pb-0.5" : "pt-2 pb-1")}>
+                                                            <h3 className={cn("font-semibold border-b", block.compact ? "text-sm pb-0.5" : "text-base pb-1")}>{block.title}</h3>
                                                         </div>
-                                                    );
-                                                }
-                                                
-                                                return (
-                                                    <div key={colIndex}>
-                                                        {columnContent}
+                                                    )}
+                                                    <div
+                                                        className={cn(
+                                                            "grid",
+                                                            block.compact ? "gap-2" : "gap-4",
+                                                            block.columns === 1
+                                                                ? "grid-cols-1"
+                                                                : block.columns === 2
+                                                                ? "grid-cols-1 md:grid-cols-2"
+                                                                : block.columns === 3
+                                                                ? "grid-cols-1 md:grid-cols-2 lg:grid-cols-3"
+                                                                : "grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+                                                        )}
+                                                    >
+                                                        {block.columns_content.map((column, colIndex) => {
+                                                            const columnName = block.column_names?.[colIndex];
+                                                            const labelPosition = block.label_positions?.[colIndex] || "top";
+                                                            const columnContent = (
+                                                                <div className={cn(block.compact ? "space-y-2" : "space-y-3 sm:space-y-4")}>
+                                                                    {column.map((fieldUuid) => renderField(fieldUuid, labelPosition))}
+                                                                </div>
+                                                            );
+                                                            if (columnName) {
+                                                                return (
+                                                                    <div key={colIndex} className={cn("border rounded-md bg-muted/20", block.compact ? "p-2" : "p-3")}>
+                                                                        <div className={cn("border-b", block.compact ? "mb-1 pb-1" : "mb-2 pb-2")}>
+                                                                            <h4 className={cn("font-semibold", block.compact ? "text-xs" : "text-sm")}>{columnName}</h4>
+                                                                        </div>
+                                                                        {columnContent}
+                                                                    </div>
+                                                                );
+                                                            }
+                                                            return <div key={colIndex}>{columnContent}</div>;
+                                                        })}
                                                     </div>
-                                                );
-                                            })}
+                                                </div>
+                                            ))}
                                         </div>
-                                    </div>
-                                ))}
+                                    );
+                                })()}
                             </form>
+
+                            {formPages.length > 1 && (
+                                <div className="flex items-center justify-between gap-4 mt-4 pt-4 border-t">
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        disabled={formPageIndex <= 0}
+                                        onClick={() => setFormPageIndex((i) => Math.max(0, i - 1))}
+                                    >
+                                        <ChevronLeft className="h-4 w-4 mr-1" />
+                                        Previous
+                                    </Button>
+                                    <span className="text-sm text-muted-foreground">
+                                        {formPageIndex + 1} / {formPages.length}
+                                    </span>
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        disabled={formPageIndex >= formPages.length - 1}
+                                        onClick={() => setFormPageIndex((i) => Math.min(formPages.length - 1, i + 1))}
+                                    >
+                                        Next
+                                        <ChevronRight className="h-4 w-4 ml-1" />
+                                    </Button>
+                                </div>
+                            )}
 
                             <div className="pt-4">
                                 <Button

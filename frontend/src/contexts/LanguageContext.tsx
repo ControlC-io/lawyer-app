@@ -5,7 +5,7 @@ export type Language = "fr" | "en";
 interface LanguageContextType {
   language: Language;
   setLanguage: (lang: Language) => void;
-  t: (key: string) => string | string[];
+  t: (key: string, vars?: Record<string, string>) => string | string[];
 }
 
 const LanguageContext = createContext<LanguageContextType | undefined>(undefined);
@@ -44,7 +44,7 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
     document.documentElement.lang = language;
   }, [language]);
 
-  const t = (key: string): string | string[] => {
+  const t = (key: string, vars?: Record<string, string>): string | string[] => {
     const keys = key.split(".");
     let value: any = translations[language];
     
@@ -56,7 +56,13 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
       }
     }
     
-    if (typeof value === "string" || Array.isArray(value)) {
+    if (typeof value === "string") {
+      if (vars) {
+        return value.replace(/\{\{(\w+)\}\}/g, (_, name) => vars[name] ?? `{{${name}}}`);
+      }
+      return value;
+    }
+    if (Array.isArray(value)) {
       return value;
     }
     return key;

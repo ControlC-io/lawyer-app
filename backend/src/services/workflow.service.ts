@@ -161,16 +161,19 @@ export const workflowService = {
         (c: WorkflowConnectionRow) => c.source_step_id === currentStepId
       );
 
-      // If decision choice is provided, filter by output name
+      // If decision choice is provided, filter by output name (case-insensitive)
       if (decisionChoice) {
+        const choiceLower = decisionChoice.trim().toLowerCase();
         const matchingConnections = outgoingConnections.filter(
-          (c: WorkflowConnectionRow) => (c.output_name || 'default') === decisionChoice
+          (c: WorkflowConnectionRow) =>
+            ((c.output_name ?? 'default') as string).trim().toLowerCase() === choiceLower
         );
 
         // Fallback to default if no match found
         if (matchingConnections.length === 0) {
           outgoingConnections = outgoingConnections.filter(
-            (c: WorkflowConnectionRow) => (c.output_name || 'default') === 'default'
+            (c: WorkflowConnectionRow) =>
+              ((c.output_name ?? 'default') as string).trim().toLowerCase() === 'default'
           );
         } else {
           outgoingConnections = matchingConnections;
@@ -278,18 +281,41 @@ export const workflowService = {
           continue;
         }
 
-        // Create execution step
-        const newExecutionStep = await prisma.workflowExecutionStep.create({
-          data: {
+        // Check if there's an existing pending execution step (pre-created at execution start)
+        const existingPending = await prisma.workflowExecutionStep.findFirst({
+          where: {
             execution_id: executionId,
             step_id: targetStepId,
-            status: 'running',
-            started_at: new Date(),
-            company_id: companyId,
-            assigned_to_user_id: assignedUserId,
-            assigned_to_group_id: assignedGroupId,
+            status: 'pending',
           },
         });
+
+        let newExecutionStep;
+        if (existingPending) {
+          // Update the existing pending step to running
+          newExecutionStep = await prisma.workflowExecutionStep.update({
+            where: { id: existingPending.id },
+            data: {
+              status: 'running',
+              started_at: new Date(),
+              assigned_to_user_id: assignedUserId,
+              assigned_to_group_id: assignedGroupId,
+            },
+          });
+        } else {
+          // Create a new execution step (fallback for steps not pre-created)
+          newExecutionStep = await prisma.workflowExecutionStep.create({
+            data: {
+              execution_id: executionId,
+              step_id: targetStepId,
+              status: 'running',
+              started_at: new Date(),
+              company_id: companyId,
+              assigned_to_user_id: assignedUserId,
+              assigned_to_group_id: assignedGroupId,
+            },
+          });
+        }
 
         triggeredSteps.push(targetStepId);
 
@@ -330,25 +356,24 @@ export const workflowService = {
         }
       }
 
-      // If no steps were triggered, check if workflow should complete
-      if (triggeredSteps.length === 0) {
-        const activeSteps = await prisma.workflowExecutionStep.count({
-          where: {
-            execution_id: executionId,
-            status: { in: ['running', 'pending'] },
+      // Always check if workflow should complete when there are no active steps
+      // (covers: last step led to end, no matching connection for decision, or no next steps)
+      const activeSteps = await prisma.workflowExecutionStep.count({
+        where: {
+          execution_id: executionId,
+          status: { in: ['running', 'pending'] },
+        },
+      });
+
+      if (activeSteps === 0) {
+        await prisma.workflowExecution.update({
+          where: { id: executionId },
+          data: {
+            status: 'completed',
+            current_step_id: null,
+            completed_at: new Date(),
           },
         });
-
-        if (activeSteps === 0) {
-          await prisma.workflowExecution.update({
-            where: { id: executionId },
-            data: {
-              status: 'completed',
-              current_step_id: null,
-              completed_at: new Date(),
-            },
-          });
-        }
       }
 
       return triggeredSteps;

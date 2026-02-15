@@ -66,6 +66,11 @@ model Company {
   created_at            DateTime               @default(now()) @db.Timestamptz(6)
   api_key               String?                @unique
   is_active             Boolean?               @default(true)
+  slug                  String?                @unique
+  logo_url              String?
+  portal_description    String?
+  portal_primary_color  String?
+  portal_enabled        Boolean                @default(false)
   agent_permissions     AgentPermission[]
   api_configurations    ApiConfiguration[]
   global_variables      DataGlobalVariable[]
@@ -480,6 +485,7 @@ model Workflow {
   icon              String?
   default_status_id String?            @db.Uuid
   is_active         Boolean?           @default(false)
+  portal_enabled    Boolean            @default(false)
   canvas_comments   Json?
   company           Company?           @relation(fields: [company_id], references: [id])
   category          WorkflowCategory?  @relation(fields: [category_id], references: [id])

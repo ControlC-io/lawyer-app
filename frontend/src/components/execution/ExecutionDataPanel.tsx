@@ -3,22 +3,26 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
-import { Loader2, ArrowRight, Lock, Eye, AlertCircle, UserCog, Bot, Mail, Save } from "lucide-react";
+import { Loader2, ArrowRight, Lock, Eye, AlertCircle, UserCog, Bot, Mail, Save, ChevronLeft, ChevronRight } from "lucide-react";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
+import { useLanguage } from "@/contexts/LanguageContext";
 import { useCompanyId } from "@/hooks/useCompanyId";
 import { useExecutionForm } from "@/hooks/useExecutionForm";
 import { useExecutionNavigation } from "@/hooks/useExecutionNavigation";
 import { FieldRenderer } from "@/components/execution/form/FieldRenderer";
 import { SendExternalLinkDialog } from "./SendExternalLinkDialog";
 import { format } from "date-fns";
+import { fr, enUS } from "date-fns/locale";
 import { Label } from "@/components/ui/label";
 import { toast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
+import { getFormPagesFromConfig, evaluateFieldRules, validateAllFields, type FieldRule, type FieldValidationRule } from "@/lib/formConfig";
+import { FormPageStepper } from "@/components/execution/FormPageStepper";
 interface ExecutionDataPanelProps {
   executionId: string;
   onFileView?: (fileUrl: string, fileName: string, filePath: string) => void;
@@ -44,9 +48,9 @@ export const ExecutionDataPanel = ({
   connections: connectionsProp,
   executionDataStructures: executionDataStructuresProp,
 }: ExecutionDataPanelProps) => {
-  const {
-    profile
-  } = useAuth();
+  const { profile } = useAuth();
+  const { t, language } = useLanguage();
+  const dateLocale = language === "fr" ? fr : enUS;
   const companyId = useCompanyId();
   const queryClient = useQueryClient();
   const [isReassignDialogOpen, setIsReassignDialogOpen] = useState(false);
@@ -55,6 +59,7 @@ export const ExecutionDataPanel = ({
   const [selectedReassignId, setSelectedReassignId] = useState<string>("");
   const [triggeringActions, setTriggeringActions] = useState<Record<string, boolean>>({});
   const [isSaving, setIsSaving] = useState(false);
+  const [formPageIndex, setFormPageIndex] = useState(0);
   const [aiFormValidation, setAiFormValidation] = useState<{
     status: "disabled" | "idle" | "validating" | "valid" | "invalid";
     comment?: string;
@@ -138,14 +143,14 @@ export const ExecutionDataPanel = ({
         queryKey: ["workflow_execution_log", executionId]
       });
       toast({
-        title: "Step reassigned successfully"
+        title: t("executionDataPanel.stepReassignedSuccess")
       });
       setIsReassignDialogOpen(false);
       setSelectedReassignId("");
     },
     onError: error => {
       toast({
-        title: "Failed to reassign step",
+        title: t("executionDataPanel.reassignFailed"),
         description: error.message,
         variant: "destructive"
       });
@@ -225,8 +230,8 @@ export const ExecutionDataPanel = ({
       } catch (error: unknown) {
         console.error('Error auto-processing file step:', error);
         toast({
-          title: "Auto-processing Error",
-          description: error instanceof Error ? error.message : "Failed to automatically process file step",
+          title: t("executionDataPanel.autoProcessingError"),
+          description: error instanceof Error ? error.message : t("executionDataPanel.autoProcessingErrorDescription"),
           variant: "destructive"
         });
         // Remove from processed set so it can be retried
@@ -312,37 +317,18 @@ export const ExecutionDataPanel = ({
         currentValues[f.id] = (execRow.values as any)?.[f.id]?.value;
       }
     });
-    const evaluateCondition = (condition: {
-      field_id: string;
-      operator: string;
-    } | null) => {
-      if (!condition || !condition.field_id) return false;
-      const value = currentValues[condition.field_id];
-      if (condition.operator === "has_value") {
-        return hasValue(value);
-      }
-      if (condition.operator === "is_true") {
-        return value === true;
-      }
-      return false;
-    };
+    const fieldRules = (cfg.field_rules as FieldRule[] | undefined) ?? [];
 
     // Check each required field
     for (const fieldUuid of fieldIdsToValidate) {
       const fieldConfig = formFields[fieldUuid];
       if (fieldConfig?.shown === false) continue;
 
-      // Check visibility condition - if hidden, skip validation
-      if (fieldConfig?.visibility_condition) {
-        const isVisible = evaluateCondition(fieldConfig.visibility_condition);
-        if (!isVisible) continue;
-      }
+      // Check visibility via centralized rules - if hidden, skip validation
+      if (!evaluateFieldRules(fieldUuid, "visibility", fieldRules, currentValues, true)) continue;
 
-      // Check required state
-      let isRequired = fieldConfig?.required === true;
-      if (!isRequired && fieldConfig?.required_condition) {
-        isRequired = evaluateCondition(fieldConfig.required_condition);
-      }
+      // Check required state (fully driven by centralized rules)
+      const isRequired = evaluateFieldRules(fieldUuid, "required", fieldRules, currentValues, false);
       if (!isRequired) continue;
       const info = findFieldDefinition(fieldUuid);
       if (!info) continue;
@@ -589,13 +575,7 @@ export const ExecutionDataPanel = ({
       }
     });
 
-    const evaluateCondition = (condition: { field_id: string; operator: string } | null) => {
-      if (!condition || !condition.field_id) return false;
-      const value = currentValues[condition.field_id];
-      if (condition.operator === "has_value") return hasValue(value);
-      if (condition.operator === "is_true") return value === true;
-      return false;
-    };
+    const aiFieldRules = (cfg.field_rules as FieldRule[] | undefined) ?? [];
 
     const payload: Record<string, any> = {};
     const usedKeys = new Set<string>();
@@ -621,10 +601,7 @@ export const ExecutionDataPanel = ({
       const fieldConfig = formFields[fieldUuid];
       if (fieldConfig?.shown === false) continue;
 
-      if (fieldConfig?.visibility_condition) {
-        const isVisible = evaluateCondition(fieldConfig.visibility_condition);
-        if (!isVisible) continue;
-      }
+      if (!evaluateFieldRules(fieldUuid, "visibility", aiFieldRules, currentValues, true)) continue;
 
       const info = findFieldDefinition(fieldUuid);
       if (!info) continue;
@@ -737,8 +714,8 @@ export const ExecutionDataPanel = ({
       aiValidatedFingerprintRef.current = null;
       if (!opts?.silent) {
         toast({
-          title: "Validation Failed",
-          description: comment || "The submitted data did not pass validation.",
+          title: t("executionDataPanel.validationFailed"),
+          description: comment || t("executionDataPanel.validationFailedDescription"),
           variant: "destructive",
         });
       }
@@ -750,7 +727,7 @@ export const ExecutionDataPanel = ({
       aiValidatedFingerprintRef.current = null;
       if (!opts?.silent) {
         toast({
-          title: "Validation Failed",
+          title: t("executionDataPanel.validationFailed"),
           description: msg,
           variant: "destructive",
         });
@@ -765,11 +742,45 @@ export const ExecutionDataPanel = ({
     if (!validation.isValid) {
       const fieldList = validation.missingFields.join(", ");
       toast({
-        title: "Required fields missing",
-        description: `Please complete the following required fields: ${fieldList}`,
+        title: t("executionDataPanel.requiredFieldsMissing"),
+        description: `${t("executionDataPanel.requiredFieldsMissingDescription")} ${fieldList}`,
         variant: "destructive"
       });
       return false;
+    }
+
+    // Field-level validation rules (format, length, range, etc.)
+    {
+      const cfg2 = (step?.workflow_steps?.config || {}) as any;
+      const fieldValidations = (cfg2.field_validations as FieldValidationRule[] | undefined) ?? [];
+      if (fieldValidations.length > 0) {
+        const allFields2 = getAllFields();
+        const currentValues2: Record<string, any> = {};
+        allFields2.forEach(f => {
+          const execRow = f.execRow;
+          const editingKey = `${execRow.id}-${f.id}`;
+          if (form.editingValues[editingKey] !== undefined) {
+            currentValues2[f.id] = form.editingValues[editingKey];
+          } else {
+            currentValues2[f.id] = (execRow.values as any)?.[f.id]?.value;
+          }
+        });
+        const validationErrors = validateAllFields(fieldValidations, currentValues2);
+        if (Object.keys(validationErrors).length > 0) {
+          const errorLines: string[] = [];
+          for (const [fieldId, errors] of Object.entries(validationErrors)) {
+            const fieldDef = allFields2.find(f => f.id === fieldId);
+            const fieldName = fieldDef?.name || fieldId;
+            errorLines.push(`${fieldName}: ${errors.join(", ")}`);
+          }
+          toast({
+            title: t("executionDataPanel.fieldValidationFailed"),
+            description: errorLines.join("\n"),
+            variant: "destructive",
+          });
+          return false;
+        }
+      }
     }
 
     // AI form validation gate (internal edit_form):
@@ -778,8 +789,8 @@ export const ExecutionDataPanel = ({
     const aiEnabled = step?.workflow_steps?.step_type === "edit_form" && !!cfg.ai_form_validation_enabled;
     if (aiEnabled && aiFormValidation.status !== "valid") {
       toast({
-        title: "Validation required",
-        description: "Please click “Validate data” before submitting.",
+        title: t("executionDataPanel.validationRequired"),
+        description: t("executionDataPanel.validationRequiredDescription"),
         variant: "destructive",
       });
       return false;
@@ -793,8 +804,8 @@ export const ExecutionDataPanel = ({
     } catch (e) {
       console.error("Error saving form", e);
       toast({
-        title: "Error saving form",
-        description: e instanceof Error ? e.message : "Failed to save field values",
+        title: t("executionDataPanel.errorSavingForm"),
+        description: e instanceof Error ? e.message : t("executionDataPanel.errorSavingFormDescription"),
         variant: "destructive"
       });
       return false;
@@ -875,6 +886,11 @@ export const ExecutionDataPanel = ({
     : (executionSteps || []).find((s: any) => s.status === "running");
   const runningStep = selectedStep;
 
+  // Reset form page index when step changes (e.g. different edit_form step)
+  useEffect(() => {
+    setFormPageIndex(0);
+  }, [runningStep?.id]);
+
   const aiValidationEnabled =
     runningStep?.workflow_steps?.step_type === "edit_form" &&
     !!(runningStep?.workflow_steps?.config as any)?.ai_form_validation_enabled;
@@ -943,15 +959,7 @@ export const ExecutionDataPanel = ({
   const renderForm = () => {
     const cfg = (runningStep.workflow_steps?.config || {}) as any;
     const formFields = (cfg.form_fields || {}) as Record<string, any>;
-    const formBlocks = (cfg.form_blocks || []) as Array<{
-      id: string;
-      title?: string;
-      columns: 1 | 2 | 3 | 4;
-      columns_content: string[][];
-      column_names?: string[];
-      label_positions?: ("top" | "side")[];
-      compact?: boolean;
-    }>;
+    const formPages = getFormPagesFromConfig(cfg);
     let structureName = "Form";
 
     // Find structure name
@@ -983,20 +991,7 @@ export const ExecutionDataPanel = ({
         currentValues[f.id] = (execRow.values as any)?.[f.id]?.value;
       }
     });
-    const evaluateCondition = (condition: {
-      field_id: string;
-      operator: string;
-    } | null) => {
-      if (!condition || !condition.field_id) return false;
-      const value = currentValues[condition.field_id];
-      if (condition.operator === "has_value") {
-        return hasValue(value);
-      }
-      if (condition.operator === "is_true") {
-        return value === true;
-      }
-      return false;
-    };
+    const renderFieldRules = (cfg.field_rules as FieldRule[] | undefined) ?? [];
 
     // Helper function to render a single field
     const renderField = (fieldUuid: string, labelPosition: "top" | "side" = "top") => {
@@ -1004,11 +999,8 @@ export const ExecutionDataPanel = ({
       // Fields in blocks are visible by default (shown: true), but we still check if explicitly hidden
       if (fieldConfig?.shown === false) return null;
 
-      // Check visibility condition
-      if (fieldConfig?.visibility_condition) {
-        const isVisible = evaluateCondition(fieldConfig.visibility_condition);
-        if (!isVisible) return null;
-      }
+      // Check visibility via centralized rules
+      if (!evaluateFieldRules(fieldUuid, "visibility", renderFieldRules, currentValues, true)) return null;
       const info = findFieldDefinition(fieldUuid);
       if (!info) return null;
       const def = info.def;
@@ -1039,13 +1031,10 @@ export const ExecutionDataPanel = ({
       // For Array fields, use arrayItems state
       const isArray = (def.type || def.field_type) === "array";
       const arrayValue = isArray ? form.arrayItems[fieldUuid] || [] : undefined;
-      const disabled = fieldConfig?.readonly === true || fieldConfig?.editable === false;
+      const disabled = fieldConfig?.readonly === true;
 
-      // Determine required state
-      let required = fieldConfig?.required;
-      if (fieldConfig?.required_condition) {
-        required = evaluateCondition(fieldConfig.required_condition);
-      }
+      // Determine required state (fully driven by centralized rules)
+      const required = evaluateFieldRules(fieldUuid, "required", renderFieldRules, currentValues, false);
 
       // Merge field config (including allowed_file_types) into field definition
       const fieldWithConfig = {
@@ -1129,8 +1118,8 @@ export const ExecutionDataPanel = ({
       );
     };
 
-    // If form_blocks exist, use block-based rendering
-    if (formBlocks && formBlocks.length > 0) {
+    // If form has page/block structure, use page → block → fields rendering
+    if (formPages.length > 0 && formPages.some((p) => p.blocks.length > 0)) {
       return (
         <Card className="w-full min-w-0 max-w-full">
           <CardHeader className="pb-2 sm:pb-3 px-2 sm:px-3 md:px-4 lg:px-6 min-w-0 max-w-full">
@@ -1153,7 +1142,7 @@ export const ExecutionDataPanel = ({
                   className="h-6 w-6"
                   onClick={() => {
                     navigator.clipboard.writeText(`${window.location.origin}/external/form/${(runningStep as any).external_token}`);
-                    toast({ title: "Link copied to clipboard" });
+                    toast({ title: t("executionDataPanel.linkCopied") });
                   }}
                   title="Copy link"
                 >
@@ -1188,60 +1177,95 @@ export const ExecutionDataPanel = ({
             </div>
           </CardHeader>
           <CardContent className="pt-0 px-2 sm:px-3 md:px-4 lg:px-6 pb-2 sm:pb-3 md:pb-4 lg:pb-6 min-w-0 max-w-full">
+            <FormPageStepper
+              pages={formPages}
+              currentIndex={formPageIndex}
+              onPageChange={setFormPageIndex}
+              getStepLabel={(page, idx) => page.title || `${t("executionDataPanel.page", "Page")} ${idx + 1}`}
+              className="mb-6"
+            />
             <form onSubmit={e => e.preventDefault()} className="w-full min-w-0 max-w-full space-y-6">
-              {formBlocks.map((block) => (
-                <div key={block.id} className={cn(block.compact ? "space-y-2" : "space-y-4")}>
-                  {/* Block Title */}
-                  {block.title && (
-                    <div className={cn(block.compact ? "pt-1 pb-0.5" : "pt-2 pb-1")}>
-                      <h3 className={cn("font-semibold border-b", block.compact ? "text-sm pb-0.5" : "text-base pb-1")}>{block.title}</h3>
-                    </div>
-                  )}
-                  {/* Block Columns */}
-                  <div
-                    className={cn(
-                      "grid",
-                      block.compact ? "gap-2" : "gap-4",
-                      block.columns === 1
-                        ? "grid-cols-1"
-                        : block.columns === 2
-                        ? "grid-cols-1 md:grid-cols-2"
-                        : block.columns === 3
-                        ? "grid-cols-1 md:grid-cols-2 lg:grid-cols-3"
-                        : "grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
-                    )}
-                  >
-                    {block.columns_content.map((column, colIndex) => {
-                      const columnName = block.column_names?.[colIndex];
-                      const labelPosition = block.label_positions?.[colIndex] || "top";
-                      const columnContent = (
-                        <div className={cn(block.compact ? "space-y-2" : "space-y-3 sm:space-y-4")}>
-                          {column.map((fieldUuid) => renderField(fieldUuid, labelPosition))}
-                        </div>
-                      );
-                      
-                      // If column has a name, wrap it in a group with background
-                      if (columnName) {
-                        return (
-                          <div key={colIndex} className={cn("border rounded-md bg-muted/20", block.compact ? "p-2" : "p-3")}>
-                            <div className={cn("border-b", block.compact ? "mb-1 pb-1" : "mb-2 pb-2")}>
-                              <h4 className={cn("font-semibold", block.compact ? "text-xs" : "text-sm")}>{columnName}</h4>
-                            </div>
-                            {columnContent}
+              {(() => {
+                const currentIndex = Math.min(Math.max(0, formPageIndex), formPages.length - 1);
+                const page = formPages[currentIndex];
+                if (!page) return null;
+                return (
+                  <div key={page.id} className="space-y-4">
+                    {page.blocks.map((block) => (
+                      <div key={block.id} className={cn(block.compact ? "space-y-2" : "space-y-4")}>
+                        {block.title && (
+                          <div className={cn(block.compact ? "pt-1 pb-0.5" : "pt-2 pb-1")}>
+                            <h3 className={cn("font-semibold border-b", block.compact ? "text-sm pb-0.5" : "text-base pb-1")}>{block.title}</h3>
                           </div>
-                        );
-                      }
-                      
-                      return (
-                        <div key={colIndex}>
-                          {columnContent}
+                        )}
+                        <div
+                          className={cn(
+                            "grid",
+                            block.compact ? "gap-2" : "gap-4",
+                            block.columns === 1
+                              ? "grid-cols-1"
+                              : block.columns === 2
+                              ? "grid-cols-1 md:grid-cols-2"
+                              : block.columns === 3
+                              ? "grid-cols-1 md:grid-cols-2 lg:grid-cols-3"
+                              : "grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+                          )}
+                        >
+                          {block.columns_content.map((column, colIndex) => {
+                            const columnName = block.column_names?.[colIndex];
+                            const labelPosition = block.label_positions?.[colIndex] || "top";
+                            const columnContent = (
+                              <div className={cn(block.compact ? "space-y-2" : "space-y-3 sm:space-y-4")}>
+                                {column.map((fieldUuid) => renderField(fieldUuid, labelPosition))}
+                              </div>
+                            );
+                            if (columnName) {
+                              return (
+                                <div key={colIndex} className={cn("border rounded-md bg-muted/20", block.compact ? "p-2" : "p-3")}>
+                                  <div className={cn("border-b", block.compact ? "mb-1 pb-1" : "mb-2 pb-2")}>
+                                    <h4 className={cn("font-semibold", block.compact ? "text-xs" : "text-sm")}>{columnName}</h4>
+                                  </div>
+                                  {columnContent}
+                                </div>
+                              );
+                            }
+                            return <div key={colIndex}>{columnContent}</div>;
+                          })}
                         </div>
-                      );
-                    })}
+                      </div>
+                    ))}
                   </div>
-                </div>
-              ))}
+                );
+              })()}
             </form>
+            {/* Prev/Next page navigation when multiple pages */}
+            {formPages.length > 1 && (
+              <div className="flex items-center justify-between gap-4 mt-4 pt-4 border-t">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={formPageIndex <= 0}
+                  onClick={() => setFormPageIndex((i) => Math.max(0, i - 1))}
+                >
+                  <ChevronLeft className="h-4 w-4 mr-1" />
+                  {t("executionDataPanel.previousPage", "Previous")}
+                </Button>
+                <span className="text-sm text-muted-foreground">
+                  {formPageIndex + 1} / {formPages.length}
+                </span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={formPageIndex >= formPages.length - 1}
+                  onClick={() => setFormPageIndex((i) => Math.min(formPages.length - 1, i + 1))}
+                >
+                  {t("executionDataPanel.nextPage", "Next")}
+                  <ChevronRight className="h-4 w-4 ml-1" />
+                </Button>
+              </div>
+            )}
           </CardContent>
         </Card>
       );
@@ -1278,7 +1302,7 @@ export const ExecutionDataPanel = ({
                   className="h-6 w-6"
                   onClick={() => {
                     navigator.clipboard.writeText(`${window.location.origin}/external/form/${(runningStep as any).external_token}`);
-                    toast({ title: "Link copied to clipboard" });
+                    toast({ title: t("executionDataPanel.linkCopied") });
                   }}
                   title="Copy link"
                 >
@@ -1318,11 +1342,9 @@ export const ExecutionDataPanel = ({
             const fieldConfig = formFields[fieldUuid];
             if (fieldConfig?.shown === false) return null;
 
-            // Check visibility condition
-            if (fieldConfig?.visibility_condition) {
-              const isVisible = evaluateCondition(fieldConfig.visibility_condition);
-              if (!isVisible) return null;
-            }
+            // Check visibility via centralized rules
+            if (!evaluateFieldRules(fieldUuid, "visibility", renderFieldRules, currentValues, true)) return null;
+
             const info = findFieldDefinition(fieldUuid);
             if (!info) return null;
             const def = info.def;
@@ -1335,13 +1357,10 @@ export const ExecutionDataPanel = ({
             // For Array fields, use arrayItems state
             const isArray = (def.type || def.field_type) === "array";
             const arrayValue = isArray ? form.arrayItems[fieldUuid] || [] : undefined;
-            const disabled = fieldConfig?.readonly === true || fieldConfig?.editable === false;
+            const disabled = fieldConfig?.readonly === true;
 
-            // Determine required state
-            let required = fieldConfig?.required;
-            if (fieldConfig?.required_condition) {
-              required = evaluateCondition(fieldConfig.required_condition);
-            }
+            // Determine required state (fully driven by centralized rules)
+            const required = evaluateFieldRules(fieldUuid, "required", renderFieldRules, currentValues, false);
             return <div key={fieldUuid} className="space-y-3">
               <FieldRenderer field={def} value={isArray ? arrayValue : currentValue} onChange={val => {
                 // Any change invalidates previous AI validation for this form
@@ -1560,6 +1579,21 @@ export const ExecutionDataPanel = ({
               </DialogContent>
             </Dialog>}
 
+            {/* In an automatic step, if the user is the assignee (human), show Done to close the step */}
+            {(isAutomaticAction || isAutomaticFileStep) && canCompleteStep && (
+              <Button
+                size="sm"
+                onClick={() => {
+                  navigation.completeStepMutation.mutate({ stepExecutionId: runningStep.id });
+                }}
+                disabled={navigation.completeStepMutation.isPending}
+              >
+                {navigation.completeStepMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                Done
+                <ArrowRight className="ml-2 h-4 w-4" />
+              </Button>
+            )}
+
             {!isApiProcessedAction && (
               <>
                 {/* Form Actions - Agent Actions that can be triggered from the form */}
@@ -1572,8 +1606,8 @@ export const ExecutionDataPanel = ({
                       const triggerFormAction = async () => {
                         if (!formAction.agent_id) {
                           toast({
-                            title: "Error",
-                            description: "Agent not configured for this action",
+                            title: t("common.error"),
+                            description: t("executionDataPanel.agentNotConfigured"),
                             variant: "destructive"
                           });
                           return;
@@ -1773,14 +1807,14 @@ export const ExecutionDataPanel = ({
                           });
 
                           toast({
-                            title: "Action completed",
-                            description: "The agent action has been executed successfully."
+                            title: t("executionDataPanel.actionCompleted"),
+                            description: t("executionDataPanel.actionCompletedDescription")
                           });
                         } catch (error: any) {
                           console.error('Error triggering form action:', error);
                           toast({
-                            title: "Error",
-                            description: error.message || "Failed to execute agent action",
+                            title: t("common.error"),
+                            description: error.message || t("executionDataPanel.failedToExecuteAgentAction"),
                             variant: "destructive"
                           });
                         } finally {
@@ -1826,14 +1860,14 @@ export const ExecutionDataPanel = ({
                       try {
                         await saveFormValues();
                         toast({
-                          title: "Data saved",
-                          description: "Your progress has been saved. You can continue later.",
+                          title: t("executionDataPanel.dataSaved"),
+                          description: t("executionDataPanel.dataSavedDescription"),
                         });
                       } catch (error: any) {
                         console.error("Error saving form", error);
                         toast({
-                          title: "Error saving",
-                          description: error instanceof Error ? error.message : "Failed to save data",
+                          title: t("executionDataPanel.errorSaving"),
+                          description: error instanceof Error ? error.message : t("executionDataPanel.errorSavingDescription"),
                           variant: "destructive"
                         });
                       } finally {
@@ -1866,8 +1900,8 @@ export const ExecutionDataPanel = ({
                         <Button size="sm" variant="default" onClick={async () => {
                           if (!canCompleteStep) {
                             toast({
-                              title: "Unauthorized",
-                              description: "You are not assigned to this step and cannot complete it.",
+                              title: t("common.error"),
+                              description: t("executionDataPanel.unauthorizedStep"),
                               variant: "destructive"
                             });
                             return;
@@ -1882,35 +1916,34 @@ export const ExecutionDataPanel = ({
                                 { apiKey: apiKey ?? undefined }
                               );
                               toast({
-                                title: "File Processed",
-                                description: "The file has been successfully processed and saved."
+                                title: t("executionDataPanel.fileProcessed"),
+                                description: t("executionDataPanel.fileProcessedDescription")
                               });
                               queryClient.invalidateQueries({ queryKey: ["workflow_execution_steps", executionId] });
                               queryClient.invalidateQueries({ queryKey: ["workflow_execution", executionId] });
                             } catch (error: unknown) {
                               console.error('Error processing file step:', error);
                               toast({
-                                title: "Error",
-                                description: error instanceof Error ? error.message : "Failed to process file step",
+                                title: t("common.error"),
+                                description: error instanceof Error ? error.message : t("executionDataPanel.failedToProcessFileStep"),
                                 variant: "destructive"
                               });
                             }
                             return;
                           }
 
-                          // Regular action step handling
+                          // Regular action step handling (use complete endpoint, not decision - decision is only for decision steps)
                           form.pendingConnectionRef.current = {
                             choice: outputName
                           };
                           const saved = await handleFormSubmit(runningStep);
                           if (saved) {
-                            navigation.makeDecisionMutation.mutate({
-                              stepId: runningStep.id,
-                              choice: outputName
+                            navigation.completeStepMutation.mutate({
+                              stepExecutionId: runningStep.id
                             });
                           }
-                        }} disabled={!canCompleteStep || navigation.makeDecisionMutation.isPending || form.updateValueMutation.isPending || aiSubmitBlocked}>
-                          {navigation.makeDecisionMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                        }} disabled={!canCompleteStep || navigation.completeStepMutation.isPending || form.updateValueMutation.isPending || aiSubmitBlocked}>
+                          {navigation.completeStepMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                           {outputName}
                           <ArrowRight className="ml-2 h-4 w-4" />
                         </Button>
@@ -1932,8 +1965,8 @@ export const ExecutionDataPanel = ({
                           return <Button key={`group-${outputName}`} size="sm" variant={buttonVariant} onClick={async () => {
                             if (!canCompleteStep) {
                               toast({
-                                title: "Unauthorized",
-                                description: "You are not assigned to this step and cannot complete it.",
+                                title: t("common.error"),
+                                description: t("executionDataPanel.unauthorizedStep"),
                                 variant: "destructive"
                               });
                               return;
@@ -1977,8 +2010,8 @@ export const ExecutionDataPanel = ({
                   <Button size="sm" onClick={async () => {
                     if (!canCompleteStep) {
                       toast({
-                        title: "Unauthorized",
-                        description: "You are not assigned to this step and cannot complete it.",
+                        title: t("common.error"),
+                        description: t("executionDataPanel.unauthorizedStep"),
                         variant: "destructive"
                       });
                       return;
@@ -1993,16 +2026,16 @@ export const ExecutionDataPanel = ({
                           { apiKey: apiKey ?? undefined }
                         );
                         toast({
-                          title: "File Processed",
-                          description: "The file has been successfully processed and saved."
+                          title: t("executionDataPanel.fileProcessed"),
+                          description: t("executionDataPanel.fileProcessedDescription")
                         });
                         queryClient.invalidateQueries({ queryKey: ["workflow_execution_steps", executionId] });
                         queryClient.invalidateQueries({ queryKey: ["workflow_execution", executionId] });
                       } catch (error: unknown) {
                         console.error('Error processing file step:', error);
                         toast({
-                          title: "Error",
-                          description: error instanceof Error ? error.message : "Failed to process file step",
+                          title: t("common.error"),
+                          description: error instanceof Error ? error.message : t("executionDataPanel.failedToProcessFileStep"),
                           variant: "destructive"
                         });
                       }
@@ -2056,7 +2089,7 @@ export const ExecutionDataPanel = ({
                   </Badge>
                   {stepData.agent_decision_at && (
                     <span className="text-xs text-muted-foreground">
-                      {format(new Date(stepData.agent_decision_at), "PPp")}
+                      {format(new Date(stepData.agent_decision_at), "PPp", { locale: dateLocale })}
                     </span>
                   )}
                 </div>

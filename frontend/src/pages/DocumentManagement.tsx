@@ -11,6 +11,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { useCompanyId } from "@/hooks/useCompanyId";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 interface FolderType {
   id: string;
@@ -82,6 +83,7 @@ export default function DocumentManagement() {
   const [newPermLevel, setNewPermLevel] = useState<"read" | "write">("read");
   const [permissionsLoading, setPermissionsLoading] = useState(false);
   const { toast } = useToast();
+  const { t } = useLanguage();
 
   useEffect(() => {
     fetchUsers();
@@ -132,7 +134,7 @@ export default function DocumentManagement() {
       );
       setUsers(data || []);
     } catch {
-      toast({ title: "Error", description: "Failed to fetch users", variant: "destructive" });
+      toast({ title: t("common.error"), description: t("documentManagement.failedToFetchUsers"), variant: "destructive" });
     }
   };
 
@@ -142,7 +144,7 @@ export default function DocumentManagement() {
       const data = await api.get<Group[]>(`/api/companies/${companyId}/groups`);
       setGroups(data || []);
     } catch {
-      toast({ title: "Error", description: "Failed to fetch groups", variant: "destructive" });
+      toast({ title: t("common.error"), description: t("documentManagement.failedToFetchGroups"), variant: "destructive" });
     }
   };
 
@@ -159,8 +161,8 @@ export default function DocumentManagement() {
       );
       setFolderPermissionsList(list || []);
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Failed to load permissions";
-      toast({ title: "Error", description: msg, variant: "destructive" });
+      const msg = err instanceof Error ? err.message : t("documentManagement.failedToLoadPermissions");
+      toast({ title: t("common.error"), description: msg, variant: "destructive" });
       setIsPermissionsDialogOpen(false);
     } finally {
       setPermissionsLoading(false);
@@ -175,7 +177,7 @@ export default function DocumentManagement() {
       );
       setFolderPermissionsList(list || []);
     } catch {
-      toast({ title: "Error", description: "Failed to refresh permissions", variant: "destructive" });
+      toast({ title: t("common.error"), description: t("documentManagement.failedToRefreshPermissions"), variant: "destructive" });
     }
   };
 
@@ -185,7 +187,7 @@ export default function DocumentManagement() {
       ? { user_id: newPermEntityId, permission_type: newPermLevel }
       : { group_id: newPermEntityId, permission_type: newPermLevel };
     if (!body.user_id && !body.group_id) {
-      toast({ title: "Select a user or group", variant: "destructive" });
+      toast({ title: t("documentManagement.selectUserOrGroup"), variant: "destructive" });
       return;
     }
     try {
@@ -193,12 +195,12 @@ export default function DocumentManagement() {
         `/api/companies/${companyId}/folders/${folderForPermissions.id}/permissions`,
         body
       );
-      toast({ title: "Success", description: "Permission added" });
+      toast({ title: t("common.success"), description: t("documentManagement.permissionAdded") });
       setNewPermEntityId("");
       fetchFolderPermissions();
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Failed to add permission";
-      toast({ title: "Error", description: msg, variant: "destructive" });
+      const msg = err instanceof Error ? err.message : t("documentManagement.failedToAddPermission");
+      toast({ title: t("common.error"), description: msg, variant: "destructive" });
     }
   };
 
@@ -208,10 +210,10 @@ export default function DocumentManagement() {
       await api.delete(
         `/api/companies/${companyId}/folders/${folderForPermissions.id}/permissions/${permissionId}`
       );
-      toast({ title: "Success", description: "Permission removed" });
+      toast({ title: t("common.success"), description: t("documentManagement.permissionRemoved") });
       fetchFolderPermissions();
     } catch {
-      toast({ title: "Error", description: "Failed to remove permission", variant: "destructive" });
+      toast({ title: t("common.error"), description: t("documentManagement.failedToRemovePermission"), variant: "destructive" });
     }
   };
 
@@ -333,12 +335,12 @@ export default function DocumentManagement() {
 
   const handleCreateFolder = async () => {
     if (!newFolderName.trim()) {
-      toast({ title: "Error", description: "Folder name is required", variant: "destructive" });
+      toast({ title: t("common.error"), description: t("documentManagement.folderNameRequired"), variant: "destructive" });
       return;
     }
 
     if (!companyId) {
-      toast({ title: "Error", description: "Company not set", variant: "destructive" });
+      toast({ title: t("common.error"), description: t("documentManagement.companyNotSet"), variant: "destructive" });
       return;
     }
 
@@ -347,7 +349,7 @@ export default function DocumentManagement() {
       parent_folder_id: currentFolderId ?? null,
     });
 
-    toast({ title: "Success", description: "Folder created successfully" });
+    toast({ title: t("common.success"), description: t("documentManagement.folderCreated") });
     setNewFolderName("");
     setIsCreateFolderOpen(false);
     fetchFoldersAndFiles();
@@ -355,12 +357,12 @@ export default function DocumentManagement() {
 
   const handleUploadFile = async () => {
     if (!selectedFile) {
-      toast({ title: "Error", description: "Please select a file", variant: "destructive" });
+      toast({ title: t("common.error"), description: t("documentManagement.pleaseSelectFile"), variant: "destructive" });
       return;
     }
 
     if (!companyId) {
-      toast({ title: "Error", description: "Company not set", variant: "destructive" });
+      toast({ title: t("common.error"), description: t("documentManagement.companyNotSet"), variant: "destructive" });
       return;
     }
 
@@ -380,7 +382,7 @@ export default function DocumentManagement() {
         sanitizedFileName = 'file';
       }
       if (!currentFolderId) {
-        toast({ title: "Error", description: "Please open or create a folder first to upload files.", variant: "destructive" });
+        toast({ title: t("common.error"), description: t("documentManagement.openOrCreateFolderFirst"), variant: "destructive" });
         return;
       }
       const formData = new FormData();
@@ -390,32 +392,32 @@ export default function DocumentManagement() {
         formData
       );
 
-      toast({ title: "Success", description: "File uploaded successfully" });
+      toast({ title: t("common.success"), description: t("documentManagement.fileUploaded") });
       setSelectedFile(null);
       setIsUploadFileOpen(false);
       fetchFoldersAndFiles();
     } catch (error: any) {
-      toast({ title: "Error", description: error.message || "Failed to upload file", variant: "destructive" });
+      toast({ title: t("common.error"), description: error.message || t("documentManagement.failedToUploadFile"), variant: "destructive" });
     }
   };
 
   const handleDeleteFolder = async (folderId: string) => {
     try {
       await api.delete(`/api/companies/${companyId}/folders/${folderId}`);
-      toast({ title: "Success", description: "Folder deleted successfully" });
+      toast({ title: t("common.success"), description: t("documentManagement.folderDeleted") });
       fetchFoldersAndFiles();
     } catch {
-      toast({ title: "Error", description: "Failed to delete folder", variant: "destructive" });
+      toast({ title: t("common.error"), description: t("documentManagement.failedToDeleteFolder"), variant: "destructive" });
     }
   };
 
   const handleDeleteFile = async (fileId: string, _storagePath: string) => {
     try {
       await api.delete(`/api/companies/${companyId}/files/${fileId}`);
-      toast({ title: "Success", description: "File deleted successfully" });
+      toast({ title: t("common.success"), description: t("documentManagement.fileDeleted") });
       fetchFoldersAndFiles();
     } catch (error: unknown) {
-      toast({ title: "Error", description: error instanceof Error ? error.message : "Failed to delete file", variant: "destructive" });
+      toast({ title: t("common.error"), description: error instanceof Error ? error.message : t("documentManagement.failedToDeleteFile"), variant: "destructive" });
     }
   };
 
@@ -439,9 +441,9 @@ export default function DocumentManagement() {
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-      toast({ title: "Success", description: "File downloaded successfully" });
+      toast({ title: t("common.success"), description: t("documentManagement.fileDownloaded") });
     } catch (error: unknown) {
-      toast({ title: "Error", description: error instanceof Error ? error.message : "Failed to download file", variant: "destructive" });
+      toast({ title: t("common.error"), description: error instanceof Error ? error.message : t("documentManagement.failedToDownloadFile"), variant: "destructive" });
     }
   };
 
@@ -487,11 +489,11 @@ export default function DocumentManagement() {
         .filter((e) => !availableMetadataKeys.some((k) => k.name === e.key))
         .map((k) => ({ id: "", name: k.key }));
       if (createdKeys.length) setAvailableMetadataKeys((prev) => [...prev, ...createdKeys]);
-      toast({ title: "Success", description: "Metadata updated successfully" });
+      toast({ title: t("common.success"), description: t("documentManagement.metadataUpdated") });
       setIsMetadataDialogOpen(false);
       fetchFoldersAndFiles();
     } catch (error: unknown) {
-      toast({ title: "Error", description: error instanceof Error ? error.message : "Failed to update metadata", variant: "destructive" });
+      toast({ title: t("common.error"), description: error instanceof Error ? error.message : t("documentManagement.failedToUpdateMetadata"), variant: "destructive" });
     }
   };
 
@@ -540,7 +542,7 @@ export default function DocumentManagement() {
                         id="folder-name"
                         value={newFolderName}
                         onChange={(e) => setNewFolderName(e.target.value)}
-                        placeholder="Enter folder name"
+                        placeholder={t("documentManagement.enterFolderName")}
                       />
                     </div>
                     <Button onClick={handleCreateFolder} className="w-full">Create Folder</Button>
@@ -593,7 +595,7 @@ export default function DocumentManagement() {
                 }}
               >
                 <SelectTrigger id="meta-key" className="h-8">
-                  <SelectValue placeholder="Select key" />
+                  <SelectValue placeholder={t("documentManagement.selectKey")} />
                 </SelectTrigger>
                 <SelectContent>
                   {availableMetadataKeys.map((key) => (
@@ -612,7 +614,7 @@ export default function DocumentManagement() {
                 disabled={!currentFilterKey}
               >
                 <SelectTrigger id="meta-value" className="h-8">
-                  <SelectValue placeholder="Select value" />
+                  <SelectValue placeholder={t("documentManagement.selectValue")} />
                 </SelectTrigger>
                 <SelectContent>
                   {availableMetadataValues.map((val) => (
@@ -742,11 +744,11 @@ export default function DocumentManagement() {
       {companyId && (
       <Card>
         <CardHeader>
-          <CardTitle>{filters.length > 0 ? "Search Results" : "Contents"}</CardTitle>
+          <CardTitle>{filters.length > 0 ? t("documentManagement.searchResults") : t("documentManagement.contents")}</CardTitle>
           <CardDescription>
             {filters.length > 0
-              ? "Files matching selected metadata filters"
-              : "Folders and files in this location"}
+              ? t("documentManagement.filesMatchingFilters")
+              : t("documentManagement.foldersAndFilesInLocation")}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -788,7 +790,7 @@ export default function DocumentManagement() {
                             e.stopPropagation();
                             openPermissionsDialog(folder);
                           }}
-                          title="Manage access"
+                          title={t("documentManagement.manageAccess")}
                           className="text-muted-foreground hover:text-primary"
                         >
                           <Shield className="h-4 w-4" />
@@ -822,7 +824,7 @@ export default function DocumentManagement() {
                     <div className="flex items-center gap-2">
                       {getMetadataCount(file.metadata) > 0 ? (
                         <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">
-                          {getMetadataCount(file.metadata)} {getMetadataCount(file.metadata) === 1 ? 'key' : 'keys'}
+                          {getMetadataCount(file.metadata)} {getMetadataCount(file.metadata) === 1 ? t("documentManagement.metadataKey") : t("documentManagement.metadataKeys")}
                         </span>
                       ) : (
                         <span className="text-xs text-muted-foreground">No metadata</span>
@@ -831,7 +833,7 @@ export default function DocumentManagement() {
                         variant="ghost"
                         size="sm"
                         onClick={() => handleOpenMetadataDialog(file)}
-                        title="Edit metadata"
+                        title={t("documentManagement.editMetadata")}
                       >
                         <Edit className="h-3 w-3" />
                       </Button>
@@ -845,7 +847,7 @@ export default function DocumentManagement() {
                           variant="ghost"
                           size="sm"
                           onClick={() => handlePreview(file)}
-                          title="Preview"
+                          title={t("documentManagement.preview")}
                         >
                           <Eye className="h-4 w-4" />
                         </Button>
@@ -854,7 +856,7 @@ export default function DocumentManagement() {
                         variant="ghost"
                         size="sm"
                         onClick={() => handleDownload(file)}
-                        title="Download"
+                        title={t("documentManagement.download")}
                       >
                         <Download className="h-4 w-4" />
                       </Button>
@@ -862,7 +864,7 @@ export default function DocumentManagement() {
                         variant="ghost"
                         size="sm"
                         onClick={() => handleDeleteFile(file.id, file.storage_path)}
-                        title="Delete"
+                        title={t("documentManagement.delete")}
                       >
                         <Trash2 className="h-4 w-4" />
                       </Button>
@@ -876,8 +878,8 @@ export default function DocumentManagement() {
                     {filters.length > 0
                       ? "No matching files found"
                       : currentFolderId
-                        ? "This folder is empty"
-                        : "No folders yet. Create a folder above to organize and upload documents."}
+                        ? t("documentManagement.folderEmpty")
+                        : t("documentManagement.noFoldersYet")}
                   </TableCell>
                 </TableRow>
               )}
@@ -933,7 +935,7 @@ export default function DocumentManagement() {
           <div className="space-y-4 overflow-auto max-h-[60vh]">
             {metadataEntries.length === 0 ? (
               <div className="text-center text-muted-foreground py-8">
-                No metadata entries. Click "Add Entry" to create one.
+                {t("documentManagement.noMetadataEntries")}
               </div>
             ) : (
               <div className="space-y-3">
@@ -946,7 +948,7 @@ export default function DocumentManagement() {
                         onValueChange={(value) => handleMetadataEntryChange(index, 'key', value)}
                       >
                         <SelectTrigger id={`key-${index}`} className="h-9">
-                          <SelectValue placeholder="Select key" />
+                          <SelectValue placeholder={t("documentManagement.selectKey")} />
                         </SelectTrigger>
                         <SelectContent>
                           {availableMetadataKeys.map((key) => (
@@ -963,7 +965,7 @@ export default function DocumentManagement() {
                         id={`value-${index}`}
                         value={entry.value}
                         onChange={(e) => handleMetadataEntryChange(index, 'value', e.target.value)}
-                        placeholder="e.g. 12345"
+                        placeholder={t("documentManagement.valuePlaceholder")}
                         className="h-9"
                       />
                     </div>
@@ -972,7 +974,7 @@ export default function DocumentManagement() {
                         variant="ghost"
                         size="sm"
                         onClick={() => handleRemoveMetadataEntry(index)}
-                        title="Remove entry"
+                        title={t("documentManagement.removeEntry")}
                         className="h-9"
                       >
                         <Trash2 className="h-4 w-4" />
@@ -1027,7 +1029,7 @@ export default function DocumentManagement() {
                           : perm.group
                             ? perm.group.name
                           : "—";
-                        const sub = perm.user ? perm.user.email : "Group";
+                        const sub = perm.user ? perm.user.email : t("documentManagement.group");
                         return (
                           <li key={perm.id} className="flex items-center justify-between gap-3 px-3 py-2.5">
                             <div className="flex items-center gap-2 min-w-0">
@@ -1088,7 +1090,7 @@ export default function DocumentManagement() {
                       <Label htmlFor="perm-entity" className="text-xs">Select {newPermType === "group" ? "group" : "user"}</Label>
                       <Select value={newPermEntityId} onValueChange={setNewPermEntityId}>
                         <SelectTrigger id="perm-entity" className="mt-1">
-                          <SelectValue placeholder={newPermType === "group" ? "Choose a group…" : "Choose a user…"} />
+                          <SelectValue placeholder={newPermType === "group" ? t("documentManagement.chooseGroup") : t("documentManagement.chooseUser")} />
                         </SelectTrigger>
                         <SelectContent>
                           {newPermType === "group"

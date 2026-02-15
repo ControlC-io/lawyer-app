@@ -1,7 +1,8 @@
-
 import { useState } from "react";
 import { format } from "date-fns";
+import { fr, enUS } from "date-fns/locale";
 import { Calendar as CalendarIcon, Clock } from "lucide-react";
+import { useLanguage } from "@/contexts/LanguageContext";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -20,6 +21,8 @@ interface DateTimeFieldProps {
 
 export const DateTimeField = ({ field, value, onChange, disabled, required, labelPosition = "top" }: DateTimeFieldProps) => {
     const [open, setOpen] = useState(false);
+    const { t, language } = useLanguage();
+    const dateLocale = language === "fr" ? fr : enUS;
 
     // Helper to parse date string or object
     // Supports ISO strings and generic date objects
@@ -87,7 +90,7 @@ export const DateTimeField = ({ field, value, onChange, disabled, required, labe
                         disabled={disabled}
                     >
                         <CalendarIcon className="mr-2 h-4 w-4" />
-                        {currentDate ? format(currentDate, "dd/MM/yyyy HH:mm") : <span>Pick a date and time</span>}
+                        {currentDate ? format(currentDate, "dd/MM/yyyy HH:mm", { locale: dateLocale }) : <span>{t("executionForm.pickDateTime")}</span>}
                     </Button>
                 </div>
             </PopoverTrigger>

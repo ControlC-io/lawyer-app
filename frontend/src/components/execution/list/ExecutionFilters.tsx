@@ -4,6 +4,7 @@ import { LayoutList, User, CheckSquare, Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 export type FilterType = "all" | "my_workflows" | "my_tasks";
 
@@ -30,27 +31,28 @@ export const ExecutionFilters = ({
     searchQuery,
     onSearchChange,
 }: ExecutionFiltersProps) => {
+    const { t } = useLanguage();
     const filters = [
         {
             id: "all" as const,
-            label: "All Workflows",
+            label: t("executionFilters.allWorkflows"),
             icon: LayoutList,
             count: counts.all,
-            description: "View all executions",
+            description: t("executionFilters.viewAllExecutions"),
         },
         {
             id: "my_workflows" as const,
-            label: "My Workflows",
+            label: t("executionFilters.myWorkflows"),
             icon: User,
             count: counts.my_workflows,
-            description: "Started by me",
+            description: t("executionFilters.startedByMe"),
         },
         {
             id: "my_tasks" as const,
-            label: "My Tasks",
+            label: t("executionFilters.myTasks"),
             icon: CheckSquare,
             count: counts.my_tasks,
-            description: "Assigned to me",
+            description: t("executionFilters.assignedToMe"),
         },
     ];
 
@@ -93,14 +95,14 @@ export const ExecutionFilters = ({
                         onCheckedChange={onShowCompletedChange}
                     />
                     <Label htmlFor="show-completed" className="cursor-pointer">
-                        Show completed executions
+                        {t("executionFilters.showCompleted")}
                     </Label>
                 </div>
 
                 <div className="relative flex-1 max-w-md">
                     <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
                     <Input
-                        placeholder="Search by workflow or execution name..."
+                        placeholder={t("executionFilters.searchPlaceholder")}
                         value={searchQuery}
                         onChange={(e) => onSearchChange(e.target.value)}
                         className="pl-8"

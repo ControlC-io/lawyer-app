@@ -13,6 +13,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { useCompanyId } from "@/hooks/useCompanyId";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 type KeyValuePair = { key: string; value: string; mode?: "static" | "bind" };
 
@@ -33,6 +34,7 @@ interface ApiConfiguration {
 
 export default function ApiConfigurations() {
   const navigate = useNavigate();
+  const { t } = useLanguage();
   const companyId = useCompanyId();
   const [configurations, setConfigurations] = useState<ApiConfiguration[]>([]);
   const [loading, setLoading] = useState(true);
@@ -69,7 +71,7 @@ export default function ApiConfigurations() {
       setConfigurations(configs);
     } catch (error) {
       console.error("Error fetching configurations:", error);
-      toast.error("Failed to load API configurations");
+      toast.error(t("apiConfigurations.failedToLoad"));
     } finally {
       setLoading(false);
     }
@@ -103,12 +105,12 @@ export default function ApiConfigurations() {
 
   const handleSave = async () => {
     if (!companyId) {
-      toast.error("Company not set");
+      toast.error(t("apiConfigurations.companyNotSet"));
       return;
     }
 
     if (!name.trim() || !apiUrl.trim()) {
-      toast.error("Name and API URL are required");
+      toast.error(t("apiConfigurations.nameAndUrlRequired"));
       return;
     }
 
@@ -129,36 +131,36 @@ export default function ApiConfigurations() {
           `/api/companies/${companyId}/api-configurations/${editingConfig.id}`,
           configData
         );
-        toast.success("Configuration updated successfully");
+        toast.success(t("apiConfigurations.configurationUpdated"));
       } else {
         await api.post(`/api/companies/${companyId}/api-configurations`, configData);
-        toast.success("Configuration created successfully");
+        toast.success(t("apiConfigurations.configurationCreated"));
       }
 
       handleCloseDialog();
       fetchConfigurations();
     } catch (error: any) {
       console.error("Error saving configuration:", error);
-      toast.error(`Failed to save configuration: ${error.message || 'Unknown error'}`);
+      toast.error(`${t("apiConfigurations.failedToSave")}: ${error.message || 'Unknown error'}`);
     }
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm("Are you sure you want to delete this configuration? This will affect any steps using it.")) {
+    if (!confirm(t("apiConfigurations.deleteConfirm"))) {
       return;
     }
 
     try {
       if (!companyId) {
-        toast.error("Company not set");
+        toast.error(t("apiConfigurations.companyNotSet"));
         return;
       }
       await api.delete(`/api/companies/${companyId}/api-configurations/${id}`);
-      toast.success("Configuration deleted successfully");
+      toast.success(t("apiConfigurations.configurationDeleted"));
       fetchConfigurations();
     } catch (error: any) {
       console.error("Error deleting configuration:", error);
-      toast.error(`Failed to delete configuration: ${error.message || 'Unknown error'}`);
+      toast.error(`${t("apiConfigurations.failedToDelete")}: ${error.message || 'Unknown error'}`);
     }
   };
 
@@ -225,10 +227,10 @@ export default function ApiConfigurations() {
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-      toast.success("API documentation downloaded successfully");
+      toast.success(t("apiConfigurations.docDownloaded"));
     } catch (error) {
       console.error("Error downloading API documentation:", error);
-      toast.error("Failed to download API documentation");
+      toast.error(t("apiConfigurations.failedToDownloadDoc"));
     }
   };
 
@@ -244,15 +246,15 @@ export default function ApiConfigurations() {
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">API Configurations</h1>
+          <h1 className="text-3xl font-bold tracking-tight">{t("apiConfigurations.title")}</h1>
           <p className="text-muted-foreground mt-1">
-            Manage reusable API configurations for automatic actions and agent decisions
+            {t("apiConfigurations.subtitle")}
           </p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" onClick={() => navigate(-1)}>
             <ArrowLeft className="h-4 w-4 mr-2" />
-            Back
+            {t("common.back")}
           </Button>
           <Button variant="outline" onClick={handleDownloadApiDocs}>
             <Download className="h-4 w-4 mr-2" />
@@ -260,7 +262,7 @@ export default function ApiConfigurations() {
           </Button>
           <Button onClick={() => handleOpenDialog()}>
             <Plus className="h-4 w-4 mr-2" />
-            New Configuration
+            {t("apiConfigurations.newConfiguration")}
           </Button>
         </div>
       </div>
@@ -320,7 +322,7 @@ export default function ApiConfigurations() {
                   <div className="flex-1">
                     <CardTitle className="text-lg">{config.name}</CardTitle>
                     <CardDescription className="mt-1">
-                      {config.description || "No description"}
+                      {config.description || t("apiConfigurations.noDescription")}
                     </CardDescription>
                   </div>
                   <div className="flex gap-1">
@@ -359,9 +361,9 @@ export default function ApiConfigurations() {
                       config.config_type === "agent_decision" ? "secondary" : 
                       "outline"
                     }>
-                      {config.config_type === "automatic_action" ? "Automatic Action" : 
-                       config.config_type === "agent_decision" ? "Agent Decision" : 
-                       "Dynamic Options"}
+                      {config.config_type === "automatic_action" ? t("apiConfigurations.automaticAction") : 
+                       config.config_type === "agent_decision" ? t("apiConfigurations.agentDecision") : 
+                       t("apiConfigurations.dynamicOptions")}
                     </Badge>
                   </div>
                   <div className="text-sm space-y-1">
@@ -381,7 +383,7 @@ export default function ApiConfigurations() {
         <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
-              {editingConfig ? "Edit Configuration" : "New Configuration"}
+              {editingConfig ? t("apiConfigurations.editConfiguration") : t("apiConfigurations.newConfiguration")}
             </DialogTitle>
             <DialogDescription>
               Create a reusable API configuration that can be used across multiple workflow steps
@@ -391,54 +393,54 @@ export default function ApiConfigurations() {
           <div className="space-y-6 mt-4">
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
-                <Label htmlFor="name">Name *</Label>
+                <Label htmlFor="name">{t("apiConfigurations.nameRequired")}</Label>
                 <Input
                   id="name"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="e.g., Customer Validation API"
+                  placeholder={t("apiConfigurations.namePlaceholder")}
                 />
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="config-type">Configuration Type *</Label>
+                <Label htmlFor="config-type">{t("apiConfigurations.configType")}</Label>
                 <Select value={configType} onValueChange={(value: any) => setConfigType(value)}>
                   <SelectTrigger id="config-type">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="automatic_action">Automatic Action</SelectItem>
-                    <SelectItem value="agent_decision">Agent Decision</SelectItem>
-                    <SelectItem value="dynamic_options">Dynamic Options</SelectItem>
+                    <SelectItem value="automatic_action">{t("apiConfigurations.automaticAction")}</SelectItem>
+                    <SelectItem value="agent_decision">{t("apiConfigurations.agentDecision")}</SelectItem>
+                    <SelectItem value="dynamic_options">{t("apiConfigurations.dynamicOptions")}</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="description">Description</Label>
+              <Label htmlFor="description">{t("apiConfigurations.description")}</Label>
               <Textarea
                 id="description"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                placeholder="Optional description of this configuration"
+                placeholder={t("apiConfigurations.descriptionPlaceholder")}
                 rows={2}
               />
             </div>
 
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
-                <Label htmlFor="api-url">API URL *</Label>
+                <Label htmlFor="api-url">{t("apiConfigurations.apiUrl")}</Label>
                 <Input
                   id="api-url"
                   value={apiUrl}
                   onChange={(e) => setApiUrl(e.target.value)}
-                  placeholder="https://api.example.com/endpoint"
+                  placeholder={t("apiConfigurations.apiUrlPlaceholder")}
                 />
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="api-method">HTTP Method *</Label>
+                <Label htmlFor="api-method">{t("apiConfigurations.httpMethod")}</Label>
                 <Select value={apiMethod} onValueChange={setApiMethod}>
                   <SelectTrigger id="api-method">
                     <SelectValue />
@@ -461,7 +463,7 @@ export default function ApiConfigurations() {
 
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <Label>Headers</Label>
+                <Label>{t("apiConfigurations.headers")}</Label>
                 <Button size="sm" variant="outline" onClick={() => handleAddKeyValue("headers")}>
                   <Plus className="h-4 w-4 mr-1" />
                   Add
@@ -471,12 +473,12 @@ export default function ApiConfigurations() {
                 {headers.map((header, index) => (
                   <div key={index} className="flex gap-2">
                     <Input
-                      placeholder="Key"
+                      placeholder={t("apiConfigurations.keyPlaceholder")}
                       value={header.key}
                       onChange={(e) => handleUpdateKeyValue("headers", index, "key", e.target.value)}
                     />
                     <Input
-                      placeholder="Value"
+                      placeholder={t("apiConfigurations.valuePlaceholder")}
                       value={header.value}
                       onChange={(e) => handleUpdateKeyValue("headers", index, "value", e.target.value)}
                     />
@@ -517,11 +519,11 @@ export default function ApiConfigurations() {
 
             <div className="flex justify-end gap-2 pt-4 border-t">
               <Button variant="outline" onClick={handleCloseDialog}>
-                Cancel
+                {t("common.cancel")}
               </Button>
               <Button onClick={handleSave}>
                 <Save className="h-4 w-4 mr-2" />
-                {editingConfig ? "Update" : "Create"}
+                {editingConfig ? t("apiConfigurations.update") : t("apiConfigurations.create")}
               </Button>
             </div>
           </div>

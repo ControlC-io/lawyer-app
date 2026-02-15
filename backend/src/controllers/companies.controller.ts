@@ -75,6 +75,11 @@ export const companiesController = {
           created_at: true,
           api_key: true,
           is_active: true,
+          slug: true,
+          logo_url: true,
+          portal_description: true,
+          portal_primary_color: true,
+          portal_enabled: true,
         },
       });
 
@@ -102,7 +107,7 @@ export const companiesController = {
   async updateCompany(req: AuthRequest, res: Response) {
     try {
       const { companyId } = req.params;
-      const { name, is_active, regenerate_api_key } = req.body;
+      const { name, is_active, regenerate_api_key, slug, logo_url, portal_description, portal_primary_color, portal_enabled } = req.body;
 
       if (!companyId) {
         return res.status(400).json({ error: 'Missing company ID', details: 'companyId is required' });
@@ -113,7 +118,7 @@ export const companiesController = {
         return res.status(access.error.status).json(access.error.body);
       }
 
-      const updateData: { name?: string; is_active?: boolean; api_key?: string } = {};
+      const updateData: Record<string, unknown> = {};
       if (typeof name === 'string') updateData.name = name.trim();
       if (typeof is_active === 'boolean') updateData.is_active = is_active;
       if (regenerate_api_key === true) {
@@ -121,10 +126,49 @@ export const companiesController = {
         updateData.api_key = crypto.randomBytes(32).toString('hex');
       }
 
+      // Portal fields
+      if (typeof slug === 'string') {
+        const slugValue = slug.trim().toLowerCase().replace(/[^a-z0-9-]/g, '');
+        if (slugValue) {
+          // Check uniqueness
+          const existing = await prisma.company.findFirst({
+            where: { slug: slugValue, id: { not: companyId } },
+            select: { id: true },
+          });
+          if (existing) {
+            return res.status(400).json({ error: 'Slug already in use', details: 'This portal URL is already taken by another company' });
+          }
+          updateData.slug = slugValue;
+        } else {
+          updateData.slug = null;
+        }
+      }
+      if (typeof logo_url === 'string') updateData.logo_url = logo_url || null;
+      if (typeof portal_description === 'string') updateData.portal_description = portal_description || null;
+      if (typeof portal_primary_color === 'string') {
+        const color = portal_primary_color.trim();
+        if (color && !/^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$/.test(color)) {
+          return res.status(400).json({ error: 'Invalid color', details: 'portal_primary_color must be a valid hex color (e.g. #3B82F6)' });
+        }
+        updateData.portal_primary_color = color || null;
+      }
+      if (typeof portal_enabled === 'boolean') updateData.portal_enabled = portal_enabled;
+
       const company = await prisma.company.update({
         where: { id: companyId },
         data: updateData,
-        select: { id: true, name: true, created_at: true, is_active: true, api_key: true },
+        select: {
+          id: true,
+          name: true,
+          created_at: true,
+          is_active: true,
+          api_key: true,
+          slug: true,
+          logo_url: true,
+          portal_description: true,
+          portal_primary_color: true,
+          portal_enabled: true,
+        },
       });
 
       return res.json(company);
@@ -425,7 +469,13 @@ export const companiesController = {
       });
       if (!execution) return res.status(404).json({ error: 'Execution not found' });
 
-      await prisma.workflowExecution.delete({ where: { id: executionId } });
+      await prisma.$transaction(async (tx) => {
+        await tx.workflowExecutionLog.deleteMany({ where: { execution_id: executionId } });
+        await tx.workflowExecutionStep.deleteMany({ where: { execution_id: executionId } });
+        await tx.workflowExecutionData.deleteMany({ where: { execution_id: executionId } });
+        await tx.agentUsage.deleteMany({ where: { workflow_execution_id: executionId } });
+        await tx.workflowExecution.delete({ where: { id: executionId } });
+      });
       return res.status(204).send();
     } catch (error) {
       console.error('deleteExecution error:', error);

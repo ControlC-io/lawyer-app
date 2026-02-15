@@ -1,11 +1,12 @@
-
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { AlertCircle, ArrowLeft, Eye } from "lucide-react";
 import { format } from "date-fns";
+import { fr, enUS } from "date-fns/locale";
 import { api } from "@/lib/api";
+import { useLanguage } from "@/contexts/LanguageContext";
 import { toast } from "@/hooks/use-toast";
 import { FieldRenderer } from "../form/FieldRenderer";
 
@@ -24,6 +25,8 @@ export const HistoricalStepView = ({
   onFileView,
   isExecutionCompleted = false
 }: HistoricalStepViewProps) => {
+  const { t, language } = useLanguage();
+  const dateLocale = language === "fr" ? fr : enUS;
   const stepData = step?.step_data || {};
   const [signedUrls, setSignedUrls] = useState<Record<string, string>>({});
   const [multipleFilesSignedUrls, setMultipleFilesSignedUrls] = useState<Record<string, Record<number, string>>>({});
@@ -49,7 +52,7 @@ export const HistoricalStepView = ({
   if (!executionData || executionData.length === 0) {
     return (
       <div className="text-center text-muted-foreground py-8">
-        <p>No data structure available</p>
+        <p>{t("executionHistoricalStep.noDataStructure")}</p>
       </div>
     );
   }
@@ -202,7 +205,7 @@ export const HistoricalStepView = ({
               className="w-full sm:w-auto"
             >
               <ArrowLeft className="h-4 w-4 mr-2" />
-              Return to Active Step
+              {t("executionHistoricalStep.returnToActive")}
             </Button>
           )}
         </CardContent>
@@ -210,23 +213,23 @@ export const HistoricalStepView = ({
       <Card className="w-full min-w-0 max-w-full overflow-x-hidden">
         <CardHeader className="pb-2 sm:pb-3 px-2 sm:px-3 md:px-4 lg:px-6 min-w-0 max-w-full">
           <CardTitle className="text-sm sm:text-base md:text-lg break-words min-w-0 max-w-full">
-            {step?.workflow_steps?.name} - Historical Data
+            {step?.workflow_steps?.name} - {t("executionHistoricalStep.historicalDataTitle")}
           </CardTitle>
           <CardDescription className="text-xs sm:text-sm break-words min-w-0 max-w-full">
-            This data snapshot was captured when the step completed on{" "}
+            {t("executionHistoricalStep.snapshotDescription")}{" "}
             {step?.completed_at
-              ? format(new Date(step.completed_at), "PPpp")
-              : "unknown date"}
+              ? format(new Date(step.completed_at), "PPpp", { locale: dateLocale })
+              : t("executionHistoricalStep.unknownDate")}
           </CardDescription>
         </CardHeader>
         <CardContent className="px-2 sm:px-3 md:px-4 lg:px-6 pb-2 sm:pb-3 md:pb-4 lg:pb-6 min-w-0 max-w-full overflow-x-hidden">
           <div className="space-y-6">
             {isDecisionStep && (decisionChoice || decisionComment) && (
               <div className="p-4 bg-muted/50 rounded-lg border border-border space-y-3">
-                <h3 className="text-sm font-semibold">Decision Information</h3>
+                <h3 className="text-sm font-semibold">{t("executionHistoricalStep.decisionInformation")}</h3>
                 {decisionChoice && (
                   <div>
-                    <p className="text-xs font-medium text-muted-foreground mb-1">Decision Choice:</p>
+                    <p className="text-xs font-medium text-muted-foreground mb-1">{t("executionHistoricalStep.decisionChoice")}</p>
                     <Badge variant="secondary" className="text-xs">
                       {decisionChoice}
                     </Badge>

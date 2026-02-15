@@ -214,6 +214,7 @@ export const workflowDefinitionController = {
       if (typeof body.api_enabled === 'boolean') updateData.api_enabled = body.api_enabled;
       if (typeof body.file_enabled === 'boolean') updateData.file_enabled = body.file_enabled;
       if (typeof body.is_active === 'boolean') updateData.is_active = body.is_active;
+      if (typeof body.portal_enabled === 'boolean') updateData.portal_enabled = body.portal_enabled;
       if (body.category_id !== undefined) updateData.category_id = body.category_id || null;
       if (body.icon !== undefined) updateData.icon = body.icon;
       if (body.data_structure !== undefined) updateData.data_structure = body.data_structure;

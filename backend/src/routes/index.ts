@@ -8,6 +8,7 @@ import agentsRoutes from './agents';
 import notificationsRoutes from './notifications';
 import publicRoutes from './public';
 import externalRoutes from './external';
+import portalRoutes from './portal';
 
 const router = Router();
 
@@ -15,6 +16,7 @@ const router = Router();
 router.use('/auth', authRoutes);
 router.use('/public', publicRoutes);
 router.use('/external', externalRoutes);
+router.use('/portal', portalRoutes);
 
 // Workflow routes (API key or internal auth)
 router.use('/workflows', workflowRoutes);

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
+import { useLanguage } from "@/contexts/LanguageContext";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { toast } from "sonner";
@@ -10,6 +11,7 @@ import { Loader2, CheckCircle2 } from "lucide-react";
 export default function AcceptInvitation() {
   const [searchParams] = useSearchParams();
   const token = searchParams.get("token");
+  const { t } = useLanguage();
   const { user, loading: authLoading, setSelectedCompanyId, refreshUserData, signOut } = useAuth();
   const [loading, setLoading] = useState(true);
   const [invitationInfo, setInvitationInfo] = useState<{ company_name: string; email: string } | null>(null);
@@ -35,11 +37,11 @@ export default function AcceptInvitation() {
         const check = await api.get<{ exists: boolean }>(`/api/invitations/check-email?email=${encodeURIComponent(data.email)}`).catch(() => ({ exists: false }));
         setEmailExists(check?.exists ?? false);
       } else {
-        toast.error("Invitation not found or expired");
+        toast.error(t("acceptInvitation.invitationNotFound"));
       }
     } catch (err) {
       console.error(err);
-      toast.error("Invitation not found or expired");
+      toast.error(t("acceptInvitation.invitationNotFound"));
     } finally {
       setLoading(false);
     }
@@ -60,13 +62,13 @@ export default function AcceptInvitation() {
     try {
       const data = await api.post<{ success: boolean; companyId?: string }>(`/api/invitations/${token}/accept`);
       if (data.success) {
-        toast.success("Successfully joined the organization!");
+        toast.success(t("acceptInvitation.joinedSuccess"));
         if (data.companyId) setSelectedCompanyId(data.companyId);
         await refreshUserData();
         setAccepted(true);
       }
     } catch (error: unknown) {
-      toast.error(error instanceof Error ? error.message : "Failed to accept invitation");
+      toast.error(error instanceof Error ? error.message : t("acceptInvitation.failedToAccept"));
       console.error(error);
     } finally {
       setLoading(false);
@@ -86,17 +88,17 @@ export default function AcceptInvitation() {
       <div className="flex items-center justify-center min-h-screen bg-muted/30 p-4">
         <Card className="w-full max-w-md">
           <CardHeader>
-            <CardTitle>Invalid Invitation</CardTitle>
-            <CardDescription>This invitation link is invalid or has expired.</CardDescription>
+            <CardTitle>{t("acceptInvitation.invalidInvitation")}</CardTitle>
+            <CardDescription>{t("acceptInvitation.invalidInvitationDescription")}</CardDescription>
           </CardHeader>
           <CardContent>
             <p className="text-sm text-muted-foreground">
-              Please contact the person who invited you to request a new invitation.
+              {t("acceptInvitation.contactForNewInvitation")}
             </p>
           </CardContent>
           <CardFooter>
             <Button onClick={() => navigate("/")} className="w-full" variant="outline">
-              Go to Home
+              {t("acceptInvitation.goToHome")}
             </Button>
           </CardFooter>
         </Card>
@@ -112,14 +114,14 @@ export default function AcceptInvitation() {
             <div className="flex justify-center mb-4">
               <CheckCircle2 className="h-16 w-16 text-green-500" />
             </div>
-            <CardTitle className="text-2xl">Welcome to {invitationInfo.company_name}!</CardTitle>
+            <CardTitle className="text-2xl">{t("acceptInvitation.welcomeTitle", { companyName: invitationInfo.company_name })}</CardTitle>
             <CardDescription>
-              You have successfully joined the organization. You can now access all shared workflows and documents.
+              {t("acceptInvitation.welcomeDescription")}
             </CardDescription>
           </CardHeader>
           <CardFooter>
             <Button onClick={() => navigate("/")} className="w-full" size="lg">
-              Go to Application
+              {t("acceptInvitation.goToApplication")}
             </Button>
           </CardFooter>
         </Card>
@@ -129,31 +131,31 @@ export default function AcceptInvitation() {
 
   return (
     <div className="flex items-center justify-center min-h-screen bg-muted/30 p-4">
-      <Card className="w-full max-w-md">
+        <Card className="w-full max-w-md">
         <CardHeader>
-          <CardTitle>Join {invitationInfo.company_name}</CardTitle>
+          <CardTitle>{t("acceptInvitation.joinTitle", { companyName: invitationInfo.company_name })}</CardTitle>
           <CardDescription>
-            You have been invited to join <strong>{invitationInfo.company_name}</strong>.
+            {t("acceptInvitation.joinDescription")} <strong>{invitationInfo.company_name}</strong>.
             {user?.email && user.email.toLowerCase() !== invitationInfo.email.toLowerCase() && (
               <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-md text-amber-800 text-sm">
-                <strong>Warning:</strong> This invitation was sent to <strong>{invitationInfo.email}</strong>, but you are signed in as <strong>{user.email}</strong>.
+                <strong>{t("acceptInvitation.warningEmailMismatch")}</strong> <strong>{invitationInfo.email}</strong>, {t("acceptInvitation.signedInAs")} <strong>{user.email}</strong>.
               </div>
             )}
           </CardDescription>
         </CardHeader>
         <CardContent>
           <p className="text-sm text-muted-foreground">
-            By accepting this invitation, you will be added as a member of this organization and will have access to its resources.
+            {t("acceptInvitation.acceptDescription")}
           </p>
         </CardContent>
         <CardFooter className="flex flex-col gap-3">
           <Button onClick={handleAccept} className="w-full" size="lg" disabled={loading}>
             {loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-            Accept Invitation
+            {t("acceptInvitation.acceptInvitation")}
           </Button>
           {user && (
              <Button variant="ghost" className="w-full text-xs" onClick={() => signOut()}>
-                Sign in with a different account
+                {t("acceptInvitation.signInDifferentAccount")}
              </Button>
           )}
         </CardFooter>

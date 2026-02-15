@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Save, Search, X, Settings, Plus, Edit, Trash2, GripVertical, ChevronRight, Star, Link2 } from "lucide-react";
+import { ArrowLeft, Save, Search, X, Settings, Plus, Edit, Trash2, GripVertical, ChevronRight, ChevronDown, Star, Link2, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Canvas } from "@/components/workflow/Canvas";
@@ -15,7 +15,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { IconPicker } from "@/components/workflow/IconPicker";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
@@ -55,6 +58,7 @@ interface Workflow {
   is_public?: boolean;
   api_enabled?: boolean;
   is_active?: boolean;
+  portal_enabled?: boolean;
 }
 
 type DataStructureField = {
@@ -153,7 +157,11 @@ export default function WorkflowEditor() {
   
   // Settings dialog state
   const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
-  const [formData, setFormData] = useState({ name: "", description: "", is_public: false, api_enabled: false, is_active: true });
+  const [settingsTab, setSettingsTab] = useState<"general" | "data-structure" | "status">("general");
+  // When opening data structure from form editor: restore step panel on settings close and show Form tab
+  const [returnToStepIdAfterSettingsClose, setReturnToStepIdAfterSettingsClose] = useState<string | null>(null);
+  const [returnToFormTab, setReturnToFormTab] = useState(false);
+  const [formData, setFormData] = useState({ name: "", description: "", is_public: false, api_enabled: false, is_active: true, portal_enabled: false });
   const [dataStructureFields, setDataStructureFields] = useState<DataStructureField[]>([]);
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
   const [selectedIcon, setSelectedIcon] = useState<string | null>(null);
@@ -167,9 +175,11 @@ export default function WorkflowEditor() {
   const [defaultStatusId, setDefaultStatusId] = useState<string | null>(null);
   const [apiConfigurations, setApiConfigurations] = useState<Array<{ id: string; name: string }>>([]);
   
-  // Field dialog state
-  const [isFieldDialogOpen, setIsFieldDialogOpen] = useState(false);
+  // Field inline state (no modal: add/edit directly in list)
+  const [addingNewFieldParentId, setAddingNewFieldParentId] = useState<string | null | undefined>(undefined);
   const [editingFieldId, setEditingFieldId] = useState<string | null>(null);
+  const [fieldDescriptionOpen, setFieldDescriptionOpen] = useState(false);
+  const [fieldTypeComboboxOpen, setFieldTypeComboboxOpen] = useState(false);
   const [fieldFormData, setFieldFormData] = useState<FieldFormData>({
     name: "",
     description: "",
@@ -715,7 +725,7 @@ export default function WorkflowEditor() {
     return path.join(" > ");
   };
 
-  const openSettingsDialog = async () => {
+  const openSettingsDialog = async (initialTab?: "general" | "data-structure" | "status") => {
     if (!workflow || !id) return;
     
     try {
@@ -746,7 +756,8 @@ export default function WorkflowEditor() {
           description: workflow.description || "",
           is_public: workflowDataTyped?.is_public || false,
           api_enabled: workflowDataTyped?.api_enabled || false,
-          is_active: workflowDataTyped?.is_active ?? true
+          is_active: workflowDataTyped?.is_active ?? true,
+          portal_enabled: workflowDataTyped?.portal_enabled || false
         });
         setSelectedCategoryId(workflowDataTyped?.category_id || null);
         setSelectedIcon(workflowDataTyped?.icon || null);
@@ -790,11 +801,19 @@ export default function WorkflowEditor() {
         await fetchWorkflowStatuses(id);
       }
       
+      const validTabs = ["general", "data-structure", "status"] as const;
+      setSettingsTab(initialTab && validTabs.includes(initialTab) ? initialTab : "general");
       setSettingsDialogOpen(true);
     } catch (error) {
       console.error("Error loading workflow settings:", error);
       toast.error("Failed to load workflow settings");
     }
+  };
+
+  const openDataStructureEditor = () => {
+    if (selectedStep) setReturnToStepIdAfterSettingsClose(selectedStep.id);
+    setSelectedStep(null);
+    openSettingsDialog("data-structure");
   };
 
   const handleSaveSettings = async () => {
@@ -807,6 +826,7 @@ export default function WorkflowEditor() {
         is_public: formData.is_public,
         api_enabled: formData.api_enabled,
         is_active: formData.is_active,
+        portal_enabled: formData.portal_enabled,
         category_id: selectedCategoryId || null,
         icon: selectedIcon,
         data_structure: dataStructureFields,
@@ -847,7 +867,8 @@ export default function WorkflowEditor() {
       api_query_params: [],
     });
     setEditingFieldId(null);
-    setIsFieldDialogOpen(true);
+    setAddingNewFieldParentId(null);
+    setFieldDescriptionOpen(false);
   };
 
   const handleEditField = (field: DataStructureField) => {
@@ -874,12 +895,14 @@ export default function WorkflowEditor() {
       api_query_params: parsedQueryParams.length > 0 ? parsedQueryParams : [],
     });
     setEditingFieldId(field.id);
-    setIsFieldDialogOpen(true);
+    setAddingNewFieldParentId(undefined);
+    setFieldDescriptionOpen(!!(field.description?.trim()));
   };
 
   const handleCloseFieldDialog = () => {
-    setIsFieldDialogOpen(false);
+    setAddingNewFieldParentId(undefined);
     setEditingFieldId(null);
+    setFieldDescriptionOpen(false);
     setFieldFormData({
       name: "",
       description: "",
@@ -947,7 +970,20 @@ export default function WorkflowEditor() {
       setDataStructureFields(prev => [...prev, fieldData]);
     }
 
-    handleCloseFieldDialog();
+    setAddingNewFieldParentId(undefined);
+    setEditingFieldId(null);
+    setFieldDescriptionOpen(false);
+    setFieldFormData({
+      name: "",
+      description: "",
+      field_type: "text",
+      options: "",
+      parent_item_id: "",
+      options_source: "static",
+      api_configuration_id: null,
+      use_query_params: false,
+      api_query_params: [],
+    });
   };
 
   const handleDeleteField = (fieldId: string) => {
@@ -965,9 +1001,12 @@ export default function WorkflowEditor() {
       parent_item_id: parentId,
       options_source: "static",
       api_configuration_id: null,
+      use_query_params: false,
+      api_query_params: [],
     });
     setEditingFieldId(null);
-    setIsFieldDialogOpen(true);
+    setAddingNewFieldParentId(parentId);
+    setFieldDescriptionOpen(false);
   };
 
   const handleDragStart = (e: React.DragEvent, fieldId: string, parentId: string | null = null) => {
@@ -1279,6 +1318,312 @@ export default function WorkflowEditor() {
 
   if (!workflow) return null;
 
+  const renderInlineFieldForm = () => (
+    <div className="border rounded-lg bg-card p-3 space-y-3" data-inline-field-form="v2">
+      <form onSubmit={handleSubmitField} className="space-y-3">
+        <div className="flex gap-3 items-end">
+          <div className="flex-1 min-w-0">
+            <Label htmlFor="field-name" className="text-xs">{t("workflowEditor.fieldName")}</Label>
+            <Input
+              id="field-name"
+              value={fieldFormData.name}
+              onChange={(e) => setFieldFormData({ ...fieldFormData, name: e.target.value })}
+              required
+              className="h-8 mt-0.5"
+            />
+          </div>
+          <div className="w-40 flex-shrink-0">
+            <Label htmlFor="field-type" className="text-xs">{t("workflowEditor.fieldType")}</Label>
+            <Popover open={fieldTypeComboboxOpen} onOpenChange={setFieldTypeComboboxOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  id="field-type"
+                  variant="outline"
+                  role="combobox"
+                  aria-expanded={fieldTypeComboboxOpen}
+                  className="h-8 mt-0.5 w-full justify-between font-normal"
+                >
+                  {FIELD_TYPES.find((t) => t.value === fieldFormData.field_type)?.label ?? fieldFormData.field_type}
+                  <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
+                <Command>
+                  <CommandInput placeholder={t("workflowEditor.searchFieldType") ?? "Search type..."} className="h-9" />
+                  <CommandList>
+                    <CommandEmpty>{t("workflowEditor.noFieldTypeFound") ?? "No type found."}</CommandEmpty>
+                    <CommandGroup>
+                      {FIELD_TYPES
+                        .filter((type) => {
+                          if (fieldFormData.parent_item_id) {
+                            return type.value !== "file" && type.value !== "multiple_files" && type.value !== "signature" && type.value !== "array";
+                          }
+                          return true;
+                        })
+                        .map((type) => (
+                          <CommandItem
+                            key={type.value}
+                            value={type.label}
+                            onSelect={() => {
+                              setFieldFormData({ ...fieldFormData, field_type: type.value });
+                              setFieldTypeComboboxOpen(false);
+                            }}
+                          >
+                            {type.label}
+                            {fieldFormData.field_type === type.value ? (
+                              <Check className="ml-auto h-4 w-4" />
+                            ) : null}
+                          </CommandItem>
+                        ))}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
+          </div>
+        </div>
+        <Collapsible open={fieldDescriptionOpen} onOpenChange={setFieldDescriptionOpen}>
+          <CollapsibleTrigger asChild>
+            <button
+              type="button"
+              className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground py-0.5"
+            >
+              <ChevronDown className={`h-3.5 w-3.5 transition-transform ${fieldDescriptionOpen ? "rotate-180" : ""}`} />
+              {t("workflowEditor.fieldDescription")}
+            </button>
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <Textarea
+              id="field-description"
+              value={fieldFormData.description}
+              onChange={(e) => setFieldFormData({ ...fieldFormData, description: e.target.value })}
+              rows={2}
+              className="mt-1.5 min-h-0 text-sm"
+            />
+          </CollapsibleContent>
+        </Collapsible>
+        {(fieldFormData.field_type === "option" || fieldFormData.field_type === "multiple_option") && (
+          <>
+            <div>
+              <Label>Options Source</Label>
+              <Select
+                value={fieldFormData.options_source || "static"}
+                onValueChange={(value: "static" | "dynamic") => {
+                  setFieldFormData({
+                    ...fieldFormData,
+                    options_source: value,
+                    api_configuration_id: value === "static" ? null : fieldFormData.api_configuration_id
+                  });
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="static">Static (Define options manually)</SelectItem>
+                  <SelectItem value="dynamic">Dynamic (Fetch from API)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {fieldFormData.options_source === "static" ? (
+              <div>
+                <Label htmlFor="field-options">Options (comma-separated)</Label>
+                <Input
+                  id="field-options"
+                  value={fieldFormData.options}
+                  onChange={(e) => setFieldFormData({ ...fieldFormData, options: e.target.value })}
+                  placeholder="Option 1, Option 2, Option 3"
+                />
+              </div>
+            ) : (
+              <div>
+                <Label htmlFor="field-api-config">API Configuration</Label>
+                <Select
+                  value={fieldFormData.api_configuration_id || ""}
+                  onValueChange={(value) => setFieldFormData({ ...fieldFormData, api_configuration_id: value || null })}
+                >
+                  <SelectTrigger id="field-api-config">
+                    <SelectValue placeholder="Select API configuration" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {apiConfigurations.length === 0 ? (
+                      <SelectItem value="" disabled>No API configurations available</SelectItem>
+                    ) : (
+                      apiConfigurations.map((config) => (
+                        <SelectItem key={config.id} value={config.id}>
+                          {config.name}
+                        </SelectItem>
+                      ))
+                    )}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {'The API should return a JSON array of strings (e.g., ["Option 1", "Option 2"])'}
+                </p>
+                <div className="mt-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="field-use-query-params">Add additional query parameters</Label>
+                    <Switch
+                      id="field-use-query-params"
+                      checked={fieldFormData.use_query_params || false}
+                      onCheckedChange={(checked) => {
+                        setFieldFormData({
+                          ...fieldFormData,
+                          use_query_params: checked,
+                          api_query_params: checked && (!fieldFormData.api_query_params || fieldFormData.api_query_params.length === 0)
+                            ? [{ key: "", value: "", mode: "static" }]
+                            : fieldFormData.api_query_params || [],
+                        });
+                      }}
+                    />
+                  </div>
+                  {fieldFormData.use_query_params && (
+                    <div className="mt-4 space-y-2 border rounded-md p-3">
+                      <div className="flex items-center justify-between mb-2">
+                        <Label className="text-sm">Query Parameters</Label>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            setFieldFormData({
+                              ...fieldFormData,
+                              api_query_params: [...(fieldFormData.api_query_params || []), { key: "", value: "", mode: "static" }],
+                            });
+                          }}
+                        >
+                          <Plus className="h-4 w-4 mr-1" />
+                          Add Parameter
+                        </Button>
+                      </div>
+                      {(fieldFormData.api_query_params || []).map((param, index) => (
+                        <div key={index} className="space-y-2">
+                          <div className="flex gap-2">
+                            <Input
+                              placeholder="Parameter key"
+                              value={param.key}
+                              onChange={(e) => {
+                                const updated = [...(fieldFormData.api_query_params || [])];
+                                updated[index].key = e.target.value;
+                                setFieldFormData({ ...fieldFormData, api_query_params: updated });
+                              }}
+                              className="flex-1"
+                            />
+                            <Select
+                              value={param.mode || "static"}
+                              onValueChange={(value: "static" | "bind") => {
+                                const updated = [...(fieldFormData.api_query_params || [])];
+                                updated[index].mode = value;
+                                if (value === "static") {
+                                  updated[index].value = "";
+                                } else {
+                                  updated[index].value = "";
+                                }
+                                setFieldFormData({ ...fieldFormData, api_query_params: updated });
+                              }}
+                            >
+                              <SelectTrigger className="w-32">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="static">Static</SelectItem>
+                                <SelectItem value="bind">Dynamic</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            {(fieldFormData.api_query_params || []).length > 1 && (
+                              <Button
+                                type="button"
+                                size="icon"
+                                variant="ghost"
+                                onClick={() => {
+                                  const updated = (fieldFormData.api_query_params || []).filter((_, i) => i !== index);
+                                  setFieldFormData({ ...fieldFormData, api_query_params: updated });
+                                }}
+                              >
+                                <X className="h-4 w-4" />
+                              </Button>
+                            )}
+                          </div>
+                          {param.mode === "bind" ? (
+                            <div className="flex gap-1">
+                              <Input
+                                placeholder="Select data to bind"
+                                value={param.value.startsWith("{{") ? dataStructureFields.find(f => param.value === `{{${f.id}}}`)?.name || "Not found" : ""}
+                                disabled
+                                className="flex-1"
+                              />
+                              <Popover>
+                                <PopoverTrigger asChild>
+                                  <Button type="button" size="icon" variant="outline">
+                                    <Link2 className="h-4 w-4" />
+                                  </Button>
+                                </PopoverTrigger>
+                                <PopoverContent className="w-80">
+                                  <div className="space-y-2">
+                                    <Label className="text-xs font-medium">Bind to Data Structure Item</Label>
+                                    <div className="max-h-60 overflow-y-auto space-y-1">
+                                      {dataStructureFields
+                                        .filter(f => f.id !== editingFieldId)
+                                        .map((dsItem) => (
+                                          <Button
+                                            key={dsItem.id}
+                                            type="button"
+                                            variant="ghost"
+                                            size="sm"
+                                            className="w-full justify-start text-xs"
+                                            onClick={() => {
+                                              const updated = [...(fieldFormData.api_query_params || [])];
+                                              updated[index].value = `{{${dsItem.id}}}`;
+                                              setFieldFormData({ ...fieldFormData, api_query_params: updated });
+                                            }}
+                                          >
+                                            <div className="flex flex-col items-start">
+                                              <span className="font-medium">{dsItem.name}</span>
+                                              <span className="text-muted-foreground text-xs">{dsItem.field_type.replace("_", " ")}</span>
+                                            </div>
+                                          </Button>
+                                        ))}
+                                      {dataStructureFields.filter(f => f.id !== editingFieldId).length === 0 && (
+                                        <p className="text-xs text-muted-foreground p-2">No data structure items available</p>
+                                      )}
+                                    </div>
+                                  </div>
+                                </PopoverContent>
+                              </Popover>
+                            </div>
+                          ) : (
+                            <Input
+                              placeholder="Static value"
+                              value={param.value}
+                              onChange={(e) => {
+                                const updated = [...(fieldFormData.api_query_params || [])];
+                                updated[index].value = e.target.value;
+                                setFieldFormData({ ...fieldFormData, api_query_params: updated });
+                              }}
+                              className="flex-1"
+                            />
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </>
+        )}
+        <div className="flex justify-end gap-2 pt-1">
+          <Button type="button" variant="outline" size="sm" onClick={handleCloseFieldDialog}>
+            {t("common.cancel")}
+          </Button>
+          <Button type="submit" size="sm">
+            {editingFieldId ? t("common.update") : t("common.create")}
+          </Button>
+        </div>
+      </form>
+    </div>
+  );
+
   return (
     <div className="flex flex-col h-screen overflow-hidden">
       <header className="border-b border-border bg-card px-6 py-4 flex items-center justify-between gap-4">
@@ -1319,7 +1664,7 @@ export default function WorkflowEditor() {
               {filteredSteps.length} {filteredSteps.length === 1 ? t("workflowEditor.match") : t("workflowEditor.matches")}
             </span>
           )}
-          <Button variant="outline" onClick={openSettingsDialog} className="gap-2">
+          <Button variant="outline" onClick={() => openSettingsDialog()} className="gap-2">
             <Settings className="h-4 w-4" />
             {t("workflowEditor.settings")}
           </Button>
@@ -1352,7 +1697,15 @@ export default function WorkflowEditor() {
         </div>
       </div>
 
-      <Dialog open={!!selectedStep} onOpenChange={(open) => !open && setSelectedStep(null)}>
+      <Dialog
+        open={!!selectedStep}
+        onOpenChange={(open) => {
+          if (!open) {
+            setReturnToFormTab(false);
+            setSelectedStep(null);
+          }
+        }}
+      >
         <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
           {selectedStep && (
             <PropertiesPanel
@@ -1360,20 +1713,33 @@ export default function WorkflowEditor() {
               workflowId={workflow.id}
               dataStructure={workflow.data_structure}
               onUpdateStep={handleUpdateStep}
-              onClose={() => setSelectedStep(null)}
+              onClose={() => {
+                setReturnToFormTab(false);
+                setSelectedStep(null);
+              }}
               onOutputRenamed={handleOutputRenamed}
+              onOpenDataStructureEditor={openDataStructureEditor}
+              initialConfigurationSubTab={returnToFormTab ? "form" : undefined}
             />
           )}
         </DialogContent>
       </Dialog>
 
       {/* Settings Dialog */}
-      <Dialog 
-        open={settingsDialogOpen} 
+      <Dialog
+        open={settingsDialogOpen}
         onOpenChange={(open) => {
+          if (!open) {
+            if (returnToStepIdAfterSettingsClose) {
+              const step = steps.find((s) => s.id === returnToStepIdAfterSettingsClose);
+              if (step) {
+                setSelectedStep(step);
+                setReturnToFormTab(true);
+              }
+              setReturnToStepIdAfterSettingsClose(null);
+            }
+          }
           setSettingsDialogOpen(open);
-          // Clear saved state when dialog is closed without saving (user can restore later if they reopen)
-          // We don't clear here because we want to preserve state even if they close the dialog
         }}
       >
         <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
@@ -1383,7 +1749,7 @@ export default function WorkflowEditor() {
               {t("workflowEditor.subtitle")}
             </DialogDescription>
           </DialogHeader>
-          <Tabs defaultValue="general" className="flex-1 flex flex-col overflow-hidden">
+          <Tabs value={settingsTab} onValueChange={(v) => setSettingsTab(v as typeof settingsTab)} className="flex-1 flex flex-col overflow-hidden">
             <div className="px-6 pt-2">
               <TabsList className="w-full grid grid-cols-3">
                 <TabsTrigger value="general">{t("workflowEditor.general")}</TabsTrigger>
@@ -1504,6 +1870,26 @@ export default function WorkflowEditor() {
                       {t("workflowEditor.enableApiDesc")}
                     </p>
                   </div>
+                  <div className="space-y-2">
+                    <div className="flex items-center space-x-2">
+                      <Checkbox
+                        id="portal_enabled"
+                        checked={formData.portal_enabled || false}
+                        onCheckedChange={(checked) => {
+                          setFormData({ ...formData, portal_enabled: checked as boolean });
+                        }}
+                      />
+                      <label
+                        htmlFor="portal_enabled"
+                        className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer"
+                      >
+                        {t("workflowEditor.enablePortal")}
+                      </label>
+                    </div>
+                    <p className="text-xs text-muted-foreground ml-6">
+                      {t("workflowEditor.enablePortalDesc")}
+                    </p>
+                  </div>
                 </div>
 
                 {/* Permissions Section */}
@@ -1512,42 +1898,27 @@ export default function WorkflowEditor() {
                     <h3 className="text-lg font-medium">{t("workflowEditor.permissions")}</h3>
                     <p className="text-sm text-muted-foreground">{t("workflowEditor.permissionsDesc")}</p>
                   </div>
-                  <div className="space-y-3">
+                  <RadioGroup
+                    value={permissionType}
+                    onValueChange={(value) => {
+                      setPermissionType(value as "public" | "specific");
+                      setFormData({ ...formData, is_public: value === "public" });
+                    }}
+                    className="space-y-3"
+                  >
                     <div className="flex items-center space-x-2">
-                      <input
-                        type="radio"
-                        id="public"
-                        name="permissionType"
-                        value="public"
-                        checked={permissionType === "public"}
-                        onChange={(e) => {
-                          setPermissionType(e.target.value as "public" | "specific");
-                          setFormData({ ...formData, is_public: true });
-                        }}
-                        className="h-4 w-4"
-                      />
-                      <label htmlFor="public" className="text-sm font-medium cursor-pointer">
+                      <RadioGroupItem value="public" id="public" />
+                      <Label htmlFor="public" className="text-sm font-medium cursor-pointer">
                         {t("workflowEditor.public")}
-                      </label>
+                      </Label>
                     </div>
                     <div className="flex items-center space-x-2">
-                      <input
-                        type="radio"
-                        id="specific"
-                        name="permissionType"
-                        value="specific"
-                        checked={permissionType === "specific"}
-                        onChange={(e) => {
-                          setPermissionType(e.target.value as "public" | "specific");
-                          setFormData({ ...formData, is_public: false });
-                        }}
-                        className="h-4 w-4"
-                      />
-                      <label htmlFor="specific" className="text-sm font-medium cursor-pointer">
+                      <RadioGroupItem value="specific" id="specific" />
+                      <Label htmlFor="specific" className="text-sm font-medium cursor-pointer">
                         {t("workflowEditor.specific")}
-                      </label>
+                      </Label>
                     </div>
-                  </div>
+                  </RadioGroup>
 
                   {permissionType === "specific" && (
                     <div className="space-y-4 pl-6 border-l-2 border-muted bg-muted/20 p-4 rounded-md">
@@ -1631,24 +2002,12 @@ export default function WorkflowEditor() {
 
               <TabsContent value="data-structure" className="space-y-6 mt-0 h-full">
                 <div className="space-y-4">
-                  <div className="border-b pb-3 flex items-center justify-between">
-                    <div>
-                      <h3 className="text-lg font-medium">{t("workflowEditor.dataStructure")}</h3>
-                      <p className="text-sm text-muted-foreground">{t("workflowEditor.dataStructureDesc")}</p>
-                    </div>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={handleAddField}
-                      className="gap-2"
-                    >
-                      <Plus className="h-4 w-4" />
-                      {t("workflowEditor.addField")}
-                    </Button>
+                  <div className="border-b pb-3">
+                    <h3 className="text-lg font-medium">{t("workflowEditor.dataStructure")}</h3>
+                    <p className="text-sm text-muted-foreground">{t("workflowEditor.dataStructureDesc")}</p>
                   </div>
 
-                  {dataStructureFields.filter(f => !f.parent_item_id).length === 0 ? (
+                  {dataStructureFields.filter(f => !f.parent_item_id).length === 0 && addingNewFieldParentId === undefined ? (
                     <div className="text-center py-12 border-2 border-dashed rounded-lg bg-muted/30">
                       <div className="flex flex-col items-center gap-3">
                         <div className="w-12 h-12 rounded-full bg-muted flex items-center justify-center">
@@ -1682,8 +2041,8 @@ export default function WorkflowEditor() {
                             return (
                               <div key={item.id} className="space-y-2">
                                 <div
-                                  draggable={true}
-                                  onDragStart={(e) => handleDragStart(e, item.id, parentId)}
+                                  draggable={editingFieldId !== item.id}
+                                  onDragStart={(e) => editingFieldId !== item.id && handleDragStart(e, item.id, parentId)}
                                   onDragOver={(e) => handleDragOver(e, currentIndex, parentId)}
                                   onDragLeave={handleDragLeave}
                                   onDrop={(e) => handleDrop(e, currentIndex, parentId)}
@@ -1692,93 +2051,102 @@ export default function WorkflowEditor() {
                                     } ${draggedFieldId === item.id ? 'opacity-50' : ''
                                     } ${dragOverIndex === currentIndex && dragOverParentId === parentId && draggedFieldId !== item.id
                                       ? 'border-primary border-2' : ''
-                                    } cursor-move`}
+                                    } ${editingFieldId === item.id ? '' : 'cursor-move'}`}
                                 >
-                                  <div className="flex items-center justify-between p-4 gap-4">
-                                    <div className="flex items-center text-muted-foreground cursor-grab active:cursor-grabbing flex-shrink-0">
-                                      <GripVertical className="h-5 w-5" />
-                                    </div>
-                                    <div className="flex-1 min-w-0 space-y-2">
-                                      <div className="flex items-center gap-2 flex-wrap">
-                                        {depth > 0 && (
-                                          <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                                  {editingFieldId === item.id ? (
+                                    renderInlineFieldForm()
+                                  ) : (
+                                    <div className="flex items-center justify-between p-4 gap-4">
+                                      <div className="flex items-center text-muted-foreground cursor-grab active:cursor-grabbing flex-shrink-0">
+                                        <GripVertical className="h-5 w-5" />
+                                      </div>
+                                      <div className="flex-1 min-w-0 space-y-2">
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                          {depth > 0 && (
+                                            <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                                          )}
+                                          <h4 className="font-semibold text-sm">{item.name}</h4>
+                                          <Badge variant="secondary" className="text-xs font-normal">
+                                            {item.field_type.replace("_", " ")}
+                                          </Badge>
+                                          {(item.field_type === "option" || item.field_type === "multiple_option") && (
+                                            <>
+                                              {item.options_source === "dynamic" ? (
+                                                <Badge variant="outline" className="text-xs font-normal bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/20 dark:text-blue-300 dark:border-blue-800">
+                                                  Dynamic
+                                                </Badge>
+                                              ) : (
+                                                <Badge variant="outline" className="text-xs font-normal">
+                                                  Static
+                                                </Badge>
+                                              )}
+                                              {item.options_source === "dynamic" && item.api_configuration_id && (
+                                                <Badge variant="outline" className="text-xs font-normal">
+                                                  {apiConfigurations.find(c => c.id === item.api_configuration_id)?.name || "API Config"}
+                                                </Badge>
+                                              )}
+                                            </>
+                                          )}
+                                        </div>
+                                        {item.description && (
+                                          <p className="text-sm text-muted-foreground leading-relaxed">
+                                            {item.description}
+                                          </p>
                                         )}
-                                        <h4 className="font-semibold text-sm">{item.name}</h4>
-                                        <Badge variant="secondary" className="text-xs font-normal">
-                                          {item.field_type.replace("_", " ")}
-                                        </Badge>
-                                        {(item.field_type === "option" || item.field_type === "multiple_option") && (
-                                          <>
-                                            {item.options_source === "dynamic" ? (
-                                              <Badge variant="outline" className="text-xs font-normal bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/20 dark:text-blue-300 dark:border-blue-800">
-                                                Dynamic
+                                        {item.options && item.options.length > 0 && (
+                                          <div className="flex flex-wrap gap-1.5 mt-2">
+                                            <span className="text-xs text-muted-foreground font-medium">Options:</span>
+                                            {item.options.map((option, idx) => (
+                                              <Badge key={idx} variant="outline" className="text-xs font-normal">
+                                                {option}
                                               </Badge>
-                                            ) : (
-                                              <Badge variant="outline" className="text-xs font-normal">
-                                                Static
-                                              </Badge>
-                                            )}
-                                            {item.options_source === "dynamic" && item.api_configuration_id && (
-                                              <Badge variant="outline" className="text-xs font-normal">
-                                                {apiConfigurations.find(c => c.id === item.api_configuration_id)?.name || "API Config"}
-                                              </Badge>
-                                            )}
-                                          </>
+                                            ))}
+                                          </div>
                                         )}
                                       </div>
-                                      {item.description && (
-                                        <p className="text-sm text-muted-foreground leading-relaxed">
-                                          {item.description}
-                                        </p>
-                                      )}
-                                      {item.options && item.options.length > 0 && (
-                                        <div className="flex flex-wrap gap-1.5 mt-2">
-                                          <span className="text-xs text-muted-foreground font-medium">Options:</span>
-                                          {item.options.map((option, idx) => (
-                                            <Badge key={idx} variant="outline" className="text-xs font-normal">
-                                              {option}
-                                            </Badge>
-                                          ))}
-                                        </div>
-                                      )}
-                                    </div>
-                                    <div className="flex items-center gap-1 flex-shrink-0">
-                                      {item.field_type === "array" && (
+                                      <div className="flex items-center gap-1 flex-shrink-0">
+                                        {item.field_type === "array" && (
+                                          <Button
+                                            type="button"
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={() => handleAddSubItem(item.id)}
+                                            className="gap-1.5 h-8 text-xs"
+                                          >
+                                            <Plus className="h-3.5 w-3.5" />
+                                            {t("workflowEditor.addSubItem")}
+                                          </Button>
+                                        )}
                                         <Button
                                           type="button"
                                           variant="ghost"
-                                          size="sm"
-                                          onClick={() => handleAddSubItem(item.id)}
-                                          className="gap-1.5 h-8 text-xs"
+                                          size="icon"
+                                          className="h-8 w-8"
+                                          onClick={() => handleEditField(item)}
                                         >
-                                          <Plus className="h-3.5 w-3.5" />
-                                          {t("workflowEditor.addSubItem")}
+                                          <Edit className="h-3.5 w-3.5" />
                                         </Button>
-                                      )}
-                                      <Button
-                                        type="button"
-                                        variant="ghost"
-                                        size="icon"
-                                        className="h-8 w-8"
-                                        onClick={() => handleEditField(item)}
-                                      >
-                                        <Edit className="h-3.5 w-3.5" />
-                                      </Button>
-                                      <Button
-                                        type="button"
-                                        variant="ghost"
-                                        size="icon"
-                                        className="h-8 w-8 text-destructive hover:text-destructive"
-                                        onClick={() => handleDeleteField(item.id)}
-                                      >
-                                        <Trash2 className="h-3.5 w-3.5" />
-                                      </Button>
+                                        <Button
+                                          type="button"
+                                          variant="ghost"
+                                          size="icon"
+                                          className="h-8 w-8 text-destructive hover:text-destructive"
+                                          onClick={() => handleDeleteField(item.id)}
+                                        >
+                                          <Trash2 className="h-3.5 w-3.5" />
+                                        </Button>
+                                      </div>
                                     </div>
-                                  </div>
+                                  )}
                                 </div>
                                 {children.length > 0 && (
                                   <div className="space-y-2">
                                     {children.map((child, idx) => renderFieldCard(child, depth + 1, currentIndex, idx))}
+                                  </div>
+                                )}
+                                {addingNewFieldParentId === item.id && (
+                                  <div className={depth > 0 ? "ml-8" : ""}>
+                                    {renderInlineFieldForm()}
                                   </div>
                                 )}
                               </div>
@@ -1787,287 +2155,24 @@ export default function WorkflowEditor() {
 
                           return renderFieldCard(field);
                         })}
+                      {addingNewFieldParentId === null && (
+                        <div className="space-y-2">
+                          {renderInlineFieldForm()}
+                        </div>
+                      )}
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={handleAddField}
+                        className="gap-2 w-full sm:w-auto"
+                      >
+                        <Plus className="h-4 w-4" />
+                        {t("workflowEditor.addField")}
+                      </Button>
                     </div>
                   )}
 
-                  {/* Field Dialog */}
-                  <Dialog open={isFieldDialogOpen} onOpenChange={handleCloseFieldDialog}>
-                    <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
-                      <DialogHeader>
-                        <DialogTitle>{editingFieldId ? t("workflowEditor.editField") : t("workflowEditor.addFieldTitle")}</DialogTitle>
-                        <DialogDescription>
-                          {editingFieldId ? t("workflowEditor.updateField") : t("workflowEditor.addFieldToStructure")}
-                        </DialogDescription>
-                      </DialogHeader>
-                      <form onSubmit={handleSubmitField} className="space-y-4">
-                        <div>
-                          <Label htmlFor="field-name">{t("workflowEditor.fieldName")}</Label>
-                          <Input
-                            id="field-name"
-                            value={fieldFormData.name}
-                            onChange={(e) => setFieldFormData({ ...fieldFormData, name: e.target.value })}
-                            required
-                          />
-                        </div>
-                        <div>
-                          <Label htmlFor="field-description">{t("workflowEditor.fieldDescription")}</Label>
-                          <Textarea
-                            id="field-description"
-                            value={fieldFormData.description}
-                            onChange={(e) => setFieldFormData({ ...fieldFormData, description: e.target.value })}
-                            rows={2}
-                          />
-                        </div>
-                        <div>
-                          <Label htmlFor="field-type">{t("workflowEditor.fieldType")}</Label>
-                          <Select
-                            value={fieldFormData.field_type}
-                            onValueChange={(value) => setFieldFormData({ ...fieldFormData, field_type: value })}
-                          >
-                            <SelectTrigger>
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {FIELD_TYPES
-                                .filter((type) => {
-                                  if (fieldFormData.parent_item_id) {
-                                    return type.value !== "file" && type.value !== "multiple_files" && type.value !== "signature" && type.value !== "array";
-                                  }
-                                  return true;
-                                })
-                                .map((type) => (
-                                  <SelectItem key={type.value} value={type.value}>
-                                    {type.label}
-                                  </SelectItem>
-                                ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        {(fieldFormData.field_type === "option" || fieldFormData.field_type === "multiple_option") && (
-                          <>
-                            <div>
-                              <Label>Options Source</Label>
-                              <Select
-                                value={fieldFormData.options_source || "static"}
-                                onValueChange={(value: "static" | "dynamic") => {
-                                  setFieldFormData({
-                                    ...fieldFormData,
-                                    options_source: value,
-                                    api_configuration_id: value === "static" ? null : fieldFormData.api_configuration_id
-                                  });
-                                }}
-                              >
-                                <SelectTrigger>
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="static">Static (Define options manually)</SelectItem>
-                                  <SelectItem value="dynamic">Dynamic (Fetch from API)</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            {fieldFormData.options_source === "static" ? (
-                              <div>
-                                <Label htmlFor="field-options">Options (comma-separated)</Label>
-                                <Input
-                                  id="field-options"
-                                  value={fieldFormData.options}
-                                  onChange={(e) => setFieldFormData({ ...fieldFormData, options: e.target.value })}
-                                  placeholder="Option 1, Option 2, Option 3"
-                                />
-                              </div>
-                            ) : (
-                              <div>
-                                <Label htmlFor="field-api-config">API Configuration</Label>
-                                <Select
-                                  value={fieldFormData.api_configuration_id || ""}
-                                  onValueChange={(value) => setFieldFormData({ ...fieldFormData, api_configuration_id: value || null })}
-                                >
-                                  <SelectTrigger id="field-api-config">
-                                    <SelectValue placeholder="Select API configuration" />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {apiConfigurations.length === 0 ? (
-                                      <SelectItem value="" disabled>No API configurations available</SelectItem>
-                                    ) : (
-                                      apiConfigurations.map((config) => (
-                                        <SelectItem key={config.id} value={config.id}>
-                                          {config.name}
-                                        </SelectItem>
-                                      ))
-                                    )}
-                                  </SelectContent>
-                                </Select>
-                                <p className="text-xs text-muted-foreground mt-1">
-                                  The API should return a JSON array of strings (e.g., ["Option 1", "Option 2"])
-                                </p>
-                                
-                                <div className="mt-4 space-y-3">
-                                  <div className="flex items-center justify-between">
-                                    <Label htmlFor="field-use-query-params">Add additional query parameters</Label>
-                                    <Switch
-                                      id="field-use-query-params"
-                                      checked={fieldFormData.use_query_params || false}
-                                      onCheckedChange={(checked) => {
-                                        setFieldFormData({
-                                          ...fieldFormData,
-                                          use_query_params: checked,
-                                          api_query_params: checked && (!fieldFormData.api_query_params || fieldFormData.api_query_params.length === 0)
-                                            ? [{ key: "", value: "", mode: "static" }]
-                                            : fieldFormData.api_query_params || [],
-                                        });
-                                      }}
-                                    />
-                                  </div>
-                                  
-                                  {fieldFormData.use_query_params && (
-                                  <div className="mt-4 space-y-2 border rounded-md p-3">
-                                    <div className="flex items-center justify-between mb-2">
-                                      <Label className="text-sm">Query Parameters</Label>
-                                      <Button
-                                        type="button"
-                                        size="sm"
-                                        variant="outline"
-                                        onClick={() => {
-                                          setFieldFormData({
-                                            ...fieldFormData,
-                                            api_query_params: [...(fieldFormData.api_query_params || []), { key: "", value: "", mode: "static" }],
-                                          });
-                                        }}
-                                      >
-                                        <Plus className="h-4 w-4 mr-1" />
-                                        Add Parameter
-                                      </Button>
-                                    </div>
-                                    
-                                    {(fieldFormData.api_query_params || []).map((param, index) => (
-                                      <div key={index} className="space-y-2">
-                                        <div className="flex gap-2">
-                                          <Input
-                                            placeholder="Parameter key"
-                                            value={param.key}
-                                            onChange={(e) => {
-                                              const updated = [...(fieldFormData.api_query_params || [])];
-                                              updated[index].key = e.target.value;
-                                              setFieldFormData({ ...fieldFormData, api_query_params: updated });
-                                            }}
-                                            className="flex-1"
-                                          />
-                                          <Select
-                                            value={param.mode || "static"}
-                                            onValueChange={(value: "static" | "bind") => {
-                                              const updated = [...(fieldFormData.api_query_params || [])];
-                                              updated[index].mode = value;
-                                              if (value === "static") {
-                                                updated[index].value = "";
-                                              } else {
-                                                updated[index].value = "";
-                                              }
-                                              setFieldFormData({ ...fieldFormData, api_query_params: updated });
-                                            }}
-                                          >
-                                            <SelectTrigger className="w-32">
-                                              <SelectValue />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                              <SelectItem value="static">Static</SelectItem>
-                                              <SelectItem value="bind">Dynamic</SelectItem>
-                                            </SelectContent>
-                                          </Select>
-                                          {(fieldFormData.api_query_params || []).length > 1 && (
-                                            <Button
-                                              type="button"
-                                              size="icon"
-                                              variant="ghost"
-                                              onClick={() => {
-                                                const updated = (fieldFormData.api_query_params || []).filter((_, i) => i !== index);
-                                                setFieldFormData({ ...fieldFormData, api_query_params: updated });
-                                              }}
-                                            >
-                                              <X className="h-4 w-4" />
-                                            </Button>
-                                          )}
-                                        </div>
-                                        
-                                        {param.mode === "bind" ? (
-                                          <div className="flex gap-1">
-                                            <Input
-                                              placeholder="Select data to bind"
-                                              value={param.value.startsWith("{{") ? dataStructureFields.find(f => param.value === `{{${f.id}}}`)?.name || "Not found" : ""}
-                                              disabled
-                                              className="flex-1"
-                                            />
-                                            <Popover>
-                                              <PopoverTrigger asChild>
-                                                <Button type="button" size="icon" variant="outline">
-                                                  <Link2 className="h-4 w-4" />
-                                                </Button>
-                                              </PopoverTrigger>
-                                              <PopoverContent className="w-80">
-                                                <div className="space-y-2">
-                                                  <Label className="text-xs font-medium">Bind to Data Structure Item</Label>
-                                                  <div className="max-h-60 overflow-y-auto space-y-1">
-                                                    {dataStructureFields
-                                                      .filter(f => f.id !== editingFieldId)
-                                                      .map((dsItem) => (
-                                                        <Button
-                                                          key={dsItem.id}
-                                                          type="button"
-                                                          variant="ghost"
-                                                          size="sm"
-                                                          className="w-full justify-start text-xs"
-                                                          onClick={() => {
-                                                            const updated = [...(fieldFormData.api_query_params || [])];
-                                                            updated[index].value = `{{${dsItem.id}}}`;
-                                                            setFieldFormData({ ...fieldFormData, api_query_params: updated });
-                                                          }}
-                                                        >
-                                                          <div className="flex flex-col items-start">
-                                                            <span className="font-medium">{dsItem.name}</span>
-                                                            <span className="text-muted-foreground text-xs">{dsItem.field_type.replace("_", " ")}</span>
-                                                          </div>
-                                                        </Button>
-                                                      ))}
-                                                    {dataStructureFields.filter(f => f.id !== editingFieldId).length === 0 && (
-                                                      <p className="text-xs text-muted-foreground p-2">No data structure items available</p>
-                                                    )}
-                                                  </div>
-                                                </div>
-                                              </PopoverContent>
-                                            </Popover>
-                                          </div>
-                                        ) : (
-                                          <Input
-                                            placeholder="Static value"
-                                            value={param.value}
-                                            onChange={(e) => {
-                                              const updated = [...(fieldFormData.api_query_params || [])];
-                                              updated[index].value = e.target.value;
-                                              setFieldFormData({ ...fieldFormData, api_query_params: updated });
-                                            }}
-                                            className="flex-1"
-                                          />
-                                        )}
-                                      </div>
-                                    ))}
-                                  </div>
-                                  )}
-                                </div>
-                              </div>
-                            )}
-                          </>
-                        )}
-                        <div className="flex justify-end gap-2">
-                          <Button type="button" variant="outline" onClick={handleCloseFieldDialog}>
-                            {t("common.cancel")}
-                          </Button>
-                          <Button type="submit">
-                            {editingFieldId ? t("common.update") : t("common.create")}
-                          </Button>
-                        </div>
-                      </form>
-                    </DialogContent>
-                  </Dialog>
                 </div>
               </TabsContent>
 

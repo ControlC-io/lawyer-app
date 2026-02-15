@@ -2,7 +2,19 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { format } from "date-fns";
+import { fr, enUS } from "date-fns/locale";
 import { CheckCircle, Clock, PlayCircle, XCircle, Pause, FileText, AlertCircle, ChevronLeft } from "lucide-react";
+import { useLanguage } from "@/contexts/LanguageContext";
+
+// Step type colors aligned with workflow editor (WorkflowNode) so users can match steps at a glance
+const stepTypeStyles: Record<string, { border: string; bg: string; text: string; ring: string; completedDot: string; completedIcon: string; runningDot: string }> = {
+  start: { border: "border-emerald-400", bg: "bg-emerald-50/60", text: "text-emerald-700", ring: "ring-emerald-400", completedDot: "bg-emerald-500", completedIcon: "text-white", runningDot: "bg-emerald-500" },
+  end: { border: "border-rose-400", bg: "bg-rose-50/60", text: "text-rose-700", ring: "ring-rose-400", completedDot: "bg-rose-500", completedIcon: "text-white", runningDot: "bg-rose-500" },
+  decision: { border: "border-amber-400", bg: "bg-amber-50/60", text: "text-amber-700", ring: "ring-amber-400", completedDot: "bg-amber-500", completedIcon: "text-white", runningDot: "bg-amber-500" },
+  action: { border: "border-blue-400", bg: "bg-blue-50/60", text: "text-blue-700", ring: "ring-blue-400", completedDot: "bg-blue-500", completedIcon: "text-white", runningDot: "bg-blue-500" },
+  edit_form: { border: "border-violet-400", bg: "bg-violet-50/60", text: "text-violet-700", ring: "ring-violet-400", completedDot: "bg-violet-500", completedIcon: "text-white", runningDot: "bg-violet-500" },
+  file: { border: "border-orange-400", bg: "bg-orange-50/60", text: "text-orange-700", ring: "ring-orange-400", completedDot: "bg-orange-500", completedIcon: "text-white", runningDot: "bg-orange-500" },
+};
 
 interface ExecutionTimelineProps {
   execution: any;
@@ -25,6 +37,9 @@ export const ExecutionTimeline = ({
   isCollapsed,
   onToggleCollapse
 }: ExecutionTimelineProps) => {
+  const { t, language } = useLanguage();
+  const dateLocale = language === "fr" ? fr : enUS;
+
   const getStatusIcon = (status: string) => {
     switch (status) {
       case "pending": return <Clock className="h-4 w-4" />;
@@ -55,9 +70,9 @@ export const ExecutionTimeline = ({
           size="sm"
           onClick={onToggleCollapse}
           className="h-full w-full flex flex-col items-center justify-center hover:bg-muted/50 p-1 gap-1 min-w-0"
-          title="Expand timeline"
+          title={t("executionTimeline.expandTimeline")}
         >
-          <span className="text-xs transform -rotate-90 whitespace-nowrap">Timeline</span>
+          <span className="text-xs transform -rotate-90 whitespace-nowrap">{t("executionTimeline.timeline")}</span>
         </Button>
       </div>
     );
@@ -71,7 +86,7 @@ export const ExecutionTimeline = ({
           size="sm"
           onClick={onToggleCollapse}
           className="h-6 w-6 p-0 bg-background border border-border shadow-sm rounded-full hover:bg-muted"
-          title="Collapse timeline"
+          title={t("executionTimeline.collapseTimeline")}
         >
           <ChevronLeft className="h-3.5 w-3.5" />
         </Button>
@@ -102,14 +117,14 @@ export const ExecutionTimeline = ({
                 <div className="space-y-1 text-xs">
                   {execution.started_at && <div className="flex items-center gap-1.5 text-muted-foreground flex-wrap">
                     <Clock className="h-3 w-3 flex-shrink-0" />
-                    <span className="font-medium flex-shrink-0">Started:</span>
-                    <span className="break-words">{format(new Date(execution.started_at), "dd/MM/yyyy HH:mm:ss")}</span>
+                    <span className="font-medium flex-shrink-0">{t("executionTimeline.started")}</span>
+                    <span className="break-words">{format(new Date(execution.started_at), "dd/MM/yyyy HH:mm:ss", { locale: dateLocale })}</span>
                   </div>}
 
                   {execution.completed_at && <div className="flex items-center gap-1.5 text-muted-foreground flex-wrap">
                     <CheckCircle className="h-3 w-3 flex-shrink-0" />
-                    <span className="font-medium flex-shrink-0">Completed:</span>
-                    <span className="break-words">{format(new Date(execution.completed_at), "dd/MM/yyyy HH:mm:ss")}</span>
+                    <span className="font-medium flex-shrink-0">{t("executionTimeline.completed")}</span>
+                    <span className="break-words">{format(new Date(execution.completed_at), "dd/MM/yyyy HH:mm:ss", { locale: dateLocale })}</span>
                   </div>}
                 </div>
 
@@ -121,93 +136,112 @@ export const ExecutionTimeline = ({
               {/* Process Timeline */}
               <div>
                 <h2 className="text-sm font-semibold mb-2">Process Timeline</h2>
-                <div className="space-y-2">
-                  {visibleSteps.map((step) => {
-                    const stepLogs = logs?.filter((log: any) => log.step_id === step.id) || [];
-                    const hasStepData = step.step_data && Object.keys(step.step_data).length > 0;
-                    const isCompleted = step.status === "completed";
-                    const isActiveStep = step.status === "running";
-                    // Make active steps clickable to navigate between multiple running steps
-                    // Also make completed steps clickable to view historical data
-                    const isClickable = isCompleted || isActiveStep;
-                    const isCurrentlyViewing = viewingHistoricalStep === step.id;
+                <div className="space-y-4">
+                  {(() => {
+                    const previousSteps = visibleSteps.filter((s: any) => s.status !== "running");
+                    const currentSteps = visibleSteps.filter((s: any) => s.status === "running");
 
-                    return <div
-                      key={step.id}
-                      className={`relative pl-5 pb-2 border-l-2 border-border last:border-l-0 transition-colors ${isClickable && !isCurrentlyViewing ? 'cursor-pointer hover:bg-muted/50 rounded-md p-1.5 -ml-1.5' : ''
-                        } ${isCurrentlyViewing ? 'bg-primary/10 border-primary rounded-md p-1.5 -ml-1.5' : ''} ${isActiveStep && !isCurrentlyViewing ? 'ring-1 ring-primary/50 rounded-md p-1.5 -ml-1.5' : ''}`}
-                      onClick={() => {
-                        if (isClickable && !isCurrentlyViewing) {
-                          // Clicking any step (running or completed) to view it
-                          // Don't allow deselecting - always keep a step selected
-                          onStepClick(step.id);
-                        }
-                      }}
-                    >
-                      <div className="absolute -left-[7px] top-1.5">
-                        <div className={`w-3 h-3 rounded-full flex items-center justify-center ${step.status === "completed" ? "bg-primary" : step.status === "running" ? "bg-secondary border-2 border-background" : step.status === "failed" ? "bg-destructive" : "bg-muted"}`}>
-                          {step.status === "completed" && <CheckCircle className="h-2.5 w-2.5 text-primary-foreground" />}
-                          {step.status === "running" && <div className="w-1.5 h-1.5 rounded-full bg-secondary-foreground animate-pulse" />}
-                          {step.status === "failed" && <XCircle className="h-2.5 w-2.5 text-destructive-foreground" />}
-                        </div>
-                      </div>
+                    const renderStep = (step: any) => {
+                      const stepLogs = logs?.filter((log: any) => log.step_id === step.id) || [];
+                      const isCompleted = step.status === "completed";
+                      const isActiveStep = step.status === "running";
+                      const isClickable = isCompleted || isActiveStep;
+                      const isCurrentlyViewing = viewingHistoricalStep === step.id;
+                      const stepType = step.workflow_steps?.step_type ?? "action";
+                      const typeStyle = stepTypeStyles[stepType] ?? stepTypeStyles.action;
 
-                      <div className="space-y-0.5">
-                        <div className="flex items-center justify-between gap-2 flex-wrap">
-                          <h3 className="font-semibold text-xs break-words flex-1 min-w-0">
-                            {step.workflow_steps?.name}
-                          </h3>
-                          <div className="flex gap-1 flex-shrink-0">
-                            {stepLogs.length > 0 && (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  onLogsClick(step.id);
-                                }}
-                                className="h-5 px-1.5 text-xs"
-                              >
-                                <FileText className="h-3 w-3" />
-                                <span className="ml-0.5">{stepLogs.length}</span>
-                              </Button>
+                      return (
+                        <div
+                          key={step.id}
+                          className={`relative pl-5 pb-2 border-l-2 last:border-l-0 transition-colors ${typeStyle.border} ${typeStyle.bg} rounded-md p-1.5 -ml-1.5 ${isCurrentlyViewing ? `ring-2 ${typeStyle.ring} ring-inset` : isActiveStep ? `ring-2 ring-offset-2 ring-offset-background ${typeStyle.ring}` : ""} ${isClickable && !isCurrentlyViewing ? "cursor-pointer hover:bg-muted/60" : ""}`}
+                          onClick={() => {
+                            if (isClickable && !isCurrentlyViewing) onStepClick(step.id);
+                          }}
+                        >
+                          <div className="absolute -left-[7px] top-1.5">
+                            <div className={`w-3 h-3 rounded-full flex items-center justify-center ${step.status === "completed" ? typeStyle.completedDot : step.status === "running" ? `${typeStyle.runningDot} border-2 border-white shadow-sm` : step.status === "failed" ? "bg-destructive" : "bg-muted"}`}>
+                              {step.status === "completed" && <CheckCircle className={`h-2.5 w-2.5 ${typeStyle.completedIcon}`} />}
+                              {step.status === "running" && <div className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />}
+                              {step.status === "failed" && <XCircle className="h-2.5 w-2.5 text-destructive-foreground" />}
+                            </div>
+                          </div>
+
+                          <div className="space-y-0.5">
+                            <div className="flex items-center justify-between gap-2 flex-wrap">
+                              <h3 className={`font-semibold text-xs break-words flex-1 min-w-0 ${typeStyle.text}`}>
+                                {step.workflow_steps?.name}
+                              </h3>
+                              <div className="flex gap-1 flex-shrink-0">
+                                {stepLogs.length > 0 && (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      onLogsClick(step.id);
+                                    }}
+                                    className="h-5 px-1.5 text-xs"
+                                  >
+                                    <FileText className="h-3 w-3" />
+                                    <span className="ml-0.5">{stepLogs.length}</span>
+                                  </Button>
+                                )}
+                              </div>
+                            </div>
+
+                            {step.started_at && <p className="text-[10px] text-muted-foreground break-words">{format(new Date(step.started_at), "dd/MM/yyyy HH:mm:ss", { locale: dateLocale })}</p>}
+
+                            {step.decision_choice && (
+                              <div className="mt-1 space-y-0.5">
+                                <Badge variant="secondary" className="text-[10px] py-0 px-1.5 break-words">
+                                  <span className="break-words">{t("executionTimeline.decisionLabel")} {step.decision_choice}</span>
+                                </Badge>
+                                {step.step_data?.decision_comment && (
+                                  <div className="mt-1 p-1.5 bg-muted/50 rounded-md border border-border">
+                                    <p className="text-[10px] font-medium text-muted-foreground mb-0.5">{t("executionTimeline.decisionCommentLabel")}</p>
+                                    <p className="text-[10px] text-foreground whitespace-pre-wrap break-words">{step.step_data.decision_comment}</p>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+
+                            {!step.started_at && step.status === "pending" && <p className="text-[10px] text-muted-foreground italic">{t("executionTimeline.notStarted")}</p>}
+
+                            {step.status === "running" && (
+                              <div className="mt-1">
+                                <Badge variant="secondary" className="text-[10px] py-0 px-1.5 break-words">
+                                  <span className="break-words">{t("executionTimeline.actionRequired")}</span>
+                                </Badge>
+                              </div>
                             )}
                           </div>
                         </div>
+                      );
+                    };
 
-                        {step.started_at && <p className="text-[10px] text-muted-foreground break-words">
-                          {format(new Date(step.started_at), "dd/MM/yyyy HH:mm:ss")}
-                        </p>}
-
-                        {step.decision_choice && <div className="mt-1 space-y-0.5">
-                          <Badge variant="secondary" className="text-[10px] py-0 px-1.5 break-words">
-                            <span className="break-words">Decision: {step.decision_choice}</span>
-                          </Badge>
-                          {step.step_data?.decision_comment && (
-                            <div className="mt-1 p-1.5 bg-muted/50 rounded-md border border-border">
-                              <p className="text-[10px] font-medium text-muted-foreground mb-0.5">Decision Comment:</p>
-                              <p className="text-[10px] text-foreground whitespace-pre-wrap break-words">{step.step_data.decision_comment}</p>
-                            </div>
-                          )}
-                        </div>}
-
-                        {!step.started_at && step.status === "pending" && <p className="text-[10px] text-muted-foreground italic">
-                          Not started
-                        </p>}
-
-                        {step.status === "running" && <div className="mt-1">
-                          <Badge variant="secondary" className="text-[10px] py-0 px-1.5 break-words">
-                            <span className="break-words">Action required</span>
-                          </Badge>
-                        </div>}
-                      </div>
-                    </div>;
-                  })}
-
-                  {visibleSteps.length === 0 && <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <AlertCircle className="h-4 w-4" />
-                    <span>No completed or running steps found</span>
-                  </div>}
+                    return (
+                      <>
+                        {previousSteps.length > 0 && (
+                          <div className="space-y-2">
+                            <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">{t("executionTimeline.previousSteps")}</h3>
+                            <div className="space-y-2">{previousSteps.map(renderStep)}</div>
+                          </div>
+                        )}
+                        {currentSteps.length > 0 && (
+                          <div className="space-y-2">
+                            <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">{t("executionTimeline.currentStep")}</h3>
+                            <div className="space-y-2">{currentSteps.map(renderStep)}</div>
+                          </div>
+                        )}
+                        {visibleSteps.length === 0 && (
+                          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                            <AlertCircle className="h-4 w-4" />
+                            <span>{t("executionTimeline.noStepsFound")}</span>
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
                 </div>
               </div>
             </div>

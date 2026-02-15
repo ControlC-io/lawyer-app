@@ -446,12 +446,17 @@ export const workflowController = {
         decision_choice
       );
 
+      const execution = await prisma.workflowExecution.findUnique({
+        where: { id: executionId },
+        select: { status: true },
+      });
+
       return res.json({
         success: true,
         message: 'Decision recorded and workflow advanced',
         decision_choice,
         triggered_steps: triggeredSteps,
-        execution_status: 'running',
+        execution_status: execution?.status ?? 'running',
       });
     } catch (error) {
       console.error('Error making decision:', error);
