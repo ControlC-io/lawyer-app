@@ -6,14 +6,14 @@ import { fr, enUS } from "date-fns/locale";
 import { CheckCircle, Clock, PlayCircle, XCircle, Pause, FileText, AlertCircle, ChevronLeft } from "lucide-react";
 import { useLanguage } from "@/contexts/LanguageContext";
 
-// Step type colors aligned with workflow editor (WorkflowNode) so users can match steps at a glance
+// Step type colors aligned with workflow editor (WorkflowNode); light + dark variants so steps fit both themes
 const stepTypeStyles: Record<string, { border: string; bg: string; text: string; ring: string; completedDot: string; completedIcon: string; runningDot: string }> = {
-  start: { border: "border-emerald-400", bg: "bg-emerald-50/60", text: "text-emerald-700", ring: "ring-emerald-400", completedDot: "bg-emerald-500", completedIcon: "text-white", runningDot: "bg-emerald-500" },
-  end: { border: "border-rose-400", bg: "bg-rose-50/60", text: "text-rose-700", ring: "ring-rose-400", completedDot: "bg-rose-500", completedIcon: "text-white", runningDot: "bg-rose-500" },
-  decision: { border: "border-amber-400", bg: "bg-amber-50/60", text: "text-amber-700", ring: "ring-amber-400", completedDot: "bg-amber-500", completedIcon: "text-white", runningDot: "bg-amber-500" },
-  action: { border: "border-blue-400", bg: "bg-blue-50/60", text: "text-blue-700", ring: "ring-blue-400", completedDot: "bg-blue-500", completedIcon: "text-white", runningDot: "bg-blue-500" },
-  edit_form: { border: "border-violet-400", bg: "bg-violet-50/60", text: "text-violet-700", ring: "ring-violet-400", completedDot: "bg-violet-500", completedIcon: "text-white", runningDot: "bg-violet-500" },
-  file: { border: "border-orange-400", bg: "bg-orange-50/60", text: "text-orange-700", ring: "ring-orange-400", completedDot: "bg-orange-500", completedIcon: "text-white", runningDot: "bg-orange-500" },
+  start: { border: "border-emerald-400 dark:border-emerald-600", bg: "bg-emerald-50/60 dark:bg-emerald-950/50", text: "text-emerald-700 dark:text-emerald-300", ring: "ring-emerald-400", completedDot: "bg-emerald-500", completedIcon: "text-white", runningDot: "bg-emerald-500" },
+  end: { border: "border-rose-400 dark:border-rose-600", bg: "bg-rose-50/60 dark:bg-rose-950/50", text: "text-rose-700 dark:text-rose-300", ring: "ring-rose-400", completedDot: "bg-rose-500", completedIcon: "text-white", runningDot: "bg-rose-500" },
+  decision: { border: "border-amber-400 dark:border-amber-600", bg: "bg-amber-50/60 dark:bg-amber-950/50", text: "text-amber-700 dark:text-amber-300", ring: "ring-amber-400", completedDot: "bg-amber-500", completedIcon: "text-white", runningDot: "bg-amber-500" },
+  action: { border: "border-blue-400 dark:border-blue-600", bg: "bg-blue-50/60 dark:bg-blue-950/50", text: "text-blue-700 dark:text-blue-300", ring: "ring-blue-400", completedDot: "bg-blue-500", completedIcon: "text-white", runningDot: "bg-blue-500" },
+  edit_form: { border: "border-violet-400 dark:border-violet-600", bg: "bg-violet-50/60 dark:bg-violet-950/50", text: "text-violet-700 dark:text-violet-300", ring: "ring-violet-400", completedDot: "bg-violet-500", completedIcon: "text-white", runningDot: "bg-violet-500" },
+  file: { border: "border-orange-400 dark:border-orange-600", bg: "bg-orange-50/60 dark:bg-orange-950/50", text: "text-orange-700 dark:text-orange-300", ring: "ring-orange-400", completedDot: "bg-orange-500", completedIcon: "text-white", runningDot: "bg-orange-500" },
 };
 
 interface ExecutionTimelineProps {
