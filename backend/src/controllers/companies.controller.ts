@@ -144,7 +144,13 @@ export const companiesController = {
         }
       }
       if (typeof logo_url === 'string') updateData.logo_url = logo_url || null;
-      if (typeof portal_description === 'string') updateData.portal_description = portal_description || null;
+      // Allow clearing portal description: accept string (trimmed) or null/empty
+      if ('portal_description' in req.body) {
+        updateData.portal_description =
+          typeof portal_description === 'string' && portal_description.trim()
+            ? portal_description.trim()
+            : null;
+      }
       if (typeof portal_primary_color === 'string') {
         const color = portal_primary_color.trim();
         if (color && !/^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$/.test(color)) {

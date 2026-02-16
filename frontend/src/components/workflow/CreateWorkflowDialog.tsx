@@ -1,4 +1,4 @@
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Wand2, Pencil } from "lucide-react";
 
@@ -20,11 +20,11 @@ export function CreateWorkflowDialog({
       <DialogContent className="sm:max-w-[500px] max-w-[calc(100vw-2rem)] overflow-hidden">
         <DialogHeader>
           <DialogTitle>Create New Workflow</DialogTitle>
+          <DialogDescription>
+            Choose how you want to create your workflow
+          </DialogDescription>
         </DialogHeader>
         <div className="grid gap-4 py-4 min-w-0">
-          <p className="text-sm text-muted-foreground">
-            Choose how you want to create your workflow
-          </p>
           <div className="grid gap-3 min-w-0">
             <Button
               variant="outline"

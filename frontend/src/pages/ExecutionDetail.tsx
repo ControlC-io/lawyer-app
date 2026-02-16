@@ -319,11 +319,14 @@ const ExecutionDetail = () => {
   }
 
   // Filter to only show completed and running steps (exclude pending steps), sorted by creation date ascending
-  const visibleSteps = executionSteps
+  const visibleSteps = (executionSteps ?? [])
     .filter((step: any) => step.status !== "pending")
-    .sort((a: any, b: any) =>
-      new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-    );
+    .sort((a: any, b: any) => {
+      const timeA = a.created_at ? new Date(a.created_at).getTime() : (a.started_at ? new Date(a.started_at).getTime() : 0);
+      const timeB = b.created_at ? new Date(b.created_at).getTime() : (b.started_at ? new Date(b.started_at).getTime() : 0);
+      if (timeA !== timeB) return timeA - timeB;
+      return (a.id ?? "").localeCompare(b.id ?? "");
+    });
 
   // Determine the current step's workflow_step.id to highlight
   const getCurrentStepWorkflowStepId = (): string | null => {

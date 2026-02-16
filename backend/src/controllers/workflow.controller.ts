@@ -508,7 +508,7 @@ export const workflowController = {
         },
         include: {
           workflow: { include: { connections: true } },
-          execution_steps: { include: { step: true } },
+          execution_steps: { include: { step: true }, orderBy: { created_at: 'asc' } },
           execution_data_records: true,
           execution_logs: { orderBy: { created_at: 'asc' } },
           current_step: true,

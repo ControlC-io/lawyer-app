@@ -655,19 +655,38 @@ export default function CompanyPortal() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Portal header */}
-      <header className="bg-white border-b">
-        <div className="max-w-4xl mx-auto px-4 py-8 text-center">
-          {portal.logo_url && (
-            <img
-              src={portal.logo_url}
-              alt={portal.name}
-              className="h-16 w-16 object-contain rounded-lg mx-auto mb-4"
-            />
-          )}
-          <h1 className="text-3xl font-bold text-gray-900">{portal.name}</h1>
-          {portal.portal_description && (
-            <p className="mt-3 text-gray-600 max-w-2xl mx-auto">{portal.portal_description}</p>
+      {/* Portal header — modern hero */}
+      <header
+        className="relative overflow-hidden border-b border-gray-200/80 bg-white"
+        style={{
+          background: `linear-gradient(135deg, ${primaryColor}08 0%, ${primaryColor}03 50%, transparent 100%)`,
+        }}
+      >
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_80%_60%_at_50%_-20%,var(--tw-gradient-from),transparent)] from-gray-100/60 to-transparent pointer-events-none" />
+        <div className="relative max-w-4xl mx-auto px-4 sm:px-6 py-10 sm:py-12">
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-4 sm:gap-6 text-center sm:text-left">
+            {portal.logo_url && (
+              <div
+                className="flex-shrink-0 inline-flex items-center justify-center w-20 h-20 sm:w-24 sm:h-24 rounded-2xl shadow-sm ring-1 ring-gray-200/60 bg-white"
+                style={{ boxShadow: `0 4px 14px ${primaryColor}15` }}
+              >
+                <img
+                  src={portal.logo_url}
+                  alt={portal.name}
+                  className="h-12 w-12 sm:h-14 sm:w-14 object-contain"
+                />
+              </div>
+            )}
+            <div className="min-w-0">
+              <h1 className="text-3xl sm:text-4xl font-bold tracking-tight text-gray-900">
+                {portal.name}
+              </h1>
+            </div>
+          </div>
+          {portal.portal_description?.trim() && (
+            <p className="mt-4 text-center text-base sm:text-lg text-gray-600 max-w-2xl mx-auto leading-relaxed">
+              {portal.portal_description}
+            </p>
           )}
         </div>
       </header>

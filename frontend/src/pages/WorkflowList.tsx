@@ -878,7 +878,8 @@ export default function WorkflowList() {
       setSelectedIcon(null);
       setPendingStatuses([]);
       setEditingPendingStatusId(null);
-      setIsFieldDialogOpen(false);
+      setAddingNewFieldParentId(undefined);
+      setFieldDescriptionOpen(false);
       setEditingFieldId(null);
       setFieldFormData({
         name: "",
