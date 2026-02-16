@@ -5,10 +5,15 @@ import { prisma } from '../lib/prisma';
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
 const INTERNAL_API_KEY = process.env.INTERNAL_API_KEY || '';
 
+/** Synthetic user id when authenticated via SUPER_ADMIN_API_KEY (server-side only). */
+export const SUPER_ADMIN_API_USER_ID = 'super-admin-api';
+
 export interface AuthRequest extends Request {
   user?: {
     id: string;
     email: string;
+    /** True when authenticated via SUPER_ADMIN_API_KEY; grants super_admin access. */
+    super_admin?: boolean;
   };
   company?: {
     id: string;
@@ -18,13 +23,27 @@ export interface AuthRequest extends Request {
 }
 
 /**
- * General authentication middleware - supports JWT and API keys
+ * General authentication middleware - supports JWT, company API keys, and super admin API key
  */
 export const authMiddleware = async (req: AuthRequest, res: Response, next: NextFunction) => {
   const authHeader = req.headers.authorization;
   const apiKey = req.headers['x-api-key'];
+  const superAdminKey = req.headers['x-super-admin-api-key'];
+  const superAdminApiKey = process.env.SUPER_ADMIN_API_KEY || '';
 
-  // 1. Check for API Key (Company authorization)
+  // 1. Check for Super Admin API Key (server-side only; grants super_admin access)
+  if (superAdminApiKey && superAdminKey && typeof superAdminKey === 'string') {
+    if (superAdminKey === superAdminApiKey) {
+      req.user = {
+        id: SUPER_ADMIN_API_USER_ID,
+        email: 'superadmin@api',
+        super_admin: true,
+      };
+      return next();
+    }
+  }
+
+  // 2. Check for API Key (Company authorization)
   if (apiKey && typeof apiKey === 'string') {
     try {
       const company = await prisma.company.findUnique({
@@ -43,7 +62,7 @@ export const authMiddleware = async (req: AuthRequest, res: Response, next: Next
     }
   }
 
-  // 2. Check for JWT (User authorization)
+  // 3. Check for JWT (User authorization)
   if (authHeader && authHeader.startsWith('Bearer ')) {
     const token = authHeader.split(' ')[1];
 

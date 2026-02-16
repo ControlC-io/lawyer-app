@@ -8,6 +8,10 @@ async function ensureCompanyAccess(req: AuthRequest, companyId: string, requireA
   if (!userId) {
     return { error: { status: 401, body: { error: 'Unauthorized', details: 'Authentication required' } } };
   }
+  // Super admin API key or JWT super_admin can access any company
+  if (req.user?.super_admin) {
+    return {};
+  }
   const userCompany = await prisma.userCompany.findFirst({
     where: { user_id: userId, company_id: companyId },
   });

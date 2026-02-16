@@ -11,7 +11,7 @@ const router = Router();
 
 router.use(authMiddleware);
 
-/** GET /api/companies - list companies (user's or all if super_admin) */
+/** GET /api/companies - list companies (user's or all if super_admin / x-super-admin-api-key) */
 router.get('/', asyncHandler(companiesController.listCompanies));
 
 /**

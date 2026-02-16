@@ -837,10 +837,12 @@ paths:
   /companies:
     get:
       summary: List companies
-      description: List user's companies (or all if super_admin). JWT required.
+      description: |
+        List companies the caller can access. With JWT, returns the user's companies (or all companies if the user is super_admin). With `x-super-admin-api-key` (server-side only), returns all companies. Accepts either Bearer JWT or Super Admin API key.
       tags: [Companies]
       security:
         - BearerAuth: []
+        - SuperAdminApiKey: []
       responses:
         200:
           description: List of companies
@@ -848,9 +850,11 @@ paths:
   /companies/{companyId}:
     get:
       summary: Get company
+      description: Get company details. With Super Admin API key (server-side), any company can be accessed without membership.
       tags: [Companies]
       security:
         - BearerAuth: []
+        - SuperAdminApiKey: []
       parameters:
         - name: companyId
           in: path
@@ -865,9 +869,11 @@ paths:
           description: Company not found
     patch:
       summary: Update company
+      description: Update company (company admin or Super Admin API key). With Super Admin API key (server-side), any company can be updated.
       tags: [Companies]
       security:
         - BearerAuth: []
+        - SuperAdminApiKey: []
       parameters:
         - name: companyId
           in: path
@@ -3163,6 +3169,12 @@ components:
       in: header
       name: x-internal-api-key
       description: Used by database triggers and internal services
+    SuperAdminApiKey:
+      type: apiKey
+      in: header
+      name: x-super-admin-api-key
+      description: |
+        Server-side only. When SUPER_ADMIN_API_KEY is set in env, requests with this header get super_admin access (e.g. list all companies, access any company). Never use client-side.
 
   schemas:
     User:

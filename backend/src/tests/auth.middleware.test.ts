@@ -6,6 +6,7 @@ import {
   externalStepAuth,
   optionalAuth,
   AuthRequest,
+  SUPER_ADMIN_API_USER_ID,
 } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 
@@ -48,9 +49,52 @@ describe('auth middleware', () => {
     jest.spyOn(console, 'error').mockImplementation(() => {});
     process.env.JWT_SECRET = 'test-secret';
     process.env.INTERNAL_API_KEY = 'internal-secret';
+    delete process.env.SUPER_ADMIN_API_KEY;
   });
 
   describe('authMiddleware', () => {
+    it('calls next() with super_admin user when x-super-admin-api-key matches', async () => {
+      process.env.SUPER_ADMIN_API_KEY = 'super-secret-key';
+      const req = mockRequest({ headers: { 'x-super-admin-api-key': 'super-secret-key' } });
+      const res = mockResponse();
+      const next = mockNext();
+
+      await authMiddleware(req, res, next);
+
+      expect(req.user).toEqual({
+        id: SUPER_ADMIN_API_USER_ID,
+        email: 'superadmin@api',
+        super_admin: true,
+      });
+      expect(next).toHaveBeenCalled();
+      expect(prisma.company.findUnique).not.toHaveBeenCalled();
+      expect(res.status).not.toHaveBeenCalled();
+    });
+
+    it('returns 401 when x-super-admin-api-key is wrong', async () => {
+      process.env.SUPER_ADMIN_API_KEY = 'super-secret-key';
+      const req = mockRequest({ headers: { 'x-super-admin-api-key': 'wrong-key' } });
+      const res = mockResponse();
+      const next = mockNext();
+
+      await authMiddleware(req, res, next);
+
+      expect(next).not.toHaveBeenCalled();
+      expect(res.status).toHaveBeenCalledWith(401);
+    });
+
+    it('ignores x-super-admin-api-key when SUPER_ADMIN_API_KEY env is not set', async () => {
+      const req = mockRequest({ headers: { 'x-super-admin-api-key': 'any-key' } });
+      const res = mockResponse();
+      const next = mockNext();
+
+      await authMiddleware(req, res, next);
+
+      expect(req.user).toBeUndefined();
+      expect(next).not.toHaveBeenCalled();
+      expect(res.status).toHaveBeenCalledWith(401);
+    });
+
     it('calls next() when API key is valid and company is active', async () => {
       (prisma.company.findUnique as jest.Mock).mockResolvedValue({
         id: 'company-1',

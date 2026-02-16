@@ -14,6 +14,11 @@ async function ensureCompanyAccess(req: AuthRequest, companyId: string, requireA
     return { error: { status: 401, body: { error: 'Unauthorized', details: 'Authentication required' } } };
   }
 
+  // Super admin API key or JWT super_admin can access any company
+  if (req.user?.super_admin) {
+    return {};
+  }
+
   const userCompany = await prisma.userCompany.findFirst({
     where: { user_id: userId, company_id: companyId },
   });
@@ -38,7 +43,8 @@ export const companiesController = {
     try {
       const userId = req.user?.id;
       if (!userId) return res.status(401).json({ error: 'Unauthorized' });
-      const superAdmin = await prisma.profileAdminRole.findUnique({ where: { profile_id: userId }, select: { super_admin: true } }).then((r) => r?.super_admin ?? false);
+      // Super admin API key or JWT super_admin: return all companies
+      const superAdmin = req.user?.super_admin ?? await prisma.profileAdminRole.findUnique({ where: { profile_id: userId }, select: { super_admin: true } }).then((r) => r?.super_admin ?? false);
       if (superAdmin) {
         const all = await prisma.company.findMany({ select: { id: true, name: true }, orderBy: { name: 'asc' } });
         return res.json(all);
@@ -1213,7 +1219,7 @@ export const companiesController = {
         where: { id: folderId, company_id: companyId },
       });
       if (!folder) return res.status(404).json({ error: 'Folder not found' });
-      const isCompanyAdmin = access.userCompany.role === 'company_admin';
+      const isCompanyAdmin = access.userCompany?.role === 'company_admin' || !!req.user?.super_admin;
       const userGroupIds = await getUserGroupIdsInCompany(userId, companyId);
       const allowed = await canUserAccessFolder(userId, companyId, folderId, isCompanyAdmin, userGroupIds);
       if (!allowed) return res.status(404).json({ error: 'Folder not found' });
@@ -1233,7 +1239,7 @@ export const companiesController = {
       if (access.error) return res.status(access.error.status).json(access.error.body);
       const userId = req.user?.id;
       if (!userId) return res.status(401).json({ error: 'Unauthorized' });
-      const isCompanyAdmin = access.userCompany.role === 'company_admin';
+      const isCompanyAdmin = access.userCompany?.role === 'company_admin' || !!req.user?.super_admin;
       const userGroupIds = await getUserGroupIdsInCompany(userId, companyId);
 
       const isRootList = parentFolderId === undefined || parentFolderId === '';
@@ -1438,7 +1444,7 @@ export const companiesController = {
       if (access.error) return res.status(access.error.status).json(access.error.body);
       const userId = req.user?.id;
       if (!userId) return res.status(401).json({ error: 'Unauthorized' });
-      const isCompanyAdmin = access.userCompany.role === 'company_admin';
+      const isCompanyAdmin = access.userCompany?.role === 'company_admin' || !!req.user?.super_admin;
       const userGroupIds = await getUserGroupIdsInCompany(userId, companyId);
 
       if (folderId !== undefined && folderId !== '') {
@@ -1538,7 +1544,7 @@ export const companiesController = {
           where: { id: { in: fileIds }, company_id: companyId },
           select: { id: true, folder_id: true },
         });
-        const isCompanyAdmin = access.userCompany.role === 'company_admin';
+        const isCompanyAdmin = access.userCompany?.role === 'company_admin' || !!req.user?.super_admin;
         const userGroupIds = await getUserGroupIdsInCompany(userId, companyId);
         const folderIds = [...new Set(filesWithFolder.map((f) => f.folder_id))];
         const allowedFolderIds = new Set<string>();
