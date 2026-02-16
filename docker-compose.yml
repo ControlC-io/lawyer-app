@@ -21,6 +21,7 @@ services:
       - SENDGRID_API_KEY=${SENDGRID_API_KEY:-}
       - FROM_EMAIL=${FROM_EMAIL:-}
       - APP_URL=${APP_URL:-}
+      - BACKEND_URL=${BACKEND_URL:-}
     command: npm run dev -w backend
     volumes:
       - .:/usr/src/app

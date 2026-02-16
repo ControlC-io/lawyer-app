@@ -1,4 +1,5 @@
 import { Response } from 'express';
+import jwt from 'jsonwebtoken';
 import { prisma } from '../lib/prisma';
 import { AuthRequest } from '../middleware/auth';
 import { workflowService } from '../services/workflow.service';
@@ -7,6 +8,15 @@ import { emailService } from '../services/email.service';
 import { storageService } from '../services/storage.service';
 import { aiService } from '../services/ai.service';
 import crypto from 'crypto';
+
+const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
+const DOCUMENT_TOKEN_EXPIRY = 5 * 60; // 5 minutes, same as /api/files/document-url
+
+/** Public base URL of the API (no trailing slash). Used so document URLs work in prod (not localhost:3001). */
+function getApiBaseUrl(): string {
+  const base = process.env.BACKEND_URL || process.env.APP_URL || 'http://localhost:3001';
+  return base.replace(/\/$/, '');
+}
 
 export const workflowController = {
   /**
@@ -525,36 +535,28 @@ export const workflowController = {
         const executionDataValues =
           execution.execution_data_records[0]?.values || {};
 
-        // Get signed URLs for file fields
+        // Get document URLs for file fields (proxy through backend like DocumentManagement /api/files/document-url)
         const fileSignedUrls: Record<string, any> = {};
+
+        const createDocumentProxyUrl = (path: string): string => {
+          const token = jwt.sign(
+            { path, download: false },
+            JWT_SECRET,
+            { expiresIn: DOCUMENT_TOKEN_EXPIRY }
+          );
+          const pathPart = `/api/files/document?token=${encodeURIComponent(token)}`;
+          return `${getApiBaseUrl()}${pathPart}`;
+        };
 
         for (const field of dataStructure.fields) {
           const fieldValue = (executionDataValues as any)[field.id];
 
           if (field.field_type === 'file' && fieldValue?.value) {
-            try {
-              const signedUrl = await storageService.getSignedUrl(
-                storageService.getDocumentsBucket(),
-                fieldValue.value
-              );
-              fileSignedUrls[field.id] = signedUrl;
-            } catch (error) {
-              console.error('Error getting signed URL:', error);
-            }
+            fileSignedUrls[field.id] = createDocumentProxyUrl(fieldValue.value);
           } else if (field.field_type === 'multiple_files' && Array.isArray(fieldValue?.value)) {
-            const signedUrls = await Promise.all(
-              fieldValue.value.map(async (filePath: string) => {
-                try {
-                  return await storageService.getSignedUrl(
-                    storageService.getDocumentsBucket(),
-                    filePath
-                  );
-                } catch (error) {
-                  return null;
-                }
-              })
+            fileSignedUrls[field.id] = fieldValue.value.map((filePath: string) =>
+              createDocumentProxyUrl(filePath)
             );
-            fileSignedUrls[field.id] = signedUrls.filter((url) => url !== null);
           }
         }
 
