@@ -239,10 +239,13 @@ export default function WorkflowList() {
   const [defaultStatusId, setDefaultStatusId] = useState<string | null>(null);
   const [pendingStatuses, setPendingStatuses] = useState<PendingStatus[]>([]);
   const [editingPendingStatusId, setEditingPendingStatusId] = useState<string | null>(null);
+  const prevCompanyIdRef = useRef<string | null>(companyId);
 
+  // When company changes, go back to root and reload workflows for the new company
   useEffect(() => {
     if (companyId) {
-      fetchWorkflows();
+      setCurrentCategoryId(null);
+      fetchWorkflows(null);
       fetchAllWorkflows(); // Fetch all workflows for counting
       fetchCategories();
       fetchUsers();
@@ -266,11 +269,12 @@ export default function WorkflowList() {
     }
   }, [duplicateToCompanyDialogOpen, isSuperAdmin]);
 
-  // Refetch filtered workflows when category changes
+  // Refetch filtered workflows when category changes (same company only; company change is handled above)
   useEffect(() => {
-    if (companyId) {
+    if (companyId && prevCompanyIdRef.current === companyId) {
       fetchWorkflows();
     }
+    prevCompanyIdRef.current = companyId;
   }, [currentCategoryId, companyId]);
 
   // Update breadcrumb when current category changes
@@ -455,7 +459,7 @@ export default function WorkflowList() {
     }
   };
 
-  const fetchWorkflows = async () => {
+  const fetchWorkflows = async (overrideCategoryId?: string | null) => {
     if (!companyId) {
       setWorkflows([]);
       setLoading(false);
@@ -463,7 +467,9 @@ export default function WorkflowList() {
     }
     try {
       const search = new URLSearchParams();
-      search.set("categoryId", currentCategoryId === null ? "" : currentCategoryId);
+      const categoryId =
+        overrideCategoryId !== undefined ? overrideCategoryId : currentCategoryId;
+      search.set("categoryId", categoryId === null ? "" : categoryId);
       const url = `/api/companies/${companyId}/workflows?${search.toString()}`;
       const workflowsWithCounts = await api.get<any[]>(url);
       setWorkflows(workflowsWithCounts || []);

@@ -132,16 +132,28 @@ describe('Files Endpoints', () => {
   });
 
   describe('POST /api/files/signed-url', () => {
-    it('should return a signed URL', async () => {
+    it('should return a proxy URL for documents bucket', async () => {
       const response = await request(app)
         .post('/api/files/signed-url')
         .set(mockAuthHeaders)
         .send({ bucket: 'documents', path: 'some/path.png' });
 
       expect(response.status).toBe(200);
-      expect(response.body.signedUrl).toBe('http://signed-url.com');
+      expect(response.body.signedUrl).toMatch(/^https?:\/\//);
+      expect(response.body.signedUrl).toContain('/api/files/document');
+      expect(response.body.signedUrl).toContain('token=');
     });
 
+    it('should return MinIO signed URL for non-documents bucket', async () => {
+      mockGetSignedUrl.mockResolvedValue('http://signed-url.com');
+      const response = await request(app)
+        .post('/api/files/signed-url')
+        .set(mockAuthHeaders)
+        .send({ bucket: 'floowly', path: 'some/path.png' });
+
+      expect(response.status).toBe(200);
+      expect(response.body.signedUrl).toBe('http://signed-url.com');
+    });
   });
 
   describe('POST /api/files/workflows/executions/:executionId/steps/:stepId/process-file', () => {

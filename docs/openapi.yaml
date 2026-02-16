@@ -320,7 +320,12 @@ paths:
   /workflows/executions/{executionId}:
     get:
       summary: Get execution data
-      description: Retrieve all data and steps for a specific execution. JWT required.
+      description: |
+        Retrieve all data and steps for a specific execution. JWT required.
+        When the workflow has a data_structure with file or multiple_files fields, the response includes
+        **signed_url** / **signed_urls** (and execution_data_mapped fields like `{field_name}_signed_url`) as
+        **full proxy URLs** (same as /api/files/document?token=...), so clients can preview or download
+        without hitting MinIO directly. Set BACKEND_URL in production so these URLs use your API origin.
       tags: [Workflows]
       security:
         - BearerAuth: []
@@ -333,7 +338,7 @@ paths:
             format: uuid
       responses:
         200:
-          description: Execution data retrieved
+          description: Execution with workflow, steps, logs, and execution_data (file URLs are full proxy URLs)
         404:
           description: Execution not found
 
@@ -643,7 +648,12 @@ paths:
 
   /files/signed-url:
     post:
-      summary: Get a signed URL
+      summary: Get a signed or proxy URL for file access
+      description: |
+        Returns a URL to access a file. **For the `documents` bucket** the response is a full proxy URL
+        (e.g. `https://your-api/api/files/document?token=...`) that streams the file through the API;
+        use this for execution files and any document so clients never see internal MinIO URLs.
+        For other buckets, returns a MinIO/S3 presigned URL. Auth is optional (some callers use JWT or API key).
       tags: [Files]
       security:
         - BearerAuth: []
@@ -658,21 +668,98 @@ paths:
               properties:
                 bucket:
                   type: string
+                  description: Bucket name (e.g. `documents` for execution/company documents)
                 path:
                   type: string
+                  description: Path within the bucket
                 expiresIn:
                   type: integer
-                  description: Expiration time in seconds
+                  description: Expiration time in seconds (used only for non-documents buckets)
       responses:
         200:
-          description: Signed URL retrieved
+          description: URL retrieved. For documents bucket, signedUrl is a full proxy URL; otherwise a presigned URL.
           content:
             application/json:
               schema:
                 type: object
+                required: [signedUrl]
                 properties:
                   signedUrl:
                     type: string
+                    format: uri
+                    description: Full URL for documents bucket (proxy); presigned URL for other buckets
+
+  /files/document-url:
+    post:
+      summary: Get a short-lived URL to stream a company document
+      description: |
+        Returns a full URL to stream a company document (preview or download). Used by Document Management.
+        The URL points to the API document proxy; token is short-lived (e.g. 5 minutes). JWT required;
+        user must have access to the file's folder.
+      tags: [Files]
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [fileId]
+              properties:
+                fileId:
+                  type: string
+                  format: uuid
+                  description: Company file ID (from folder/files)
+                download:
+                  type: boolean
+                  default: false
+                  description: If true, response suggests attachment download
+      responses:
+        200:
+          description: Document URL (full URL to stream via API)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [url]
+                properties:
+                  url:
+                    type: string
+                    format: uri
+        401:
+          description: Unauthorized
+        403:
+          description: No access to this file's folder
+        404:
+          description: File not found
+
+  /files/document:
+    get:
+      summary: Stream a document by token
+      description: |
+        Streams a document using a short-lived JWT in the query string. No auth header required;
+        used for img/iframe/preview and download links returned by document-url or signed-url (documents bucket).
+      tags: [Files]
+      parameters:
+        - name: token
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Short-lived JWT containing path (and optional download flag)
+      responses:
+        200:
+          description: File stream (Content-Type and Content-Disposition set by server)
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        400:
+          description: Missing or invalid token
+        401:
+          description: Invalid or expired token
 
   /files/workflows/executions/{executionId}/steps/{stepId}/process-file:
     post:

@@ -2,6 +2,7 @@ import { Response } from 'express';
 import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 import { canUserAccessFolder, getUserFolderPermissionLevel, getUserGroupIdsInCompany } from '../lib/folderAccess';
+import { getDocumentProxyUrl } from '../lib/documentUrl';
 import { storageService } from '../services/storage.service';
 import { workflowService } from '../services/workflow.service';
 import multer from 'multer';
@@ -316,7 +317,8 @@ export const filesController = {
 
   /**
    * POST /api/files/signed-url
-   * Get a signed URL for file access (was: get-signed-url)
+   * Get a signed URL for file access (was: get-signed-url).
+   * For the documents bucket we return a proxy URL (same as document-url) so clients never get MinIO internal URLs.
    */
   async getSignedUrl(req: AuthRequest, res: Response) {
     try {
@@ -327,6 +329,12 @@ export const filesController = {
           error: 'Missing required fields',
           details: 'bucket and path are required',
         });
+      }
+
+      const documentsBucket = storageService.getDocumentsBucket();
+      if (bucket === documentsBucket) {
+        const signedUrl = getDocumentProxyUrl(path, false);
+        return res.json({ signedUrl });
       }
 
       const rawExpiration =
@@ -390,15 +398,7 @@ export const filesController = {
       if (!allowed) {
         return res.status(403).json({ error: 'You do not have access to this folder' });
       }
-      const token = jwt.sign(
-        {
-          path: fileRecord.storage_path,
-          download: Boolean(download),
-        },
-        JWT_SECRET,
-        { expiresIn: DOCUMENT_TOKEN_EXPIRY }
-      );
-      const url = `/api/files/document?token=${encodeURIComponent(token)}`;
+      const url = getDocumentProxyUrl(fileRecord.storage_path, Boolean(download));
       return res.json({ url });
     } catch (error) {
       console.error('Error creating document URL:', error);

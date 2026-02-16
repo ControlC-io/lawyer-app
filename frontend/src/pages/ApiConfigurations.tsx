@@ -213,7 +213,7 @@ export default function ApiConfigurations() {
 
   const handleDownloadApiDocs = async () => {
     try {
-      const response = await fetch('/api-docs/openapi.json');
+      const response = await fetch('/docs/openapi.json');
       if (!response.ok) {
         throw new Error('Failed to fetch API documentation');
       }
@@ -222,7 +222,7 @@ export default function ApiConfigurations() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = 'path-art-api-documentation.json';
+      a.download = 'floowly-api-documentation.json';
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -274,14 +274,14 @@ export default function ApiConfigurations() {
             API Documentation
           </CardTitle>
           <CardDescription>
-            Download the complete OpenAPI/Swagger specification for all available edge functions
+            Download the complete OpenAPI/Swagger specification for the Floowly API
           </CardDescription>
         </CardHeader>
         <CardContent>
           <div className="flex items-center justify-between">
             <div className="flex-1">
               <p className="text-sm text-muted-foreground mb-2">
-                The API documentation includes detailed information about all edge functions including:
+                The API documentation includes detailed information about all API endpoints including:
               </p>
               <ul className="text-sm text-muted-foreground list-disc list-inside space-y-1">
                 <li>Workflow triggering and execution management</li>
