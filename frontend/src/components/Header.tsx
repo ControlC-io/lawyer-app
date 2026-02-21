@@ -77,6 +77,7 @@ export function Header() {
     documents: { labelKey: "sidebar.documents", path: "/documents" },
     "api-configurations": { labelKey: "sidebar.apiConfigurations", path: "/api-configurations" },
     "agent-configurations": { labelKey: "sidebar.agentConfigurations", path: "/agent-configurations" },
+    "agent-usage": { labelKey: "sidebar.agentUsage", path: "/agent-usage" },
     "users-groups": { labelKey: "sidebar.usersGroups", path: "/users-groups" },
     "organization-settings": { labelKey: "sidebar.organizationSettings", path: "/organization-settings" },
     "user-settings": { labelKey: "sidebar.userSettings", path: "/user-settings" },

@@ -1641,4 +1641,47 @@ export const companiesController = {
       return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
     }
   },
+
+  /**
+   * GET /api/companies/:companyId/agent-usage
+   * List agent_usage for this company (read-only). Company admin or super_admin only.
+   */
+  async listCompanyAgentUsage(req: AuthRequest, res: Response) {
+    try {
+      const { companyId } = req.params;
+      if (!companyId) return res.status(400).json({ error: 'Missing company ID' });
+      const access = await ensureCompanyAccess(req, companyId, true);
+      if (access.error) return res.status(access.error.status).json(access.error.body);
+
+      const list = await prisma.agentUsage.findMany({
+        where: { company_id: companyId },
+        include: {
+          agent: { select: { id: true, name: true } },
+          company: { select: { id: true, name: true } },
+        },
+        orderBy: { created_at: 'desc' },
+      });
+
+      const serialized = list.map((row) => ({
+        id: row.id,
+        workflow_execution_id: row.workflow_execution_id,
+        agent_id: row.agent_id,
+        agent_name: row.agent?.name ?? null,
+        model_name: row.model_name,
+        input_tokens: row.input_tokens != null ? String(row.input_tokens) : null,
+        thinking_tokens: row.thinking_tokens != null ? String(row.thinking_tokens) : null,
+        output_tokens: row.output_tokens != null ? String(row.output_tokens) : null,
+        total_cost: row.total_cost != null ? String(row.total_cost) : null,
+        company_id: row.company_id,
+        company_name: row.company?.name ?? null,
+        comment: row.comment ?? null,
+        created_at: row.created_at,
+      }));
+
+      return res.json(serialized);
+    } catch (error) {
+      console.error('listCompanyAgentUsage error:', error);
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
 };

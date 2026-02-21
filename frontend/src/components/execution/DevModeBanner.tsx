@@ -24,6 +24,7 @@ interface DevModeBannerProps {
     actionType?: string;
     decisionNodeType?: string;
     workflowStepId: string;
+    companyId?: string | null;
 }
 
 export const DevModeBanner = ({
@@ -34,6 +35,7 @@ export const DevModeBanner = ({
     actionType,
     decisionNodeType,
     workflowStepId,
+    companyId,
 }: DevModeBannerProps) => {
     const { toast } = useToast();
     const [isOpen, setIsOpen] = useState(true);
@@ -46,6 +48,7 @@ export const DevModeBanner = ({
     const [isPayloadOpen, setIsPayloadOpen] = useState(false);
     const [agentConfig, setAgentConfig] = useState<any>(null);
     const [isLoadingAgentConfig, setIsLoadingAgentConfig] = useState(false);
+    const [apiConfiguration, setApiConfiguration] = useState<{ api_url?: string; api_method?: string } | null>(null);
 
     // Parse stepConfig if it's a string
     const stepConfig = typeof rawStepConfig === 'string' 
@@ -90,10 +93,37 @@ export const DevModeBanner = ({
         fetchAgentConfig();
     }, [stepConfig?.agent_id]);
 
-    // Get webhook URL from agent config if available, otherwise from step config
-    const effectiveConfig = agentConfig || stepConfig;
-    const webhookUrl = effectiveConfig?.api_url || "";
-    const webhookMethod = effectiveConfig?.api_method || "POST";
+    useEffect(() => {
+        const fetchApiConfiguration = async () => {
+            const configId = stepConfig?.api_configuration_id;
+            if (!companyId || !configId || configId === "none" || stepConfig?.agent_id) {
+                setApiConfiguration(null);
+                return;
+            }
+            try {
+                const list = await api.get<Array<{ id: string; api_url?: string; api_method?: string }>>(
+                    `/api/companies/${companyId}/api-configurations`
+                );
+                const found = (list ?? []).find((c) => c.id === configId) ?? null;
+                setApiConfiguration(found ? { api_url: found.api_url, api_method: found.api_method } : null);
+            } catch {
+                setApiConfiguration(null);
+            }
+        };
+
+        fetchApiConfiguration();
+    }, [companyId, stepConfig?.api_configuration_id, stepConfig?.agent_id]);
+
+    // Get webhook URL: agent config > shared API config > step custom api_url; then append step api_path
+    const baseConfig = agentConfig || apiConfiguration || stepConfig;
+    const baseUrl = (baseConfig?.api_url && String(baseConfig.api_url).trim()) || "";
+    const stepPath = (stepConfig?.api_path && String(stepConfig.api_path).trim()) || "";
+    const webhookUrl = baseUrl
+        ? stepPath
+            ? `${baseUrl.replace(/\/+$/, "")}/${stepPath.replace(/^\/+/, "")}`
+            : baseUrl.replace(/\/+$/, "") || baseUrl
+        : "";
+    const webhookMethod = baseConfig?.api_method || "POST";
     const currentUrl = isEditing ? editedUrl : webhookUrl;
 
     useEffect(() => {

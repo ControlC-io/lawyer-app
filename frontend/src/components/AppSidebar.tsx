@@ -1,5 +1,5 @@
 import { Link, useLocation } from "react-router-dom";
-import { Workflow, Users, Building2, PlayCircle, FolderOpen, LogOut, Settings, Network, Play, Bot, Database, Sun, Globe, User, Table2, Variable } from "lucide-react";
+import { Workflow, Users, Building2, PlayCircle, FolderOpen, LogOut, Settings, Network, Play, Bot, BarChart2, Database, Sun, Globe, User, Table2, Variable } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -68,7 +68,7 @@ const menuSections: { groupLabelKey: string; items: MenuItem[] }[] = [
 
 export function AppSidebar() {
   const { open } = useSidebar();
-  const { signOut, profile, loading, userCompanies, isSuperAdmin } = useAuth();
+  const { signOut, profile, loading, userCompanies, isSuperAdmin, isCompanyAdmin } = useAuth();
   const location = useLocation();
   const [startWorkflowDialogOpen, setStartWorkflowDialogOpen] = useState(false);
   const [feedbackDialogOpen, setFeedbackDialogOpen] = useState(false);
@@ -172,6 +172,16 @@ export function AppSidebar() {
                       </SidebarMenuButton>
                     </SidebarMenuItem>
                   )}
+                  {section.groupLabelKey === "sidebar.groupAdministration" && isCompanyAdmin && (
+                    <SidebarMenuItem>
+                      <SidebarMenuButton asChild isActive={location.pathname === "/agent-usage"}>
+                        <Link to="/agent-usage">
+                          <BarChart2 className="h-4 w-4" />
+                          {open && <span>{t("sidebar.agentUsage")}</span>}
+                        </Link>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  )}
                 </SidebarMenu>
               </SidebarGroupContent>
             </SidebarGroup>
@@ -234,8 +244,13 @@ export function AppSidebar() {
             </Button>
           </div>
           {open && profile && (
-            <div className="mt-1.5 px-1 text-center text-xs text-muted-foreground truncate" title={`${profile.full_name || profile.email}\n${profile.email}`}>
-              {profile.full_name || profile.email}
+            <div className="mt-1.5 px-1 text-center text-xs text-muted-foreground truncate flex flex-col items-center gap-0.5" title={`${profile.full_name || profile.email}\n${profile.email}${isSuperAdmin ? '\nSuper Admin' : ''}`}>
+              <span className="truncate w-full">{profile.full_name || profile.email}</span>
+              {isSuperAdmin && (
+                <Badge variant="secondary" className="text-[10px] px-1.5 py-0 font-medium shrink-0">
+                  Super Admin
+                </Badge>
+              )}
             </div>
           )}
         </SidebarFooter>

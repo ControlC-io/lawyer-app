@@ -608,6 +608,7 @@ model AgentUsage {
   output_tokens         BigInt?
   total_cost            Decimal?            @db.Decimal
   company_id            String?             @db.Uuid
+  comment               String?            @db.Text
   created_at            DateTime            @default(now()) @db.Timestamptz(6)
   execution             WorkflowExecution?  @relation(fields: [workflow_execution_id], references: [id])
   agent                 AgentConfiguration? @relation(fields: [agent_id], references: [id])

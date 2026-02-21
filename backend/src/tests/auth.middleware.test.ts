@@ -95,6 +95,44 @@ describe('auth middleware', () => {
       expect(res.status).toHaveBeenCalledWith(401);
     });
 
+    it('calls next() with super_admin user when x-api-key matches SUPER_ADMIN_API_KEY', async () => {
+      process.env.SUPER_ADMIN_API_KEY = 'super-secret-key';
+      const req = mockRequest({ headers: { 'x-api-key': 'super-secret-key' } });
+      const res = mockResponse();
+      const next = mockNext();
+
+      await authMiddleware(req, res, next);
+
+      expect(req.user).toEqual({
+        id: SUPER_ADMIN_API_USER_ID,
+        email: 'superadmin@api',
+        super_admin: true,
+      });
+      expect(req.company).toBeUndefined();
+      expect(next).toHaveBeenCalled();
+      expect(prisma.company.findUnique).not.toHaveBeenCalled();
+      expect(res.status).not.toHaveBeenCalled();
+    });
+
+    it('treats x-api-key as company key when value does not match SUPER_ADMIN_API_KEY', async () => {
+      process.env.SUPER_ADMIN_API_KEY = 'other-super-key';
+      (prisma.company.findUnique as jest.Mock).mockResolvedValue({
+        id: 'company-1',
+        name: 'Acme',
+        is_active: true,
+      });
+      const req = mockRequest({ headers: { 'x-api-key': 'valid-key' } });
+      const res = mockResponse();
+      const next = mockNext();
+
+      await authMiddleware(req, res, next);
+
+      expect(prisma.company.findUnique).toHaveBeenCalledWith({ where: { api_key: 'valid-key' } });
+      expect(req.company).toEqual({ id: 'company-1', name: 'Acme' });
+      expect(next).toHaveBeenCalled();
+      expect(res.status).not.toHaveBeenCalled();
+    });
+
     it('calls next() when API key is valid and company is active', async () => {
       (prisma.company.findUnique as jest.Mock).mockResolvedValue({
         id: 'company-1',
@@ -286,6 +324,25 @@ describe('auth middleware', () => {
       expect(next).not.toHaveBeenCalled();
     });
 
+    it('calls next() with super_admin user when x-api-key matches SUPER_ADMIN_API_KEY', async () => {
+      process.env.SUPER_ADMIN_API_KEY = 'super-secret-key';
+      const req = mockRequest({ headers: { 'x-api-key': 'super-secret-key' } });
+      const res = mockResponse();
+      const next = mockNext();
+
+      await apiKeyAuth(req, res, next);
+
+      expect(req.user).toEqual({
+        id: SUPER_ADMIN_API_USER_ID,
+        email: 'superadmin@api',
+        super_admin: true,
+      });
+      expect(req.company).toBeUndefined();
+      expect(next).toHaveBeenCalled();
+      expect(prisma.company.findUnique).not.toHaveBeenCalled();
+      expect(res.status).not.toHaveBeenCalled();
+    });
+
     it('returns 401 when company not found', async () => {
       (prisma.company.findUnique as jest.Mock).mockResolvedValue(null);
       const req = mockRequest({ headers: { 'x-api-key': 'unknown' } });
@@ -418,6 +475,25 @@ describe('auth middleware', () => {
   });
 
   describe('optionalAuth', () => {
+    it('calls next() with super_admin user when x-api-key matches SUPER_ADMIN_API_KEY', async () => {
+      process.env.SUPER_ADMIN_API_KEY = 'super-secret-key';
+      const req = mockRequest({ headers: { 'x-api-key': 'super-secret-key' } });
+      const res = mockResponse();
+      const next = mockNext();
+
+      await optionalAuth(req, res, next);
+
+      expect(req.user).toEqual({
+        id: SUPER_ADMIN_API_USER_ID,
+        email: 'superadmin@api',
+        super_admin: true,
+      });
+      expect(req.company).toBeUndefined();
+      expect(next).toHaveBeenCalledTimes(1);
+      expect(prisma.company.findUnique).not.toHaveBeenCalled();
+      expect(res.status).not.toHaveBeenCalled();
+    });
+
     it('calls next() when API key is valid', async () => {
       (prisma.company.findUnique as jest.Mock).mockResolvedValue({
         id: 'c1',

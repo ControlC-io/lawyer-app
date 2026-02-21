@@ -28,3 +28,49 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
 
   return <>{children}</>;
 }
+
+interface SuperAdminRouteProps {
+  children: React.ReactNode;
+}
+
+/** Renders children only for super-admin users; otherwise redirects to home. */
+export function SuperAdminRoute({ children }: SuperAdminRouteProps) {
+  const { isSuperAdmin, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  if (!isSuperAdmin) {
+    return <Navigate to="/" replace />;
+  }
+
+  return <>{children}</>;
+}
+
+interface CompanyAdminRouteProps {
+  children: React.ReactNode;
+}
+
+/** Renders children only for company-admin users with a selected company; otherwise redirects to home. */
+export function CompanyAdminRoute({ children }: CompanyAdminRouteProps) {
+  const { isCompanyAdmin, selectedCompanyId, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  if (!selectedCompanyId || !isCompanyAdmin) {
+    return <Navigate to="/" replace />;
+  }
+
+  return <>{children}</>;
+}

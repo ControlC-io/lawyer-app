@@ -260,6 +260,7 @@
     "userSettings": "Paramètres utilisateur",
     "organizationSettings": "Paramètres de l'organisation",
     "agentConfigurations": "Configurations d'agents",
+    "agentUsage": "Usage des agents",
     "startWorkflow": "Démarrer un workflow",
     "signOut": "Déconnexion",
     "darkMode": "Mode sombre",
@@ -774,6 +775,22 @@
     "apiReturnsArrayNote": "L'API doit retourner un tableau JSON de chaînes (ex. [\"Option 1\", \"Option 2\"]).",
     "update": "Mettre à jour",
     "create": "Créer"
+  },
+  "agentUsage": {
+    "description": "Vue en lecture seule de l'usage des agents pour votre organisation.",
+    "loading": "Chargement des données d'usage…",
+    "filterPlaceholder": "Filtrer par agent, modèle, ID d'exécution…",
+    "clear": "Effacer",
+    "noRecords": "Aucun enregistrement d'usage.",
+    "noMatch": "Aucune ligne ne correspond au filtre.",
+    "totalsByMonth": "Totaux par mois",
+    "month": "Mois",
+    "input": "Entrée",
+    "thinking": "Réflexion",
+    "output": "Sortie",
+    "cost": "Coût",
+    "requests": "Requêtes",
+    "comment": "Commentaire"
   },
   "agentConfigurations": {
     "failedToLoadData": "Échec du chargement des données",

@@ -1,5 +1,5 @@
 import { Response } from 'express';
-import { AuthRequest } from '../middleware/auth';
+import { AuthRequest, resolveCompanyForRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 import { aiService } from '../services/ai.service';
 import fetch from 'node-fetch';
@@ -17,15 +17,9 @@ export const agentsController = {
    */
   async getAgent(req: AuthRequest, res: Response) {
     try {
+      if (!(await resolveCompanyForRequest(req, res))) return;
       const { agentId } = req.params;
-      const companyId = req.company?.id;
-
-      if (!companyId) {
-        return res.status(401).json({
-          error: 'Missing API key',
-          details: 'x-api-key header is required',
-        });
-      }
+      const companyId = req.company!.id;
 
       if (!agentId) {
         return res.status(400).json({
@@ -498,6 +492,47 @@ Les détails de structure sont identiques aux spécifications Supabase originale
       return res.json(list);
     } catch (error) {
       console.error('listConfigurations error:', error);
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
+  /**
+   * GET /api/agents/usage
+   * List agent_usage table (read-only). Super admin only.
+   */
+  async listAgentUsage(req: AuthRequest, res: Response) {
+    try {
+      if (!req.user?.id) return res.status(401).json({ error: 'Unauthorized' });
+      if (!req.user?.super_admin) return res.status(403).json({ error: 'Forbidden: super admin only' });
+
+      const list = await prisma.agentUsage.findMany({
+        include: {
+          agent: { select: { id: true, name: true } },
+          company: { select: { id: true, name: true } },
+        },
+        orderBy: { created_at: 'desc' },
+      });
+
+      // Serialize BigInt and Decimal for JSON
+      const serialized = list.map((row) => ({
+        id: row.id,
+        workflow_execution_id: row.workflow_execution_id,
+        agent_id: row.agent_id,
+        agent_name: row.agent?.name ?? null,
+        model_name: row.model_name,
+        input_tokens: row.input_tokens != null ? String(row.input_tokens) : null,
+        thinking_tokens: row.thinking_tokens != null ? String(row.thinking_tokens) : null,
+        output_tokens: row.output_tokens != null ? String(row.output_tokens) : null,
+        total_cost: row.total_cost != null ? String(row.total_cost) : null,
+        company_id: row.company_id,
+        company_name: row.company?.name ?? null,
+        comment: row.comment ?? null,
+        created_at: row.created_at,
+      }));
+
+      return res.json(serialized);
+    } catch (error) {
+      console.error('listAgentUsage error:', error);
       return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
     }
   },

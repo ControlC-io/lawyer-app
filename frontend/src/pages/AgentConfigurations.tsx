@@ -1,6 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { Plus, Trash2, Edit, ArrowLeft, Save, X, Settings, Shield, Grid, Layers, ChevronDown } from "lucide-react";
+import { Plus, Trash2, Edit, ArrowLeft, Save, X, Settings, Shield, Grid, Layers, ChevronDown, BarChart2, ArrowUpDown, ArrowUp, ArrowDown, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -56,6 +56,22 @@ interface Company {
     name: string;
 }
 
+interface AgentUsageRow {
+    id: string;
+    workflow_execution_id: string | null;
+    agent_id: string | null;
+    agent_name: string | null;
+    model_name: string | null;
+    input_tokens: string | null;
+    thinking_tokens: string | null;
+    output_tokens: string | null;
+    total_cost: string | null;
+    company_id: string | null;
+    company_name: string | null;
+    comment: string | null;
+    created_at: string;
+}
+
 export default function AgentConfigurations() {
     const navigate = useNavigate();
     const { t } = useLanguage();
@@ -70,6 +86,11 @@ export default function AgentConfigurations() {
     const [companies, setCompanies] = useState<Company[]>([]);
     const [selectedCompanyIds, setSelectedCompanyIds] = useState<string[]>([]);
     const [agentTypeFilter, setAgentTypeFilter] = useState<"all" | "action" | "decision">("all");
+    const [agentUsageList, setAgentUsageList] = useState<AgentUsageRow[]>([]);
+    const [agentUsageLoading, setAgentUsageLoading] = useState(false);
+    const [usageSortField, setUsageSortField] = useState<keyof AgentUsageRow | null>(null);
+    const [usageSortDirection, setUsageSortDirection] = useState<"asc" | "desc">("asc");
+    const [usageSearch, setUsageSearch] = useState("");
 
     // Dialog states
     const [configDialogOpen, setConfigDialogOpen] = useState(false);
@@ -112,6 +133,93 @@ export default function AgentConfigurations() {
         }
         fetchData();
     }, [isSuperAdmin, navigate]);
+
+    const fetchAgentUsage = async () => {
+        setAgentUsageLoading(true);
+        try {
+            const data = await api.get<AgentUsageRow[]>(`/api/agents/usage`);
+            setAgentUsageList(data);
+        } catch (err) {
+            console.error("Failed to load agent usage:", err);
+            toast.error("Failed to load agent usage");
+            setAgentUsageList([]);
+        } finally {
+            setAgentUsageLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        if (isSuperAdmin && activeTab === "usage") {
+            fetchAgentUsage();
+        }
+    }, [isSuperAdmin, activeTab]);
+
+    const usageColumns: { key: keyof AgentUsageRow; label: string; align?: "left" | "right" }[] = [
+        { key: "created_at", label: "Created", align: "left" },
+        { key: "agent_name", label: "Agent", align: "left" },
+        { key: "company_name", label: "Company", align: "left" },
+        { key: "workflow_execution_id", label: "Execution", align: "left" },
+        { key: "model_name", label: "Model", align: "left" },
+        { key: "input_tokens", label: "Input", align: "right" },
+        { key: "thinking_tokens", label: "Thinking", align: "right" },
+        { key: "output_tokens", label: "Output", align: "right" },
+        { key: "total_cost", label: "Cost", align: "right" },
+        { key: "comment", label: t("agentUsage.comment"), align: "left" },
+    ];
+
+    const filteredAndSortedUsage = useMemo(() => {
+        const q = usageSearch.trim().toLowerCase();
+        let list = agentUsageList;
+        if (q) {
+            list = list.filter((row) => {
+                const created = row.created_at ? new Date(row.created_at).toLocaleString().toLowerCase() : "";
+                const agent = (row.agent_name ?? row.agent_id ?? "").toString().toLowerCase();
+                const company = (row.company_name ?? row.company_id ?? "").toString().toLowerCase();
+                const exec = (row.workflow_execution_id ?? "").toLowerCase();
+                const model = (row.model_name ?? "").toLowerCase();
+                const comment = (row.comment ?? "").toLowerCase();
+                return [created, agent, company, exec, model, comment].some((s) => s.includes(q));
+            });
+        }
+        if (!usageSortField) return list;
+        const dir = usageSortDirection === "asc" ? 1 : -1;
+        const numericKeys = ["input_tokens", "thinking_tokens", "output_tokens", "total_cost"];
+        return [...list].sort((a, b) => {
+            const aVal = a[usageSortField];
+            const bVal = b[usageSortField];
+            const aStr = (aVal ?? "").toString();
+            const bStr = (bVal ?? "").toString();
+            if (numericKeys.includes(usageSortField)) {
+                const aNum = parseFloat(aStr) || 0;
+                const bNum = parseFloat(bStr) || 0;
+                return dir * (aNum - bNum);
+            }
+            if (usageSortField === "created_at") {
+                const aDate = aStr ? new Date(aStr).getTime() : 0;
+                const bDate = bStr ? new Date(bStr).getTime() : 0;
+                return dir * (aDate - bDate);
+            }
+            return dir * aStr.localeCompare(bStr, undefined, { numeric: true });
+        });
+    }, [agentUsageList, usageSearch, usageSortField, usageSortDirection]);
+
+    const handleUsageSort = (field: keyof AgentUsageRow) => {
+        if (usageSortField === field) {
+            setUsageSortDirection((d) => (d === "asc" ? "desc" : "asc"));
+        } else {
+            setUsageSortField(field);
+            setUsageSortDirection("asc");
+        }
+    };
+
+    const getUsageSortIcon = (field: keyof AgentUsageRow) => {
+        if (usageSortField !== field) return <ArrowUpDown className="h-4 w-4 ml-1 opacity-50" />;
+        return usageSortDirection === "asc" ? (
+            <ArrowUp className="h-4 w-4 ml-1" />
+        ) : (
+            <ArrowDown className="h-4 w-4 ml-1" />
+        );
+    };
 
     const fetchData = async () => {
         setLoading(true);
@@ -445,6 +553,10 @@ export default function AgentConfigurations() {
                         <Shield className="h-4 w-4" />
                         Permissions
                     </TabsTrigger>
+                    <TabsTrigger value="usage" className="flex items-center gap-2">
+                        <BarChart2 className="h-4 w-4" />
+                        Usage
+                    </TabsTrigger>
                 </TabsList>
 
                 {/* CONFIGURATIONS TAB */}
@@ -655,6 +767,109 @@ export default function AgentConfigurations() {
                             </tbody>
                         </table>
                     </div>
+                </TabsContent>
+
+                {/* USAGE TAB - super_admin only: read-only agent_usage table */}
+                <TabsContent value="usage" className="space-y-4">
+                    <Card>
+                        <CardHeader>
+                            <CardTitle className="flex items-center gap-2">
+                                <BarChart2 className="h-5 w-5" />
+                                Agent Usage
+                            </CardTitle>
+                            <CardDescription>
+                                Read-only view of the agent_usage table. Visible to super admins only.
+                            </CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                            {!isSuperAdmin ? (
+                                <p className="text-sm text-muted-foreground">
+                                    This view is only available to super administrators.
+                                </p>
+                            ) : agentUsageLoading ? (
+                                <p className="text-sm text-muted-foreground">Loading usage data…</p>
+                            ) : (
+                                <div className="space-y-3">
+                                    <div className="flex items-center gap-2">
+                                        <div className="relative flex-1 max-w-sm">
+                                            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                                            <Input
+                                                placeholder="Filter by agent, company, model, execution ID…"
+                                                value={usageSearch}
+                                                onChange={(e) => setUsageSearch(e.target.value)}
+                                                className="pl-8"
+                                            />
+                                        </div>
+                                        {(usageSearch || usageSortField) && (
+                                            <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                onClick={() => {
+                                                    setUsageSearch("");
+                                                    setUsageSortField(null);
+                                                    setUsageSortDirection("asc");
+                                                }}
+                                            >
+                                                Clear
+                                            </Button>
+                                        )}
+                                    </div>
+                                    <div className="border rounded-md overflow-x-auto">
+                                        <table className="w-full text-sm">
+                                            <thead className="bg-muted/50 text-muted-foreground">
+                                                <tr>
+                                                    {usageColumns.map(({ key, label, align }) => (
+                                                        <th
+                                                            key={key}
+                                                            className={`p-3 font-medium cursor-pointer select-none hover:bg-muted/70 ${align === "right" ? "text-right" : "text-left"}`}
+                                                            onClick={() => handleUsageSort(key)}
+                                                        >
+                                                            <span className="inline-flex items-center">
+                                                                {label}
+                                                                {getUsageSortIcon(key)}
+                                                            </span>
+                                                        </th>
+                                                    ))}
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {filteredAndSortedUsage.length === 0 ? (
+                                                    <tr>
+                                                        <td colSpan={10} className="p-6 text-center text-muted-foreground">
+                                                            {agentUsageList.length === 0
+                                                                ? "No usage records."
+                                                                : "No rows match the current filter."}
+                                                        </td>
+                                                    </tr>
+                                                ) : (
+                                                    filteredAndSortedUsage.map((row) => (
+                                                        <tr key={row.id} className="border-t hover:bg-muted/30">
+                                                            <td className="p-3 whitespace-nowrap">
+                                                                {row.created_at ? new Date(row.created_at).toLocaleString() : "—"}
+                                                            </td>
+                                                            <td className="p-3">{row.agent_name ?? row.agent_id ?? "—"}</td>
+                                                            <td className="p-3">{row.company_name ?? row.company_id ?? "—"}</td>
+                                                            <td className="p-3 font-mono text-xs truncate max-w-[120px]" title={row.workflow_execution_id ?? ""}>
+                                                                {row.workflow_execution_id ?? "—"}
+                                                            </td>
+                                                            <td className="p-3">{row.model_name ?? "—"}</td>
+                                                            <td className="p-3 text-right">{row.input_tokens ?? "—"}</td>
+                                                            <td className="p-3 text-right">{row.thinking_tokens ?? "—"}</td>
+                                                            <td className="p-3 text-right">{row.output_tokens ?? "—"}</td>
+                                                            <td className="p-3 text-right">{row.total_cost ?? "—"}</td>
+                                                            <td className="p-3 max-w-[200px] truncate" title={row.comment ?? ""}>
+                                                                {row.comment ?? "—"}
+                                                            </td>
+                                                        </tr>
+                                                    ))
+                                                )}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            )}
+                        </CardContent>
+                    </Card>
                 </TabsContent>
             </Tabs>
 

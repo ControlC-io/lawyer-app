@@ -8,7 +8,7 @@ import { AppSidebar } from "@/components/AppSidebar";
 import { Header } from "@/components/Header";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { LanguageProvider } from "@/contexts/LanguageContext";
-import { ProtectedRoute } from "@/components/ProtectedRoute";
+import { ProtectedRoute, SuperAdminRoute, CompanyAdminRoute } from "@/components/ProtectedRoute";
 import { ThemeProvider } from "next-themes";
 import Auth from "./pages/Auth";
 import WorkflowList from "./pages/WorkflowList";
@@ -24,6 +24,7 @@ import UserSettings from "./pages/UserSettings";
 import AcceptInvitation from "./pages/AcceptInvitation";
 import ApiConfigurations from "./pages/ApiConfigurations";
 import AgentConfigurations from "./pages/AgentConfigurations";
+import AgentUsage from "./pages/AgentUsage";
 import NoOrganization from "./pages/NoOrganization";
 import { ExternalForm } from "./pages/ExternalForm";
 import CompanyPortal from "./pages/CompanyPortal";
@@ -73,7 +74,8 @@ const App = () => (
                             <Route path="/organization-settings" element={<OrganizationSettings />} />
                             <Route path="/user-settings" element={<UserSettings />} />
                             <Route path="/api-configurations" element={<ApiConfigurations />} />
-                            <Route path="/agent-configurations" element={<AgentConfigurations />} />
+                            <Route path="/agent-configurations" element={<SuperAdminRoute><AgentConfigurations /></SuperAdminRoute>} />
+                            <Route path="/agent-usage" element={<CompanyAdminRoute><AgentUsage /></CompanyAdminRoute>} />
                             <Route path="*" element={<NotFound />} />
                           </Routes>
                         </main>

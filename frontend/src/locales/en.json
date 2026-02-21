@@ -260,6 +260,7 @@
     "userSettings": "User Settings",
     "organizationSettings": "Organization Settings",
     "agentConfigurations": "Agent Configurations",
+    "agentUsage": "Agent Usage",
     "startWorkflow": "Start Workflow",
     "signOut": "Sign Out",
     "darkMode": "Dark Mode",
@@ -774,6 +775,22 @@
     "apiReturnsArrayNote": "The API should return a JSON array of strings (e.g., [\"Option 1\", \"Option 2\"]).",
     "update": "Update",
     "create": "Create"
+  },
+  "agentUsage": {
+    "description": "Read-only view of agent usage for your organization.",
+    "loading": "Loading usage data…",
+    "filterPlaceholder": "Filter by agent, model, execution ID…",
+    "clear": "Clear",
+    "noRecords": "No usage records.",
+    "noMatch": "No rows match the current filter.",
+    "totalsByMonth": "Totals by month",
+    "month": "Month",
+    "input": "Input",
+    "thinking": "Thinking",
+    "output": "Output",
+    "cost": "Cost",
+    "requests": "Requests",
+    "comment": "Comment"
   },
   "agentConfigurations": {
     "failedToLoadData": "Failed to load data",

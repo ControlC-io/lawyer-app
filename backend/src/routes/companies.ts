@@ -98,6 +98,7 @@ router.get('/:companyId/agent-permissions', asyncHandler(companiesController.lis
 router.post('/:companyId/agent-permissions', asyncHandler(companiesController.addAgentPermission));
 router.patch('/:companyId/agent-permissions/:permissionId', asyncHandler(companiesController.updateAgentPermission));
 router.delete('/:companyId/agent-permissions/:permissionId', asyncHandler(companiesController.deleteAgentPermission));
+router.get('/:companyId/agent-usage', asyncHandler(companiesController.listCompanyAgentUsage));
 
 router.get('/:companyId/data-tables', asyncHandler(companiesController.listDataTables));
 router.post('/:companyId/data-tables', asyncHandler(companiesController.createDataTable));

@@ -1,5 +1,5 @@
 import { Response } from 'express';
-import { AuthRequest } from '../middleware/auth';
+import { AuthRequest, resolveCompanyForRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 import { emailService } from '../services/email.service';
 import bcrypt from 'bcryptjs';
@@ -241,15 +241,9 @@ export const usersController = {
    */
   async getUser(req: AuthRequest, res: Response) {
     try {
+      if (!(await resolveCompanyForRequest(req, res))) return;
       const { userId } = req.params;
-      const companyId = req.company?.id;
-
-      if (!companyId) {
-        return res.status(401).json({
-          error: 'Missing API key',
-          details: 'x-api-key header is required',
-        });
-      }
+      const companyId = req.company!.id;
 
       if (!userId) {
         return res.status(400).json({

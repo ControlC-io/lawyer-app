@@ -18,6 +18,8 @@ router.post('/configurations', authMiddleware, asyncHandler(agentsController.cre
 router.patch('/configurations/:configId', authMiddleware, asyncHandler(agentsController.updateConfiguration));
 router.delete('/configurations/:configId', authMiddleware, asyncHandler(agentsController.deleteConfiguration));
 
+router.get('/usage', authMiddleware, asyncHandler(agentsController.listAgentUsage));
+
 /**
  * GET /api/agents/:agentId
  * Get agent configuration

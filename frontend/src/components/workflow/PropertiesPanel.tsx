@@ -14,6 +14,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { api } from "@/lib/api";
 import { useCompanyId } from "@/hooks/useCompanyId";
+import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { FormBlocksEditor } from "./FormBlocksEditor";
@@ -38,6 +39,7 @@ interface PropertiesPanelProps {
 
 export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep, onClose, onOutputRenamed, onOpenDataStructureEditor, initialConfigurationSubTab }: PropertiesPanelProps) {
   const companyId = useCompanyId();
+  const { isSuperAdmin } = useAuth();
   const navigate = useNavigate();
   const [outputs, setOutputs] = useState<string[]>(
     step.step_type === "decision"
@@ -54,7 +56,7 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
   const [groups, setGroups] = useState<Array<{ id: string; name: string; description: string | null }>>([]);
   const [dataStructureItems, setDataStructureItems] = useState<Array<{ id: string; name: string; data_structure_name: string; field_type?: string }>>([]);
   const [folders, setFolders] = useState<Array<{ id: string; name: string; parent_folder_id: string | null }>>([]);
-  const [apiConfigurations, setApiConfigurations] = useState<Array<{ id: string; name: string; config_type: string }>>([]);
+  const [apiConfigurations, setApiConfigurations] = useState<Array<{ id: string; name: string; config_type: string; api_url?: string }>>([]);
   const [workflowStatuses, setWorkflowStatuses] = useState<Array<{ id: string; name: string; color: string; order: number }>>([]);
   const [agents, setAgents] = useState<Array<{ id: string; name: string; category_id: string | null }>>([]);
   const [agentCategories, setAgentCategories] = useState<Array<{ id: string; name: string; icon: string | null }>>([]);
@@ -255,7 +257,7 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
   const fetchApiConfigurations = async () => {
     if (!companyId) return;
     const configType = step.action_type === "automatic" ? "automatic_action" : "agent_decision";
-    const configs = await api.get<Array<{ id: string; name: string; config_type: string }>>(
+    const configs = await api.get<Array<{ id: string; name: string; config_type: string; api_url?: string }>>(
       `/api/companies/${companyId}/api-configurations`
     );
     if (configs) setApiConfigurations(configs.filter((c) => c.config_type === configType));
@@ -526,7 +528,6 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
   const handleDeleteKeyValue = (type: "headers" | "params" | "data", index: number) => {
     const setter = type === "headers" ? setHeaders : type === "params" ? setParams : setData;
     const current = type === "headers" ? headers : type === "params" ? params : data;
-    if (current.length <= 1) return;
     const updated = current.filter((_, i) => i !== index);
     setter(updated);
     const configKey = type === "headers" ? "api_headers" : type === "params" ? "api_params" : "api_data";
@@ -1496,6 +1497,22 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
                             <p className="text-xs text-muted-foreground">
                               Optional path to append to the base URL from the API configuration.
                             </p>
+                            {(() => {
+                              const selectedConfig = apiConfigurations.find((c) => c.id === selectedConfigId);
+                              const baseUrl = selectedConfig?.api_url?.trim() || "";
+                              const pathPart = (step.config.api_path && String(step.config.api_path).trim()) || "";
+                              const fullPath = baseUrl
+                                ? pathPart
+                                  ? `${baseUrl.replace(/\/+$/, "")}/${pathPart.replace(/^\/+/, "")}`
+                                  : baseUrl.replace(/\/+$/, "") || baseUrl
+                                : "";
+                              if (!fullPath) return null;
+                              return (
+                                <p className="text-xs text-muted-foreground font-mono break-all" title={fullPath}>
+                                  Full path: {fullPath}
+                                </p>
+                              );
+                            })()}
                           </div>
                         </>
                       )}
@@ -1553,15 +1570,13 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
                                   value={header.value}
                                   onChange={(e) => handleUpdateKeyValue("headers", index, "value", e.target.value)}
                                 />
-                                {headers.length > 1 && (
-                                  <Button
-                                    size="icon"
-                                    variant="ghost"
-                                    onClick={() => handleDeleteKeyValue("headers", index)}
-                                  >
-                                    <Trash2 className="h-4 w-4" />
-                                  </Button>
-                                )}
+                                <Button
+                                  size="icon"
+                                  variant="ghost"
+                                  onClick={() => handleDeleteKeyValue("headers", index)}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
                               </div>
                             ))}
                           </div>
@@ -1644,15 +1659,13 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
                                       className="flex-1"
                                     />
                                   )}
-                                  {params.length > 1 && (
-                                    <Button
-                                      size="icon"
-                                      variant="ghost"
-                                      onClick={() => handleDeleteKeyValue("params", index)}
-                                    >
-                                      <Trash2 className="h-4 w-4" />
-                                    </Button>
-                                  )}
+                                  <Button
+                                    size="icon"
+                                    variant="ghost"
+                                    onClick={() => handleDeleteKeyValue("params", index)}
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
                                 </div>
                               </div>
                             ))}
@@ -1736,15 +1749,13 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
                                       className="flex-1"
                                     />
                                   )}
-                                  {data.length > 1 && (
-                                    <Button
-                                      size="icon"
-                                      variant="ghost"
-                                      onClick={() => handleDeleteKeyValue("data", index)}
-                                    >
-                                      <Trash2 className="h-4 w-4" />
-                                    </Button>
-                                  )}
+                                  <Button
+                                    size="icon"
+                                    variant="ghost"
+                                    onClick={() => handleDeleteKeyValue("data", index)}
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
                                 </div>
                               </div>
                             ))}
@@ -1806,15 +1817,13 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
                                   });
                                 }}
                               />
-                              {data.length > 1 && (
-                                <Button
-                                  size="icon"
-                                  variant="ghost"
-                                  onClick={() => handleDeleteKeyValue("data", index)}
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                </Button>
-                              )}
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                onClick={() => handleDeleteKeyValue("data", index)}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
                             </div>
                           ))}
                         </div>
@@ -1852,14 +1861,16 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
                     <div className="space-y-2">
                       <div className="flex items-center justify-between">
                         <Label htmlFor="agent-select">Select Agent</Label>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => navigate("/agent-configurations")}
-                        >
-                          <Settings className="h-4 w-4 mr-1" />
-                          Manage
-                        </Button>
+                        {isSuperAdmin && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => navigate("/agent-configurations")}
+                          >
+                            <Settings className="h-4 w-4 mr-1" />
+                            Manage
+                          </Button>
+                        )}
                       </div>
                       <Select
                         value={step.config.agent_id || "none"}
@@ -1974,15 +1985,13 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
                                   value={header.value}
                                   onChange={(e) => handleUpdateKeyValue("headers", index, "value", e.target.value)}
                                 />
-                                {headers.length > 1 && (
-                                  <Button
-                                    size="icon"
-                                    variant="ghost"
-                                    onClick={() => handleDeleteKeyValue("headers", index)}
-                                  >
-                                    <Trash2 className="h-4 w-4" />
-                                  </Button>
-                                )}
+                                <Button
+                                  size="icon"
+                                  variant="ghost"
+                                  onClick={() => handleDeleteKeyValue("headers", index)}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
                               </div>
                             ))}
                           </div>
@@ -2065,15 +2074,13 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
                                       className="flex-1"
                                     />
                                   )}
-                                  {params.length > 1 && (
-                                    <Button
-                                      size="icon"
-                                      variant="ghost"
-                                      onClick={() => handleDeleteKeyValue("params", index)}
-                                    >
-                                      <Trash2 className="h-4 w-4" />
-                                    </Button>
-                                  )}
+                                  <Button
+                                    size="icon"
+                                    variant="ghost"
+                                    onClick={() => handleDeleteKeyValue("params", index)}
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
                                 </div>
                               </div>
                             ))}
@@ -2157,15 +2164,13 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
                                       className="flex-1"
                                     />
                                   )}
-                                  {data.length > 1 && (
-                                    <Button
-                                      size="icon"
-                                      variant="ghost"
-                                      onClick={() => handleDeleteKeyValue("data", index)}
-                                    >
-                                      <Trash2 className="h-4 w-4" />
-                                    </Button>
-                                  )}
+                                  <Button
+                                    size="icon"
+                                    variant="ghost"
+                                    onClick={() => handleDeleteKeyValue("data", index)}
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
                                 </div>
                               </div>
                             ))}
@@ -2227,15 +2232,13 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
                                   });
                                 }}
                               />
-                              {data.length > 1 && (
-                                <Button
-                                  size="icon"
-                                  variant="ghost"
-                                  onClick={() => handleDeleteKeyValue("data", index)}
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                </Button>
-                              )}
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                onClick={() => handleDeleteKeyValue("data", index)}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
                             </div>
                           ))}
                         </div>
@@ -2417,15 +2420,13 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
                               className="flex-1"
                             />
                           )}
-                          {data.length > 1 && (
-                            <Button
-                              size="icon"
-                              variant="ghost"
-                              onClick={() => handleDeleteKeyValue("data", index)}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          )}
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            onClick={() => handleDeleteKeyValue("data", index)}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
                         </div>
                       </div>
                     ))}

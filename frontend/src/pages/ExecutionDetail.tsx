@@ -442,6 +442,7 @@ const ExecutionDetail = () => {
                     actionType={currentStep.workflow_steps.action_type || ''}
                     decisionNodeType={currentStep.workflow_steps.decision_node_type || ''}
                     workflowStepId={currentStep.workflow_steps.id}
+                    companyId={companyId}
                   />
                 );
               }

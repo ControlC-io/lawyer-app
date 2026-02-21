@@ -1,6 +1,6 @@
 import { Response } from 'express';
 import { prisma } from '../lib/prisma';
-import { AuthRequest } from '../middleware/auth';
+import { AuthRequest, resolveCompanyForRequest } from '../middleware/auth';
 import { getDocumentProxyUrl } from '../lib/documentUrl';
 import { workflowService } from '../services/workflow.service';
 import { notificationService } from '../services/notification.service';
@@ -16,16 +16,10 @@ export const workflowController = {
    */
   async triggerWorkflow(req: AuthRequest, res: Response) {
     try {
+      if (!(await resolveCompanyForRequest(req, res))) return;
       const { workflowId } = req.params;
       const { data } = req.body;
-      const companyId = req.company?.id;
-
-      if (!companyId) {
-        return res.status(401).json({
-          error: 'Missing company authorization',
-          details: 'x-api-key header is required',
-        });
-      }
+      const companyId = req.company!.id;
 
       if (!workflowId) {
         return res.status(400).json({
@@ -206,6 +200,14 @@ export const workflowController = {
           error: 'Invalid configuration',
           details: 'api_url is required for automatic steps',
         });
+      }
+
+      // Append optional step path to base URL (from shared config or agent)
+      const stepPath = (config.api_path && String(config.api_path).trim()) || '';
+      if (stepPath) {
+        const base = apiUrl.replace(/\/+$/, '');
+        const pathPart = stepPath.replace(/^\/+/, '');
+        apiUrl = pathPart ? `${base}/${pathPart}` : base;
       }
 
       // Get execution data for bindings
@@ -595,13 +597,10 @@ export const workflowController = {
    */
   async updateExecutionData(req: AuthRequest, res: Response) {
     try {
+      if (!(await resolveCompanyForRequest(req, res))) return;
       const { executionId } = req.params;
       const { data } = req.body;
-      const companyId = req.company?.id;
-
-      if (!companyId) {
-        return res.status(401).json({ error: 'Missing company authorization' });
-      }
+      const companyId = req.company!.id;
 
       if (!executionId || !data || typeof data !== 'object') {
         return res.status(400).json({
@@ -760,13 +759,10 @@ export const workflowController = {
    */
   async renameExecution(req: AuthRequest, res: Response) {
     try {
+      if (!(await resolveCompanyForRequest(req, res))) return;
       const { executionId } = req.params;
       const { name } = req.body;
-      const companyId = req.company?.id;
-
-      if (!companyId) {
-        return res.status(401).json({ error: 'Missing company authorization' });
-      }
+      const companyId = req.company!.id;
 
       if (!executionId || name === undefined) {
         return res.status(400).json({
@@ -808,13 +804,10 @@ export const workflowController = {
    */
   async addExecutionLog(req: AuthRequest, res: Response) {
     try {
+      if (!(await resolveCompanyForRequest(req, res))) return;
       const { executionId } = req.params;
       const { step_id, log_text, log_type } = req.body;
-      const companyId = req.company?.id;
-
-      if (!companyId) {
-        return res.status(401).json({ error: 'Missing company authorization' });
-      }
+      const companyId = req.company!.id;
 
       if (!executionId || !log_text) {
         return res.status(400).json({
@@ -889,13 +882,10 @@ export const workflowController = {
    */
   async updateExecutionStep(req: AuthRequest, res: Response) {
     try {
+      if (!(await resolveCompanyForRequest(req, res))) return;
       const { executionId, stepId } = req.params;
       const { assigned_to_user_id, assigned_to_group_id } = req.body;
-      const companyId = req.company?.id;
-
-      if (!companyId) {
-        return res.status(401).json({ error: 'Missing company authorization' });
-      }
+      const companyId = req.company!.id;
 
       if (!executionId || !stepId) {
         return res.status(400).json({ error: 'Missing execution_id or step_id' });

@@ -12,7 +12,7 @@ export interface AuthRequest extends Request {
   user?: {
     id: string;
     email: string;
-    /** True when authenticated via SUPER_ADMIN_API_KEY; grants super_admin access. */
+    /** True when user has super_admin in profile_admin_roles (JWT) or when authenticated via SUPER_ADMIN_API_KEY. */
     super_admin?: boolean;
   };
   company?: {
@@ -43,8 +43,16 @@ export const authMiddleware = async (req: AuthRequest, res: Response, next: Next
     }
   }
 
-  // 2. Check for API Key (Company authorization)
+  // 2. Check for x-api-key: super_admin first, then company
   if (apiKey && typeof apiKey === 'string') {
+    if (superAdminApiKey && apiKey === superAdminApiKey) {
+      req.user = {
+        id: SUPER_ADMIN_API_USER_ID,
+        email: 'superadmin@api',
+        super_admin: true,
+      };
+      return next();
+    }
     try {
       const company = await prisma.company.findUnique({
         where: { api_key: apiKey },
@@ -71,13 +79,19 @@ export const authMiddleware = async (req: AuthRequest, res: Response, next: Next
       
       const user = await prisma.user.findUnique({
         where: { id: decoded.userId },
-        include: { profile: true }
+        include: {
+          profile: {
+            include: { admin_role: { select: { super_admin: true } } },
+          },
+        },
       });
 
       if (user) {
+        const super_admin = user.profile?.admin_role?.super_admin ?? false;
         req.user = {
           id: user.id,
           email: user.email,
+          super_admin,
         };
         return next();
       }
@@ -109,16 +123,27 @@ export const internalAuth = (req: AuthRequest, res: Response, next: NextFunction
 };
 
 /**
- * API Key only authentication - for company API endpoints
+ * API Key only authentication - for company API endpoints (also accepts super_admin key via x-api-key)
  */
 export const apiKeyAuth = async (req: AuthRequest, res: Response, next: NextFunction) => {
   const apiKey = req.headers['x-api-key'];
+  const superAdminApiKey = process.env.SUPER_ADMIN_API_KEY || '';
 
   if (!apiKey || typeof apiKey !== 'string') {
     return res.status(401).json({
       error: 'Missing API key',
       details: 'x-api-key header is required',
     });
+  }
+
+  // Super admin key: set user only, no company
+  if (superAdminApiKey && apiKey === superAdminApiKey) {
+    req.user = {
+      id: SUPER_ADMIN_API_USER_ID,
+      email: 'superadmin@api',
+      super_admin: true,
+    };
+    return next();
   }
 
   try {
@@ -208,9 +233,18 @@ export const externalStepAuth = async (req: AuthRequest, res: Response, next: Ne
 export const optionalAuth = async (req: AuthRequest, res: Response, next: NextFunction) => {
   const authHeader = req.headers.authorization;
   const apiKey = req.headers['x-api-key'];
+  const superAdminApiKey = process.env.SUPER_ADMIN_API_KEY || '';
 
-  // Try API Key
+  // Try x-api-key: super_admin first, then company
   if (apiKey && typeof apiKey === 'string') {
+    if (superAdminApiKey && apiKey === superAdminApiKey) {
+      req.user = {
+        id: SUPER_ADMIN_API_USER_ID,
+        email: 'superadmin@api',
+        super_admin: true,
+      };
+      return next();
+    }
     try {
       const company = await prisma.company.findUnique({
         where: { api_key: apiKey },
@@ -237,13 +271,19 @@ export const optionalAuth = async (req: AuthRequest, res: Response, next: NextFu
       
       const user = await prisma.user.findUnique({
         where: { id: decoded.userId },
-        include: { profile: true }
+        include: {
+          profile: {
+            include: { admin_role: { select: { super_admin: true } } },
+          },
+        },
       });
 
       if (user) {
+        const super_admin = user.profile?.admin_role?.super_admin ?? false;
         req.user = {
           id: user.id,
           email: user.email,
+          super_admin,
         };
         return next();
       }
@@ -255,3 +295,43 @@ export const optionalAuth = async (req: AuthRequest, res: Response, next: NextFu
   // Continue without authentication
   next();
 };
+
+/**
+ * Resolve req.company for apiKeyAuth-only routes when caller is super_admin.
+ * If req.company is already set, returns true. If req.user?.super_admin and company_id
+ * is provided (X-Company-Id header or body.company_id), loads company and sets req.company.
+ * Otherwise sends 401 and returns false.
+ */
+export async function resolveCompanyForRequest(
+  req: AuthRequest,
+  res: Response
+): Promise<boolean> {
+  if (req.company) {
+    return true;
+  }
+  if (req.user?.super_admin) {
+    const companyId =
+      (req.headers['x-company-id'] as string) ||
+      (req.body?.company_id as string) ||
+      (req.query?.company_id as string);
+    if (companyId && typeof companyId === 'string') {
+      try {
+        const company = await prisma.company.findFirst({
+          where: { id: companyId, is_active: true },
+        });
+        if (company) {
+          req.company = { id: company.id, name: company.name };
+          return true;
+        }
+      } catch (error) {
+        console.error('resolveCompanyForRequest error:', error);
+      }
+    }
+  }
+  res.status(401).json({
+    error: 'Company context required',
+    details:
+      'Provide x-api-key (company key) or X-Company-Id header / company_id in body when using super admin key',
+  });
+  return false;
+}

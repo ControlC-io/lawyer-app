@@ -1,5 +1,5 @@
 import { Response } from 'express';
-import { AuthRequest } from '../middleware/auth';
+import { AuthRequest, resolveCompanyForRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 import { canUserAccessFolder, getUserFolderPermissionLevel, getUserGroupIdsInCompany } from '../lib/folderAccess';
 import { getDocumentProxyUrl } from '../lib/documentUrl';
@@ -51,16 +51,10 @@ export const filesController = {
    */
   async uploadExecutionFile(req: AuthRequest, res: Response) {
     try {
+      if (!(await resolveCompanyForRequest(req, res))) return;
       const { executionId } = req.params;
       const { field_name, file_url, file_base64, file_name, mime_type } = req.body;
-      const companyId = req.company?.id;
-
-      if (!companyId) {
-        return res.status(401).json({
-          error: 'Missing API key',
-          details: 'x-api-key header is required',
-        });
-      }
+      const companyId = req.company!.id;
 
       if (!executionId || !field_name) {
         return res.status(400).json({
