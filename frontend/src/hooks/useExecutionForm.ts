@@ -55,7 +55,7 @@ export const useExecutionForm = (
     return directory ? `${directory}/${sanitizedFilename}` : sanitizedFilename;
   };
 
-  const getSignedUrl = async (filePath: string): Promise<string | null> => {
+  const getSignedUrl = async (filePath: string, filename?: string): Promise<string | null> => {
     try {
       if (filePath.startsWith("http://") || filePath.startsWith("https://")) {
         if (filePath.includes("?token=")) return filePath;
@@ -68,6 +68,7 @@ export const useExecutionForm = (
         bucket: DOCUMENTS_BUCKET,
         path: sanitizedPath,
         expiresIn: 604800, // 7 days (matches MinIO/S3 maximum)
+        ...(typeof filename === "string" && filename.length > 0 ? { filename } : {}),
       });
       return res?.signedUrl ?? null;
     } catch (error) {
@@ -142,11 +143,17 @@ export const useExecutionForm = (
               rawValue && typeof rawValue === "object" && "value" in rawValue
                 ? (rawValue as { value?: string }).value
                 : rawValue;
+            const originalName =
+              rawValue && typeof rawValue === "object" && "original_name" in rawValue
+                ? (rawValue as { original_name?: string }).original_name
+                : undefined;
             if (fileValue && typeof fileValue === "string") {
               const cacheKey = `${eds.id}-${field.id}`;
-
-              // Generate signed URL (will be cached by state)
-              const signedUrl = await getSignedUrl(fileValue);
+              const displayName =
+                typeof originalName === "string" && originalName.length > 0
+                  ? originalName
+                  : fileValue.split("/").pop()?.replace(/^\d+_/, "") ?? undefined;
+              const signedUrl = await getSignedUrl(fileValue, displayName);
               if (signedUrl) {
                 newSignedUrls[cacheKey] = signedUrl;
               }
@@ -164,6 +171,10 @@ export const useExecutionForm = (
             } else if (raw && typeof raw === "object" && "value" in raw) {
               filePaths = Array.isArray(raw.value) ? raw.value : [raw.value];
             }
+            const rawOriginalNames =
+              raw && typeof raw === "object" && Array.isArray((raw as { original_name?: string[] }).original_name)
+                ? (raw as { original_name: string[] }).original_name
+                : null;
             if (filePaths.length > 0) {
               const cacheKey = `${eds.id}-${field.id}`;
               const signedUrlsMap: Record<number, string> = {};
@@ -171,7 +182,12 @@ export const useExecutionForm = (
               for (let i = 0; i < filePaths.length; i++) {
                 const filePath = filePaths[i];
                 if (filePath && typeof filePath === "string") {
-                  const signedUrl = await getSignedUrl(filePath);
+                  const originalName = rawOriginalNames?.[i];
+                  const displayName =
+                    typeof originalName === "string" && originalName.length > 0
+                      ? originalName
+                      : filePath.split("/").pop()?.replace(/^\d+_/, "") ?? undefined;
+                  const signedUrl = await getSignedUrl(filePath, displayName);
                   if (signedUrl) {
                     signedUrlsMap[i] = signedUrl;
                   }
@@ -365,7 +381,7 @@ export const useExecutionForm = (
         { apiKey: apiKey ?? undefined }
       );
       const filePath = res?.file_path;
-      const signedUrl = filePath ? await getSignedUrl(filePath) : null;
+      const signedUrl = filePath ? await getSignedUrl(filePath, file.name) : null;
       if (fieldType === "multiple_files" && signedUrl) {
         const currentSignedUrls = multipleFilesSignedUrls[cacheKey] || {};
         setMultipleFilesSignedUrls((prev) => ({ ...prev, [cacheKey]: { ...currentSignedUrls, 0: signedUrl } }));

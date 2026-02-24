@@ -85,40 +85,43 @@ export const HistoricalStepView = ({
 
           // Handle multiple_files fields (arrays)
           if (fieldType === 'multiple_files') {
-            // Extract file paths from value
+            // Extract file paths and original names from value
             let filePaths: string[] = [];
-            
+            let originalNames: (string | undefined)[] = [];
+
             if (Array.isArray(value)) {
-              // Check if it's array of objects or array of strings
               if (value.length > 0 && typeof value[0] === 'object' && value[0] !== null) {
-                // Array of objects format: [{value: path, original_name: name}, ...]
                 filePaths = value.map((item: any) => item.value || item);
+                originalNames = value.map((item: any) => item.original_name);
               } else {
-                // Array of strings (legacy format)
                 filePaths = value;
+                originalNames = new Array(value.length).fill(undefined);
               }
             } else if (value && typeof value === 'object' && 'value' in value) {
-              // Object format with value array
               filePaths = Array.isArray(value.value) ? value.value : [value.value];
+              originalNames = Array.isArray(value.original_name) ? value.original_name : new Array(filePaths.length).fill(undefined);
             } else if (typeof value === 'string') {
-              // Single string (legacy)
               filePaths = [value];
+              originalNames = [undefined];
             }
 
-            // Generate signed URLs for each file in the array
             const fieldUrls: Record<number, string> = {};
             await Promise.all(
               filePaths.map(async (filePath: string, index: number) => {
                 if (!filePath) return;
 
-                // If it's already a full URL, use it directly
                 if (filePath.startsWith('http')) {
                   fieldUrls[index] = filePath;
                   return;
                 }
 
+                const displayName = originalNames[index] || filePath.split('/').pop()?.replace(/^\d+_/, '') || undefined;
                 try {
-                  const res = await api.post<{ signedUrl?: string }>('/api/files/signed-url', { bucket: 'documents', path: filePath });
+                  const res = await api.post<{ signedUrl?: string }>('/api/files/signed-url', {
+                    bucket: 'documents',
+                    path: filePath,
+                    ...(displayName ? { filename: displayName } : {}),
+                  });
                   if (res?.signedUrl) fieldUrls[index] = res.signedUrl;
                 } catch (err) {
                   console.error(`Failed to generate signed URL for field ${field.id}, file ${index}:`, err);
@@ -135,22 +138,28 @@ export const HistoricalStepView = ({
           // Handle single file and signature fields
           // Value can be a string (path) or an object with value and original_name
           let filePath: string | null = null;
+          let originalName: string | undefined;
           if (typeof value === 'string') {
             filePath = value;
           } else if (value && typeof value === 'object' && 'value' in value) {
             filePath = value.value;
+            originalName = value.original_name;
           }
 
           if (!filePath) return;
 
-          // If it's already a full URL, use it directly
           if (filePath.startsWith('http')) {
             urls[field.id] = filePath;
             return;
           }
 
+          const displayName = originalName || filePath.split('/').pop()?.replace(/^\d+_/, '') || undefined;
           try {
-            const res = await api.post<{ signedUrl?: string }>('/api/files/signed-url', { bucket: 'documents', path: filePath });
+            const res = await api.post<{ signedUrl?: string }>('/api/files/signed-url', {
+              bucket: 'documents',
+              path: filePath,
+              ...(displayName ? { filename: displayName } : {}),
+            });
             if (res?.signedUrl) urls[field.id] = res.signedUrl;
           } catch (err) {
             console.error(`Failed to generate signed URL for field ${field.id}:`, err);
@@ -175,7 +184,11 @@ export const HistoricalStepView = ({
     }
 
     try {
-      const res = await api.post<{ signedUrl?: string }>('/api/files/signed-url', { bucket: 'documents', path });
+      const res = await api.post<{ signedUrl?: string }>('/api/files/signed-url', {
+        bucket: 'documents',
+        path,
+        ...(name ? { filename: name } : {}),
+      });
       if (res?.signedUrl) onFileView(res.signedUrl, name, path);
     } catch (err) {
       toast({

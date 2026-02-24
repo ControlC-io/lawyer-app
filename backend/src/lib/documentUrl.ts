@@ -15,10 +15,17 @@ export function getApiBaseUrl(): string {
 /**
  * Returns a full URL that proxies through GET /api/files/document?token=...
  * Use this for any document in the documents bucket so clients never see MinIO internal URLs.
+ * @param path - Storage path of the file
+ * @param download - If true, response will have Content-Disposition: attachment
+ * @param filename - Optional original filename for download; used in Content-Disposition when download is true
  */
-export function getDocumentProxyUrl(path: string, download = false): string {
+export function getDocumentProxyUrl(path: string, download = false, filename?: string): string {
+  const payload: { path: string; download: boolean; filename?: string } = { path, download };
+  if (filename != null && filename !== '') {
+    payload.filename = filename;
+  }
   const token = jwt.sign(
-    { path, download },
+    payload,
     JWT_SECRET,
     { expiresIn: DOCUMENT_TOKEN_EXPIRY }
   );

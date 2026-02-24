@@ -223,6 +223,7 @@ export const filesController = {
         updatedFieldValue = {
           ...currentValues[fieldId],
           value: storagePath,
+          original_name: fileName,
         };
       }
 
@@ -316,7 +317,7 @@ export const filesController = {
    */
   async getSignedUrl(req: AuthRequest, res: Response) {
     try {
-      const { bucket, path, expiresIn } = req.body;
+      const { bucket, path, expiresIn, filename } = req.body;
 
       if (!bucket || !path) {
         return res.status(400).json({
@@ -327,7 +328,7 @@ export const filesController = {
 
       const documentsBucket = storageService.getDocumentsBucket();
       if (bucket === documentsBucket) {
-        const signedUrl = getDocumentProxyUrl(path, false);
+        const signedUrl = getDocumentProxyUrl(path, false, typeof filename === 'string' ? filename : undefined);
         return res.json({ signedUrl });
       }
 
@@ -413,9 +414,9 @@ export const filesController = {
       if (!token) {
         return res.status(400).json({ error: 'Missing token' });
       }
-      let payload: { path: string; download?: boolean; exp?: number };
+      let payload: { path: string; download?: boolean; filename?: string; exp?: number };
       try {
-        payload = jwt.verify(token, JWT_SECRET) as { path: string; download?: boolean; exp?: number };
+        payload = jwt.verify(token, JWT_SECRET) as { path: string; download?: boolean; filename?: string; exp?: number };
       } catch {
         return res.status(401).json({ error: 'Invalid or expired token' });
       }
@@ -427,11 +428,15 @@ export const filesController = {
       const stream = await storageService.downloadFile(bucket, path);
       const stat = await storageService.getFileStat(bucket, path).catch(() => null);
       const contentType = stat?.contentType || 'application/octet-stream';
-      const filename = path.split('/').pop()?.replace(/^\d+_/, '') || 'download';
+      const filename =
+        typeof payload.filename === 'string' && payload.filename.length > 0
+          ? payload.filename
+          : path.split('/').pop()?.replace(/^\d+_/, '') || 'download';
       res.setHeader('Content-Type', contentType);
-      if (payload.download) {
-        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-      }
+      res.setHeader(
+        'Content-Disposition',
+        payload.download ? `attachment; filename="${filename}"` : `inline; filename="${filename}"`
+      );
       stream.pipe(res);
     } catch (error) {
       console.error('Error streaming document:', error);
