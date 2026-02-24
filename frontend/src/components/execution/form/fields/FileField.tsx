@@ -19,10 +19,27 @@ interface FileFieldProps {
   signedUrl?: string;
 }
 
-// Helper function to convert allowed_file_types to accept attribute
+// MIME types and corresponding extensions for native file picker (accept attribute).
+// Including both helps OS file dialogs grey out / filter invalid files.
+const MIME_TO_EXTENSIONS: Record<string, string[]> = {
+  "application/pdf": [".pdf"],
+  "image/jpeg": [".jpg", ".jpeg"],
+  "image/png": [".png"],
+  "image/gif": [".gif"],
+  "image/webp": [".webp"],
+  "application/msword": [".doc"],
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": [".docx"],
+  "application/vnd.ms-excel": [".xls"],
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"],
+};
+
+// Helper function to convert allowed_file_types to accept attribute (MIME + extensions so native picker greys out invalid files)
 const getAcceptAttribute = (allowedTypes?: string[]): string => {
   if (!allowedTypes || allowedTypes.length === 0) {
     return ""; // Allow all file types
+  }
+  if (allowedTypes.some((t) => t?.toLowerCase() === "all")) {
+    return ""; // "All" means no restriction
   }
 
   const mimeTypeMap: Record<string, string[]> = {
@@ -33,42 +50,50 @@ const getAcceptAttribute = (allowedTypes?: string[]): string => {
     audio: ["audio/*"],
   };
 
-  const acceptTypes: string[] = [];
+  const extToMime: Record<string, string> = {
+    pdf: "application/pdf",
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    png: "image/png",
+    gif: "image/gif",
+    webp: "image/webp",
+    doc: "application/msword",
+    docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    xls: "application/vnd.ms-excel",
+    xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  };
+
+  const parts = new Set<string>();
   allowedTypes.forEach((type) => {
     if (mimeTypeMap[type.toLowerCase()]) {
-      acceptTypes.push(...mimeTypeMap[type.toLowerCase()]);
+      mimeTypeMap[type.toLowerCase()].forEach((mime) => {
+        parts.add(mime);
+        (MIME_TO_EXTENSIONS[mime] ?? []).forEach((ext) => parts.add(ext));
+      });
     } else if (type.startsWith(".")) {
-      // If it's a file extension like ".pdf", convert to MIME type
-      const ext = type.toLowerCase().substring(1);
-      const extToMime: Record<string, string> = {
-        pdf: "application/pdf",
-        jpg: "image/jpeg",
-        jpeg: "image/jpeg",
-        png: "image/png",
-        gif: "image/gif",
-        webp: "image/webp",
-        doc: "application/msword",
-        docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        xls: "application/vnd.ms-excel",
-        xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      };
-      if (extToMime[ext]) {
-        acceptTypes.push(extToMime[ext]);
-      } else {
-        acceptTypes.push(type); // Use as-is if we don't have a mapping
+      const ext = type.toLowerCase();
+      parts.add(ext);
+      if (extToMime[ext.substring(1)]) {
+        parts.add(extToMime[ext.substring(1)]);
       }
     } else {
-      acceptTypes.push(type); // Use as-is
+      parts.add(type);
+      if (MIME_TO_EXTENSIONS[type]) {
+        MIME_TO_EXTENSIONS[type].forEach((ext) => parts.add(ext));
+      }
     }
   });
 
-  return acceptTypes.join(",");
+  return [...parts].join(",");
 };
 
 // Helper function to validate file type
 const validateFileType = (file: File, allowedTypes?: string[]): boolean => {
   if (!allowedTypes || allowedTypes.length === 0) {
     return true; // No restrictions
+  }
+  if (allowedTypes.some((t) => t?.toLowerCase() === "all")) {
+    return true; // "All" means allow any file type
   }
 
   const fileExtension = "." + file.name.split(".").pop()?.toLowerCase();
@@ -126,7 +151,7 @@ export const FileField = ({
       return originalName;
     }
     
-    if (!filePath) return "Uploaded file";
+    if (!filePath || typeof filePath !== 'string') return "Uploaded file";
     try {
       // Extract filename from path
       const pathWithoutQuery = filePath.split('?')[0];
@@ -139,9 +164,11 @@ export const FileField = ({
       return pathWithoutQuery.split('/').pop()?.replace(/^\d+_/, '') || "Uploaded file";
     }
   };
-  
-  // Extract file path and original name from value
-  const filePath = typeof value === 'string' ? value : (value?.value || value);
+
+  // Extract file path and original name from value; only treat non-empty string as valid path
+  const rawPath = typeof value === 'string' ? value : (value?.value ?? value);
+  const filePath =
+    typeof rawPath === 'string' && rawPath.length > 0 ? rawPath : null;
   const originalName = typeof value === 'string' ? undefined : value?.original_name;
   const fileName = filePath ? getFileName(filePath, originalName) : "";
 
@@ -176,21 +203,22 @@ export const FileField = ({
   };
 
   const handleRemove = async () => {
-    // Delete from storage if onDelete callback is provided
+    // Delete from backend/storage first when callback is provided; only clear UI on success
     if (onDelete && filePath) {
       try {
         await onDelete(filePath);
       } catch (error) {
-        console.error('Error deleting file from storage:', error);
+        console.error('Error deleting file:', error);
         toast({
-          title: "Warning",
-          description: "File removed from form but may still exist in storage",
+          title: "Error deleting file",
+          description: "File could not be deleted. It will remain in the form.",
           variant: "destructive",
         });
+        return;
       }
     }
-    
-    // Remove from UI and update state
+
+    // Remove from UI and update state (only reached when delete succeeded or no onDelete)
     onChange(null);
   };
 

@@ -19,7 +19,7 @@ export function FormStepFieldConfig({ item, step, onUpdate }: FormStepFieldConfi
     const fieldConfig = step.config.form_fields?.[item.id] || {
         shown: false,
         readonly: false,
-        allowed_file_types: [],
+        allowed_file_types: ["all"],
         allow_ai_extraction: false,
     };
 

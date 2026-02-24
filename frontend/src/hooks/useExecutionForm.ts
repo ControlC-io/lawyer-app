@@ -335,6 +335,18 @@ export const useExecutionForm = (
     fetchDynamicOptions();
   }, [executionDataStructures, companyId]);
 
+  /** Convert ArrayBuffer to base64 in chunks to avoid "Maximum call stack size exceeded" on large files (e.g. PDFs). */
+  const arrayBufferToBase64 = (buffer: ArrayBuffer): string => {
+    const bytes = new Uint8Array(buffer);
+    const chunkSize = 8192;
+    let binary = "";
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      const chunk = bytes.subarray(i, Math.min(i + chunkSize, bytes.length));
+      binary += String.fromCharCode.apply(null, chunk as unknown as number[]);
+    }
+    return btoa(binary);
+  };
+
   const handleFileUpload = async (fieldId: string, file: File) => {
     if (!file || !apiKey) return;
     setUploadingFiles((prev) => ({ ...prev, [fieldId]: true }));
@@ -346,7 +358,7 @@ export const useExecutionForm = (
       const cacheKey = `${row.id}-${fieldId}`;
       const fieldType = info.def.field_type || info.def.type;
       const buf = await file.arrayBuffer();
-      const base64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
+      const base64 = arrayBufferToBase64(buf);
       const res = await api.post<{ file_path?: string }>(
         `/api/files/workflows/executions/${executionId}/files`,
         { field_name: fieldName, file_base64: base64, file_name: file.name, mime_type: file.type },
@@ -525,7 +537,7 @@ export const useExecutionForm = (
     const fieldType = info.def.field_type || info.def.type;
     const currentValues = ((row as any).values ?? {}) as Record<string, any>;
     const currentValueObj = currentValues[fieldId] || {};
-    let updatedValue: any;
+    let payload: any;
     if (fieldType === "multiple_files") {
       const currentFileArray = Array.isArray(currentValueObj.value) ? currentValueObj.value : (currentValueObj.value ? [currentValueObj.value] : []);
       const currentOriginalNames = Array.isArray(currentValueObj.original_name) ? currentValueObj.original_name : (currentValueObj.original_name ? [currentValueObj.original_name] : []);
@@ -533,16 +545,17 @@ export const useExecutionForm = (
       if (fileIndex === -1) return;
       const newFileArray = currentFileArray.filter((_: any, i: number) => i !== fileIndex);
       const newOriginalNames = currentOriginalNames.filter((_: any, i: number) => i !== fileIndex);
-      updatedValue = { ...currentValueObj, value: newFileArray.length > 0 ? newFileArray : null, original_name: newOriginalNames.length > 0 ? newOriginalNames : undefined };
+      payload = { ...currentValueObj, value: newFileArray.length > 0 ? newFileArray : null, original_name: newOriginalNames.length > 0 ? newOriginalNames : undefined };
     } else {
       const currentFilePath = typeof currentValueObj === "string" ? currentValueObj : (currentValueObj.value ?? currentValueObj);
       if (currentFilePath !== filePath) return;
-      updatedValue = { ...currentValueObj, value: null, original_name: undefined };
+      // Backend stores this as the field's .value; send null so DB has value: null and persists correctly
+      payload = null;
     }
     try {
       await api.put(
         `/api/workflows/executions/${executionId}/data`,
-        { data: { [info.def.name]: updatedValue } },
+        { data: { [info.def.name]: payload } },
         { apiKey: apiKey ?? undefined }
       );
       queryClient.invalidateQueries({ queryKey: ["workflow_execution", executionId] });

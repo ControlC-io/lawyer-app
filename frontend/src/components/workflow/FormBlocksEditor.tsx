@@ -121,7 +121,7 @@ export function FormBlocksEditor({ step, dataStructureItems, onUpdate, fullDataS
     return step.config.form_fields?.[fieldId] || {
       shown: true, // Fields in blocks are visible by default
       readonly: false,
-      allowed_file_types: [],
+      allowed_file_types: ["all"],
       allow_ai_extraction: false,
       compact_mode: false,
       array_enable_duplicate: true,
@@ -824,15 +824,20 @@ function FieldSettingsDialog({
               <div className="space-y-4">
                 <div className="space-y-3">
                   <Label className="text-xs font-medium">Allowed File Types</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Choose &quot;All&quot; or one or more specific types; &quot;All&quot; cannot be combined with specific types. At least one option must be selected.
+                  </p>
                   <div className="flex flex-wrap gap-4">
                     <label className="flex items-center gap-2 text-sm cursor-pointer">
                       <Checkbox
                         checked={fieldConfig.allowed_file_types?.includes("image")}
                         onCheckedChange={(checked) => {
-                          const current = fieldConfig.allowed_file_types || [];
-                          const updated = checked
-                            ? [...current, "image"]
-                            : current.filter((t) => t !== "image");
+                          const current = fieldConfig.allowed_file_types || ["all"];
+                          const withoutAll = current.filter((t) => t !== "all");
+                          let updated = checked
+                            ? [...withoutAll, "image"]
+                            : withoutAll.filter((t) => t !== "image");
+                          if (updated.length === 0) updated = ["all"];
                           onUpdate({ allowed_file_types: updated });
                         }}
                       />
@@ -842,10 +847,12 @@ function FieldSettingsDialog({
                       <Checkbox
                         checked={fieldConfig.allowed_file_types?.includes("pdf")}
                         onCheckedChange={(checked) => {
-                          const current = fieldConfig.allowed_file_types || [];
-                          const updated = checked
-                            ? [...current, "pdf"]
-                            : current.filter((t) => t !== "pdf");
+                          const current = fieldConfig.allowed_file_types || ["all"];
+                          const withoutAll = current.filter((t) => t !== "all");
+                          let updated = checked
+                            ? [...withoutAll, "pdf"]
+                            : withoutAll.filter((t) => t !== "pdf");
+                          if (updated.length === 0) updated = ["all"];
                           onUpdate({ allowed_file_types: updated });
                         }}
                       />
@@ -853,12 +860,12 @@ function FieldSettingsDialog({
                     </label>
                     <label className="flex items-center gap-2 text-sm cursor-pointer">
                       <Checkbox
-                        checked={fieldConfig.allowed_file_types?.includes("all")}
+                        checked={
+                          !fieldConfig.allowed_file_types?.length || fieldConfig.allowed_file_types?.includes("all")
+                        }
                         onCheckedChange={(checked) => {
-                          const current = fieldConfig.allowed_file_types || [];
-                          const updated = checked
-                            ? [...current, "all"]
-                            : current.filter((t) => t !== "all");
+                          const current = fieldConfig.allowed_file_types || ["all"];
+                          const updated = checked ? ["all"] : current.filter((t) => t !== "all");
                           onUpdate({ allowed_file_types: updated });
                         }}
                       />
@@ -1064,7 +1071,7 @@ function FormPreviewDialog({ pages, dataStructureItems, formFields, fieldRules, 
     return formFields[fieldId] || {
       shown: true,
       readonly: false,
-      allowed_file_types: [],
+      allowed_file_types: ["all"],
       allow_ai_extraction: false,
       compact_mode: false,
       array_enable_duplicate: true,
