@@ -574,8 +574,15 @@ export const useExecutionForm = (
         { data: { [info.def.name]: payload } },
         { apiKey: apiKey ?? undefined }
       );
-      queryClient.invalidateQueries({ queryKey: ["workflow_execution", executionId] });
+      // Use the same query key as useExecutionData so the execution detail view gets fresh data
+      const executionQueryKey =
+        companyId != null
+          ? ["workflow_execution", executionId, companyId]
+          : ["workflow_execution", executionId];
+      queryClient.invalidateQueries({ queryKey: executionQueryKey });
       queryClient.invalidateQueries({ queryKey: ["execution_data_structures", executionId] });
+      // Wait for refetch so the cache is updated before showing success; avoids file reappearing on refresh
+      await queryClient.refetchQueries({ queryKey: executionQueryKey });
       toast({ title: "File deleted successfully", description: "File has been removed from form" });
     } catch (error: unknown) {
       console.error("Error deleting file:", error);
