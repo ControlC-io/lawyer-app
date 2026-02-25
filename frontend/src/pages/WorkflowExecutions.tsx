@@ -285,9 +285,10 @@ const WorkflowExecutions = () => {
 
       return {
         ...e,
-        current_step_name: stepNames.length > 0 ? stepNames[0] : undefined, // Keep for backward compatibility
-        current_step_names: stepNames.length > 0 ? stepNames : undefined,
-        assignees: assignees.length > 0 ? assignees : undefined
+        current_step_name: stepNames.length > 0 ? stepNames[0] : (e as any).current_step_name, // Keep for backward compatibility
+        current_step_names: stepNames.length > 0 ? stepNames : (e as any).current_step_names,
+        // Keep server-provided assignees when step feed is intentionally scoped to current user
+        assignees: assignees.length > 0 ? assignees : (e as any).assignees
       };
     });
 

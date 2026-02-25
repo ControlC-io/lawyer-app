@@ -2529,7 +2529,7 @@ paths:
   /companies/{companyId}/workflows:
     get:
       summary: List workflows
-      description: List workflows the user has permission to execute (public, or user/group permission). Optional filter by category.
+      description: List workflows visible to the user based on workflow visibility scope and explicit visibility permissions. Optional filter by category.
       tags: [Companies]
       security:
         - BearerAuth: []
@@ -2568,13 +2568,28 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                name:
+                  type: string
+                description:
+                  type: string
+                  nullable: true
+                visibility_scope:
+                  type: string
+                  enum: [all_company, specific]
+                start_permission_scope:
+                  type: string
+                  enum: [public, specific]
+                is_public:
+                  type: boolean
+                  description: Legacy compatibility flag. Mirrors start_permission_scope=public.
       responses:
         201:
           description: Workflow created
   /companies/{companyId}/workflows/{workflowId}/start:
     post:
       summary: Start workflow execution from UI
-      description: Start a new execution for this workflow. Only is_active is checked (not api_enabled). JWT required.
+      description: Start a new execution for this workflow. Requires workflow to be active and caller to satisfy the workflow start permission policy.
       tags: [Companies]
       security:
         - BearerAuth: []
@@ -2663,6 +2678,21 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                name:
+                  type: string
+                description:
+                  type: string
+                  nullable: true
+                visibility_scope:
+                  type: string
+                  enum: [all_company, specific]
+                start_permission_scope:
+                  type: string
+                  enum: [public, specific]
+                is_public:
+                  type: boolean
+                  description: Legacy compatibility flag. Mirrors start_permission_scope=public.
       responses:
         200:
           description: Workflow updated

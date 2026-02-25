@@ -9,6 +9,26 @@ import { storageService } from '../services/storage.service';
 import { aiService } from '../services/ai.service';
 import crypto from 'crypto';
 
+async function resolveExecutionVisibilityForUser(userId: string, companyId: string) {
+  const membership = await prisma.userCompany.findFirst({
+    where: { user_id: userId, company_id: companyId },
+    select: { role: true },
+  });
+
+  if (!membership) return { canAccessCompany: false, isAdmin: false, groupIds: [] as string[] };
+
+  const isAdmin = membership.role === 'company_admin';
+  const groupMemberships = await prisma.profileGroupMember.findMany({
+    where: { profile_id: userId },
+    select: { group_id: true },
+  });
+  const groupIds = groupMemberships
+    .map((membershipRow) => membershipRow.group_id)
+    .filter((id): id is string => id !== null);
+
+  return { canAccessCompany: true, isAdmin, groupIds };
+}
+
 export const workflowController = {
   /**
    * POST /api/workflows/:workflowId/trigger
@@ -477,12 +497,14 @@ export const workflowController = {
     try {
       const { executionId } = req.params;
       let companyId = req.company?.id;
+      const userId = req.user?.id;
+      const isSuperAdmin = !!req.user?.super_admin;
 
       if (!executionId) {
         return res.status(400).json({ error: 'missing execution_id' });
       }
 
-      if (!companyId && req.user?.id) {
+      if (!companyId && userId) {
         const execution = await prisma.workflowExecution.findUnique({
           where: { id: executionId },
           select: { company_id: true },
@@ -490,10 +512,8 @@ export const workflowController = {
         if (!execution?.company_id) {
           return res.status(404).json({ error: 'not found or access denied' });
         }
-        const userCompany = await prisma.userCompany.findFirst({
-          where: { user_id: req.user.id, company_id: execution.company_id },
-        });
-        if (!userCompany) {
+        const visibility = await resolveExecutionVisibilityForUser(userId, execution.company_id);
+        if (!visibility.canAccessCompany) {
           return res.status(403).json({ error: 'Access denied to this execution' });
         }
         companyId = execution.company_id;
@@ -522,6 +542,76 @@ export const workflowController = {
         return res.status(404).json({ error: 'not found or access denied' });
       }
 
+      if (!isSuperAdmin && userId) {
+        const visibility = await resolveExecutionVisibilityForUser(userId, companyId);
+        if (!visibility.canAccessCompany) {
+          return res.status(403).json({ error: 'Access denied to this execution' });
+        }
+
+        const allowedExecutionSteps = execution.execution_steps.filter((executionStep) => (
+          executionStep.assigned_to_user_id === userId ||
+          (executionStep.assigned_to_group_id && visibility.groupIds.includes(executionStep.assigned_to_group_id))
+        ));
+
+        const hasStepAssignmentAccess = allowedExecutionSteps.length > 0;
+        const workflowVisibilityTypes = ['visibility', 'view'];
+        const workflowScope = (execution.workflow as any).visibility_scope;
+        const hasWorkflowScopeVisibility = workflowScope === 'all_company' || execution.workflow.is_public === true;
+        const hasWorkflowPermissionVisibility = hasWorkflowScopeVisibility
+          ? true
+          : !!(await prisma.workflowPermission.findFirst({
+              where: {
+                workflow_id: execution.workflow_id,
+                permission_type: { in: workflowVisibilityTypes },
+                OR: [
+                  { user_id: userId },
+                  ...(visibility.groupIds.length > 0 ? [{ group_id: { in: visibility.groupIds } }] : []),
+                ],
+              },
+              select: { id: true },
+            }));
+        const hasWorkflowVisibility = hasWorkflowScopeVisibility || hasWorkflowPermissionVisibility;
+
+        if (!hasWorkflowVisibility && !hasStepAssignmentAccess) {
+          return res.status(403).json({ error: 'You do not have access to this execution' });
+        }
+
+        // With workflow visibility, user can inspect full execution history/steps.
+        // Without workflow visibility, keep data scoped to assigned steps only.
+        if (!hasWorkflowVisibility) {
+          const allowedExecutionStepIds = new Set(allowedExecutionSteps.map((step) => step.id));
+          execution.execution_steps = allowedExecutionSteps;
+          execution.execution_logs = execution.execution_logs.filter((log) => (
+            log.step_id ? allowedExecutionStepIds.has(log.step_id) : false
+          ));
+
+          const currentAssignedStep = allowedExecutionSteps.find((step) => step.status === 'running') ?? allowedExecutionSteps[0];
+          const sourceStepData = (currentAssignedStep?.step_data && typeof currentAssignedStep.step_data === 'object')
+            ? (currentAssignedStep.step_data as Record<string, unknown>)
+            : {};
+
+          const scopedValues = Object.entries(sourceStepData).reduce<Record<string, { value: unknown }>>((acc, [fieldId, value]) => {
+            acc[fieldId] = { value };
+            return acc;
+          }, {});
+
+          if (execution.execution_data_records.length > 0) {
+            execution.execution_data_records = execution.execution_data_records.map((record, index) => (
+              index === 0 ? { ...record, values: scopedValues as any } : { ...record, values: {} as any }
+            ));
+          } else {
+            execution.execution_data_records = [{
+              id: `scoped-${execution.id}`,
+              execution_id: execution.id,
+              company_id: execution.company_id,
+              created_at: execution.created_at,
+              updated_at: execution.updated_at,
+              values: scopedValues as any,
+            } as typeof execution.execution_data_records[number]];
+          }
+        }
+      }
+
       // Process execution data if data structure exists
       if (execution.workflow.data_structure && Array.isArray(execution.workflow.data_structure)) {
         const dataStructure = { fields: execution.workflow.data_structure as any[] };
@@ -534,12 +624,16 @@ export const workflowController = {
         for (const field of dataStructure.fields) {
           const fieldValue = (executionDataValues as any)[field.id];
 
-          if (field.field_type === 'file' && fieldValue?.value) {
-            fileSignedUrls[field.id] = getDocumentProxyUrl(fieldValue.value);
-          } else if (field.field_type === 'multiple_files' && Array.isArray(fieldValue?.value)) {
-            fileSignedUrls[field.id] = fieldValue.value.map((filePath: string) =>
-              getDocumentProxyUrl(filePath)
-            );
+          try {
+            if (field.field_type === 'file' && fieldValue?.value) {
+              fileSignedUrls[field.id] = getDocumentProxyUrl(fieldValue.value);
+            } else if (field.field_type === 'multiple_files' && Array.isArray(fieldValue?.value)) {
+              fileSignedUrls[field.id] = fieldValue.value.map((filePath: string) =>
+                getDocumentProxyUrl(filePath)
+              );
+            }
+          } catch {
+            // Keep execution response available even when signed URL generation fails.
           }
         }
 

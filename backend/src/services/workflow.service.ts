@@ -55,7 +55,12 @@ export const workflowService = {
       .filter((step: WorkflowStepRow) => step.step_type !== 'start' && step.step_type !== 'end')
       .map((step: WorkflowStepRow) => {
         const stepConfig = (step.config as Record<string, unknown>) || {};
-        const assignToCreator = stepConfig.assign_to_execution_creator !== false;
+        const hasExplicitAssignee = !!(step.assigned_to_user_id || step.assigned_to_group_id);
+        const assignToCreator = stepConfig.assign_to_execution_creator === true
+          ? true
+          : stepConfig.assign_to_execution_creator === false
+            ? false
+            : !hasExplicitAssignee;
         return {
           execution_id: execution.id,
           step_id: step.id,
@@ -259,7 +264,12 @@ export const workflowService = {
 
         // Determine assignment
         const stepConfig = (targetStep.config as any) || {};
-        const assignToCreator = stepConfig.assign_to_execution_creator !== false;
+        const hasExplicitAssignee = !!(targetStep.assigned_to_user_id || targetStep.assigned_to_group_id);
+        const assignToCreator = stepConfig.assign_to_execution_creator === true
+          ? true
+          : stepConfig.assign_to_execution_creator === false
+            ? false
+            : !hasExplicitAssignee;
         const assignedUserId = assignToCreator
           ? execution.created_by
           : targetStep.assigned_to_user_id;

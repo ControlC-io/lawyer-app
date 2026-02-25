@@ -37,6 +37,7 @@ import { CategoryCard } from "@/components/workflow/CategoryCard";
 import { CategoryBreadcrumb } from "@/components/workflow/CategoryBreadcrumb";
 import { SearchResults } from "@/components/workflow/SearchResults";
 import { IconPicker } from "@/components/workflow/IconPicker";
+import { PermissionTargetPicker } from "@/components/workflow/PermissionTargetPicker";
 import { FolderPlus, MoreVertical, Workflow as WorkflowIcon, Folder } from "lucide-react";
 import { renderIcon } from "@/lib/iconUtils";
 import {
@@ -66,6 +67,8 @@ interface Workflow {
   category_id: string | null;
   icon: string | null;
   is_active?: boolean;
+  visibility_scope?: "all_company" | "specific";
+  start_permission_scope?: "public" | "specific";
 }
 
 interface WorkflowCategory {
@@ -177,7 +180,7 @@ export default function WorkflowList() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingWorkflow, setEditingWorkflow] = useState<Workflow | null>(null);
   const [workflowToDelete, setWorkflowToDelete] = useState<Workflow | null>(null);
-  const [formData, setFormData] = useState({ name: "", description: "", is_public: false, api_enabled: false });
+  const [formData, setFormData] = useState({ name: "", description: "", is_public: true, api_enabled: false });
   const [dataStructureFields, setDataStructureFields] = useState<DataStructureField[]>([]);
   const [addingNewFieldParentId, setAddingNewFieldParentId] = useState<string | null | undefined>(undefined);
   const [editingFieldId, setEditingFieldId] = useState<string | null>(null);
@@ -195,9 +198,12 @@ export default function WorkflowList() {
   });
   const [users, setUsers] = useState<User[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
-  const [selectedUsers, setSelectedUsers] = useState<string[]>([]);
-  const [selectedGroups, setSelectedGroups] = useState<string[]>([]);
-  const [permissionType, setPermissionType] = useState<"public" | "specific">("public");
+  const [visibilityScope, setVisibilityScope] = useState<"all_company" | "specific">("all_company");
+  const [startScope, setStartScope] = useState<"public" | "specific">("public");
+  const [visibilityUsers, setVisibilityUsers] = useState<string[]>([]);
+  const [visibilityGroups, setVisibilityGroups] = useState<string[]>([]);
+  const [startUsers, setStartUsers] = useState<string[]>([]);
+  const [startGroups, setStartGroups] = useState<string[]>([]);
   const [showWorkflowId, setShowWorkflowId] = useState<string | null>(null);
   const [draggedFieldId, setDraggedFieldId] = useState<string | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
@@ -494,7 +500,9 @@ export default function WorkflowList() {
           {
             name: formData.name,
             description: formData.description,
-            is_public: formData.is_public,
+            is_public: startScope === "public",
+            visibility_scope: visibilityScope,
+            start_permission_scope: startScope,
             api_enabled: formData.api_enabled,
             category_id: selectedCategoryId || null,
             icon: selectedIcon,
@@ -520,7 +528,9 @@ export default function WorkflowList() {
           {
             name: formData.name,
             description: formData.description,
-            is_public: formData.is_public,
+            is_public: startScope === "public",
+            visibility_scope: visibilityScope,
+            start_permission_scope: startScope,
             api_enabled: formData.api_enabled,
             category_id: selectedCategoryId || null,
             icon: selectedIcon,
@@ -558,11 +568,14 @@ export default function WorkflowList() {
           );
           setDialogOpen(false);
           setEditingWorkflow(null);
-          setPermissionType("public");
+          setVisibilityScope("all_company");
+          setStartScope("public");
           setFormData({ name: "", description: "", is_public: true, api_enabled: false });
           setDataStructureFields([]);
-          setSelectedUsers([]);
-          setSelectedGroups([]);
+          setVisibilityUsers([]);
+          setVisibilityGroups([]);
+          setStartUsers([]);
+          setStartGroups([]);
           setSelectedCategoryId(null);
           setSelectedIcon(null);
           fetchWorkflows();
@@ -573,11 +586,14 @@ export default function WorkflowList() {
       }
 
       setDialogOpen(false);
-      setPermissionType("public");
+      setVisibilityScope("all_company");
+      setStartScope("public");
       setFormData({ name: "", description: "", is_public: true, api_enabled: false }); // Default to public
       setDataStructureFields([]);
-      setSelectedUsers([]);
-      setSelectedGroups([]);
+      setVisibilityUsers([]);
+      setVisibilityGroups([]);
+      setStartUsers([]);
+      setStartGroups([]);
       setEditingWorkflow(null);
       setSelectedCategoryId(null);
       setSelectedIcon(null);
@@ -606,13 +622,23 @@ export default function WorkflowList() {
   };
 
   const createWorkflowPermissions = async (workflowId: string) => {
-    if (formData.is_public || !companyId) return;
+    if (!companyId) return;
     const base = `/api/companies/${companyId}/workflows/${workflowId}/permissions`;
-    for (const userId of selectedUsers) {
-      await api.post(base, { user_id: userId, permission_type: "execute" });
+    if (visibilityScope === "specific") {
+      for (const userId of visibilityUsers) {
+        await api.post(base, { user_id: userId, permission_type: "visibility" });
+      }
+      for (const groupId of visibilityGroups) {
+        await api.post(base, { group_id: groupId, permission_type: "visibility" });
+      }
     }
-    for (const groupId of selectedGroups) {
-      await api.post(base, { group_id: groupId, permission_type: "execute" });
+    if (startScope === "specific") {
+      for (const userId of startUsers) {
+        await api.post(base, { user_id: userId, permission_type: "start" });
+      }
+      for (const groupId of startGroups) {
+        await api.post(base, { group_id: groupId, permission_type: "start" });
+      }
     }
   };
 
@@ -626,9 +652,7 @@ export default function WorkflowList() {
         `/api/companies/${companyId}/workflows/${workflowId}/permissions/${p.id}`
       );
     }
-    if (!formData.is_public) {
-      await createWorkflowPermissions(workflowId);
-    }
+    await createWorkflowPermissions(workflowId);
   };
 
   const confirmDelete = (e: React.MouseEvent, workflow: Workflow) => {
@@ -709,6 +733,8 @@ export default function WorkflowList() {
           is_active: workflowData.is_active ?? false,
           data_structure: workflowData.data_structure || null,
           is_public: workflowData.is_public ?? false,
+          visibility_scope: workflowData.visibility_scope ?? "all_company",
+          start_permission_scope: workflowData.start_permission_scope ?? (workflowData.is_public ? "public" : "specific"),
           api_enabled: workflowData.api_enabled ?? false,
         }
       );
@@ -823,13 +849,21 @@ export default function WorkflowList() {
       setFormData({
         name: workflow.name,
         description: workflow.description || "",
-        is_public: (workflow as any).is_public || false,
+        is_public: (workflow as any).start_permission_scope
+          ? (workflow as any).start_permission_scope === "public"
+          : (workflow as any).is_public || false,
         api_enabled: (workflow as any).api_enabled || false
       });
       setSelectedCategoryId(workflow.category_id || null);
       setSelectedIcon(workflow.icon || null);
 
-      let workflowDataTyped: { data_structure?: any[]; is_public?: boolean; api_enabled?: boolean } = {};
+      let workflowDataTyped: {
+        data_structure?: any[];
+        is_public?: boolean;
+        api_enabled?: boolean;
+        visibility_scope?: "all_company" | "specific";
+        start_permission_scope?: "public" | "specific";
+      } = {};
       if (companyId) {
         workflowDataTyped = await api.get(
           `/api/companies/${companyId}/workflows/${workflow.id}`
@@ -856,30 +890,44 @@ export default function WorkflowList() {
           return 0;
         }));
 
-      setPermissionType(workflowDataTyped?.is_public ? "public" : "specific");
+      setVisibilityScope(workflowDataTyped?.visibility_scope === "specific" ? "specific" : "all_company");
+      setStartScope(workflowDataTyped?.start_permission_scope === "specific" ? "specific" : "public");
 
-      let userIds: string[] = [];
-      let groupIds: string[] = [];
+      let visibilityUserIds: string[] = [];
+      let visibilityGroupIds: string[] = [];
+      let startUserIds: string[] = [];
+      let startGroupIds: string[] = [];
       if (companyId) {
-        const permissions = await api.get<{ user_id: string | null; group_id: string | null }[]>(
+        const permissions = await api.get<{ user_id: string | null; group_id: string | null; permission_type: string }[]>(
           `/api/companies/${companyId}/workflows/${workflow.id}/permissions`
         );
-        userIds = permissions?.filter((p) => p.user_id).map((p) => p.user_id!) || [];
-        groupIds = permissions?.filter((p) => p.group_id).map((p) => p.group_id!) || [];
+        visibilityUserIds =
+          permissions?.filter((p) => p.user_id && (p.permission_type === "visibility" || p.permission_type === "view")).map((p) => p.user_id!) || [];
+        visibilityGroupIds =
+          permissions?.filter((p) => p.group_id && (p.permission_type === "visibility" || p.permission_type === "view")).map((p) => p.group_id!) || [];
+        startUserIds =
+          permissions?.filter((p) => p.user_id && (p.permission_type === "start" || p.permission_type === "execute")).map((p) => p.user_id!) || [];
+        startGroupIds =
+          permissions?.filter((p) => p.group_id && (p.permission_type === "start" || p.permission_type === "execute")).map((p) => p.group_id!) || [];
       }
 
-      setSelectedUsers(userIds);
-      setSelectedGroups(groupIds);
+      setVisibilityUsers(visibilityUserIds);
+      setVisibilityGroups(visibilityGroupIds);
+      setStartUsers(startUserIds);
+      setStartGroups(startGroupIds);
 
       // Fetch workflow statuses
       await fetchWorkflowStatuses(workflow.id);
     } else {
       setEditingWorkflow(null);
-      setPermissionType("public");
+      setVisibilityScope("all_company");
+      setStartScope("public");
       setFormData({ name: "", description: "", is_public: true, api_enabled: false }); // Default to public when creating new workflow
       setDataStructureFields([]);
-      setSelectedUsers([]);
-      setSelectedGroups([]);
+      setVisibilityUsers([]);
+      setVisibilityGroups([]);
+      setStartUsers([]);
+      setStartGroups([]);
       setSelectedCategoryId(categoryToUse); // Default to current category (captured at open time)
       setSelectedIcon(null);
       setPendingStatuses([]);
@@ -2386,107 +2434,99 @@ export default function WorkflowList() {
                 <div className="space-y-4">
                   <div className="border-b pb-2">
                     <h3 className="text-lg font-medium">Workflow Permissions</h3>
-                    <p className="text-sm text-muted-foreground">Control who can execute this workflow</p>
+                    <p className="text-sm text-muted-foreground">Control who can see and start this workflow</p>
                   </div>
-                  <RadioGroup
-                    value={permissionType}
-                    onValueChange={(value) => {
-                      setPermissionType(value as "public" | "specific");
-                      setFormData({ ...formData, is_public: value === "public" });
-                    }}
-                    className="space-y-3"
-                  >
-                    <div className="flex items-center space-x-2">
-                      <RadioGroupItem value="public" id="public" />
-                      <Label htmlFor="public" className="text-sm font-medium cursor-pointer">
-                        Public - Everyone in the company can execute this workflow
-                      </Label>
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      <RadioGroupItem value="specific" id="specific" />
-                      <Label htmlFor="specific" className="text-sm font-medium cursor-pointer">
-                        Specific - Only selected users and groups can execute
-                      </Label>
-                    </div>
-                  </RadioGroup>
-
-                  {permissionType === "specific" && (
-                    <div className="space-y-4 pl-6 border-l-2 border-muted bg-muted/20 p-4 rounded-md">
-                      <div className="space-y-3">
-                        <div className="space-y-2">
-                          <Label className="text-sm font-medium">Allowed Users</Label>
-                          <Select onValueChange={(value) => {
-                            if (!selectedUsers.includes(value)) {
-                              setSelectedUsers([...selectedUsers, value]);
-                            }
-                          }}>
-                            <SelectTrigger className="h-9">
-                              <SelectValue placeholder="Select users..." />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {users.filter(user => !selectedUsers.includes(user.id)).map((user) => (
-                                <SelectItem key={user.id} value={user.id}>
-                                  {user.full_name || user.email}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                          {selectedUsers.length > 0 && (
-                            <div className="flex flex-wrap gap-2">
-                              {selectedUsers.map((userId) => {
-                                const user = users.find(u => u.id === userId);
-                                return (
-                                  <Badge key={userId} variant="secondary" className="flex items-center gap-1 text-xs">
-                                    {user?.full_name || user?.email}
-                                    <X
-                                      className="h-3 w-3 cursor-pointer hover:text-destructive"
-                                      onClick={() => setSelectedUsers(selectedUsers.filter(id => id !== userId))}
-                                    />
-                                  </Badge>
-                                );
-                              })}
-                            </div>
-                          )}
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium">Visibility</Label>
+                      <RadioGroup
+                        value={visibilityScope}
+                        onValueChange={(value) => {
+                          setVisibilityScope(value as "all_company" | "specific");
+                        }}
+                        className="space-y-2"
+                      >
+                        <div className="flex items-center space-x-2">
+                          <RadioGroupItem value="all_company" id="list-visibility-all-company" />
+                          <Label htmlFor="list-visibility-all-company" className="text-sm cursor-pointer">
+                            All company
+                          </Label>
                         </div>
-
-                        <div className="space-y-2">
-                          <Label className="text-sm font-medium">Allowed Groups</Label>
-                          <Select onValueChange={(value) => {
-                            if (!selectedGroups.includes(value)) {
-                              setSelectedGroups([...selectedGroups, value]);
-                            }
-                          }}>
-                            <SelectTrigger className="h-9">
-                              <SelectValue placeholder="Select groups..." />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {groups.filter(group => !selectedGroups.includes(group.id)).map((group) => (
-                                <SelectItem key={group.id} value={group.id}>
-                                  {group.name}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                          {selectedGroups.length > 0 && (
-                            <div className="flex flex-wrap gap-2">
-                              {selectedGroups.map((groupId) => {
-                                const group = groups.find(g => g.id === groupId);
-                                return (
-                                  <Badge key={groupId} variant="secondary" className="flex items-center gap-1 text-xs">
-                                    {group?.name}
-                                    <X
-                                      className="h-3 w-3 cursor-pointer hover:text-destructive"
-                                      onClick={() => setSelectedGroups(selectedGroups.filter(id => id !== groupId))}
-                                    />
-                                  </Badge>
-                                );
-                              })}
-                            </div>
-                          )}
+                        <div className="flex items-center space-x-2">
+                          <RadioGroupItem value="specific" id="list-visibility-specific" />
+                          <Label htmlFor="list-visibility-specific" className="text-sm cursor-pointer">
+                            Specific users or groups
+                          </Label>
                         </div>
+                      </RadioGroup>
+                    </div>
+
+                    {visibilityScope === "specific" && (
+                      <div className="pl-6 border-l-2 border-muted bg-muted/20 p-4 rounded-md">
+                        <PermissionTargetPicker
+                          users={users}
+                          groups={groups}
+                          selectedUsers={visibilityUsers}
+                          selectedGroups={visibilityGroups}
+                          onSelectedUsersChange={setVisibilityUsers}
+                          onSelectedGroupsChange={setVisibilityGroups}
+                          confirmBeforeRemove
+                          labels={{
+                            users: "Visible to users",
+                            groups: "Visible to groups",
+                            usersPlaceholder: "Select users...",
+                            groupsPlaceholder: "Select groups...",
+                          }}
+                        />
                       </div>
+                    )}
+
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium">Start permission</Label>
+                      <RadioGroup
+                        value={startScope}
+                        onValueChange={(value) => {
+                          const next = value as "public" | "specific";
+                          setStartScope(next);
+                          setFormData({ ...formData, is_public: next === "public" });
+                        }}
+                        className="space-y-2"
+                      >
+                        <div className="flex items-center space-x-2">
+                          <RadioGroupItem value="public" id="list-start-public" />
+                          <Label htmlFor="list-start-public" className="text-sm cursor-pointer">
+                            Public (all company)
+                          </Label>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <RadioGroupItem value="specific" id="list-start-specific" />
+                          <Label htmlFor="list-start-specific" className="text-sm cursor-pointer">
+                            Specific users or groups
+                          </Label>
+                        </div>
+                      </RadioGroup>
                     </div>
-                  )}
+
+                    {startScope === "specific" && (
+                      <div className="pl-6 border-l-2 border-muted bg-muted/20 p-4 rounded-md">
+                        <PermissionTargetPicker
+                          users={users}
+                          groups={groups}
+                          selectedUsers={startUsers}
+                          selectedGroups={startGroups}
+                          onSelectedUsersChange={setStartUsers}
+                          onSelectedGroupsChange={setStartGroups}
+                          confirmBeforeRemove
+                          labels={{
+                            users: "Can start (users)",
+                            groups: "Can start (groups)",
+                            usersPlaceholder: "Select users...",
+                            groupsPlaceholder: "Select groups...",
+                          }}
+                        />
+                      </div>
+                    )}
+                  </div>
                 </div>
               </TabsContent>
 

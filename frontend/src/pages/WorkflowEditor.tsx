@@ -24,6 +24,7 @@ import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { useCompanyId } from "@/hooks/useCompanyId";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { PermissionTargetPicker } from "@/components/workflow/PermissionTargetPicker";
 
 export interface WorkflowStep {
   id: string;
@@ -56,6 +57,8 @@ interface Workflow {
   category_id?: string | null;
   icon?: string | null;
   is_public?: boolean;
+  visibility_scope?: "all_company" | "specific";
+  start_permission_scope?: "public" | "specific";
   api_enabled?: boolean;
   is_active?: boolean;
   portal_enabled?: boolean;
@@ -165,9 +168,12 @@ export default function WorkflowEditor() {
   const [dataStructureFields, setDataStructureFields] = useState<DataStructureField[]>([]);
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
   const [selectedIcon, setSelectedIcon] = useState<string | null>(null);
-  const [permissionType, setPermissionType] = useState<"public" | "specific">("public");
-  const [selectedUsers, setSelectedUsers] = useState<string[]>([]);
-  const [selectedGroups, setSelectedGroups] = useState<string[]>([]);
+  const [visibilityScope, setVisibilityScope] = useState<"all_company" | "specific">("all_company");
+  const [startScope, setStartScope] = useState<"public" | "specific">("public");
+  const [visibilityUsers, setVisibilityUsers] = useState<string[]>([]);
+  const [visibilityGroups, setVisibilityGroups] = useState<string[]>([]);
+  const [startUsers, setStartUsers] = useState<string[]>([]);
+  const [startGroups, setStartGroups] = useState<string[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
   const [categories, setCategories] = useState<WorkflowCategory[]>([]);
@@ -221,9 +227,12 @@ export default function WorkflowEditor() {
         dataStructureFields,
         selectedCategoryId,
         selectedIcon,
-        permissionType,
-        selectedUsers,
-        selectedGroups,
+        visibilityScope,
+        startScope,
+        visibilityUsers,
+        visibilityGroups,
+        startUsers,
+        startGroups,
         workflowStatuses,
         defaultStatusId,
       };
@@ -295,9 +304,12 @@ export default function WorkflowEditor() {
           dataStructureFields,
           selectedCategoryId,
           selectedIcon,
-          permissionType,
-          selectedUsers,
-          selectedGroups,
+          visibilityScope,
+          startScope,
+          visibilityUsers,
+          visibilityGroups,
+          startUsers,
+          startGroups,
           workflowStatuses,
           defaultStatusId,
         };
@@ -311,9 +323,12 @@ export default function WorkflowEditor() {
     dataStructureFields,
     selectedCategoryId,
     selectedIcon,
-    permissionType,
-    selectedUsers,
-    selectedGroups,
+    visibilityScope,
+    startScope,
+    visibilityUsers,
+    visibilityGroups,
+    startUsers,
+    startGroups,
     workflowStatuses,
     defaultStatusId,
     settingsDialogOpen,
@@ -738,9 +753,12 @@ export default function WorkflowEditor() {
         setDataStructureFields(savedState.dataStructureFields);
         setSelectedCategoryId(savedState.selectedCategoryId);
         setSelectedIcon(savedState.selectedIcon);
-        setPermissionType(savedState.permissionType);
-        setSelectedUsers(savedState.selectedUsers);
-        setSelectedGroups(savedState.selectedGroups);
+        setVisibilityScope(savedState.visibilityScope || "all_company");
+        setStartScope(savedState.startScope || "public");
+        setVisibilityUsers(savedState.visibilityUsers || []);
+        setVisibilityGroups(savedState.visibilityGroups || []);
+        setStartUsers(savedState.startUsers || []);
+        setStartGroups(savedState.startGroups || []);
         setWorkflowStatuses(savedState.workflowStatuses);
         setDefaultStatusId(savedState.defaultStatusId);
         
@@ -754,7 +772,9 @@ export default function WorkflowEditor() {
         setFormData({
           name: workflow.name,
           description: workflow.description || "",
-          is_public: workflowDataTyped?.is_public || false,
+          is_public: workflowDataTyped?.start_permission_scope
+            ? workflowDataTyped.start_permission_scope === "public"
+            : (workflowDataTyped?.is_public || false),
           api_enabled: workflowDataTyped?.api_enabled || false,
           is_active: workflowDataTyped?.is_active ?? true,
           portal_enabled: workflowDataTyped?.portal_enabled || false
@@ -785,17 +805,39 @@ export default function WorkflowEditor() {
             return 0;
           }));
 
-        // Set permission type
-        setPermissionType(workflowDataTyped?.is_public ? "public" : "specific");
+        setVisibilityScope(
+          workflowDataTyped?.visibility_scope === "specific" ? "specific" : "all_company"
+        );
+        setStartScope(
+          workflowDataTyped?.start_permission_scope === "specific" ? "specific" : "public"
+        );
 
-        const permissions = await api.get<{ user_id: string | null; group_id: string | null }[]>(
+        const permissions = await api.get<{ user_id: string | null; group_id: string | null; permission_type: string }[]>(
           `/api/companies/${companyId}/workflows/${id}/permissions`
         );
-        const userIds = permissions?.filter((p) => p.user_id).map((p) => p.user_id!) || [];
-        const groupIds = permissions?.filter((p) => p.group_id).map((p) => p.group_id!) || [];
+        const visibilityPermissionTypes = new Set(["visibility", "view"]);
+        const startPermissionTypes = new Set(["start", "execute"]);
 
-        setSelectedUsers(userIds);
-        setSelectedGroups(groupIds);
+        setVisibilityUsers(
+          permissions
+            ?.filter((p) => p.user_id && visibilityPermissionTypes.has(p.permission_type))
+            .map((p) => p.user_id!) || []
+        );
+        setVisibilityGroups(
+          permissions
+            ?.filter((p) => p.group_id && visibilityPermissionTypes.has(p.permission_type))
+            .map((p) => p.group_id!) || []
+        );
+        setStartUsers(
+          permissions
+            ?.filter((p) => p.user_id && startPermissionTypes.has(p.permission_type))
+            .map((p) => p.user_id!) || []
+        );
+        setStartGroups(
+          permissions
+            ?.filter((p) => p.group_id && startPermissionTypes.has(p.permission_type))
+            .map((p) => p.group_id!) || []
+        );
 
         // Fetch workflow statuses
         await fetchWorkflowStatuses(id);
@@ -823,7 +865,9 @@ export default function WorkflowEditor() {
       await api.patch(`/api/companies/${companyId}/workflows/${id}`, {
         name: formData.name,
         description: formData.description,
-        is_public: formData.is_public,
+        is_public: startScope === "public",
+        visibility_scope: visibilityScope,
+        start_permission_scope: startScope,
         api_enabled: formData.api_enabled,
         is_active: formData.is_active,
         portal_enabled: formData.portal_enabled,
@@ -1285,13 +1329,21 @@ export default function WorkflowEditor() {
         `/api/companies/${companyId}/workflows/${workflowId}/permissions/${p.id}`
       );
     }
-    if (!formData.is_public) {
-      const base = `/api/companies/${companyId}/workflows/${workflowId}/permissions`;
-      for (const userId of selectedUsers) {
-        await api.post(base, { user_id: userId, permission_type: "execute" });
+    const base = `/api/companies/${companyId}/workflows/${workflowId}/permissions`;
+    if (visibilityScope === "specific") {
+      for (const userId of visibilityUsers) {
+        await api.post(base, { user_id: userId, permission_type: "visibility" });
       }
-      for (const groupId of selectedGroups) {
-        await api.post(base, { group_id: groupId, permission_type: "execute" });
+      for (const groupId of visibilityGroups) {
+        await api.post(base, { group_id: groupId, permission_type: "visibility" });
+      }
+    }
+    if (startScope === "specific") {
+      for (const userId of startUsers) {
+        await api.post(base, { user_id: userId, permission_type: "start" });
+      }
+      for (const groupId of startGroups) {
+        await api.post(base, { group_id: groupId, permission_type: "start" });
       }
     }
   };
@@ -1898,105 +1950,97 @@ export default function WorkflowEditor() {
                     <h3 className="text-lg font-medium">{t("workflowEditor.permissions")}</h3>
                     <p className="text-sm text-muted-foreground">{t("workflowEditor.permissionsDesc")}</p>
                   </div>
-                  <RadioGroup
-                    value={permissionType}
-                    onValueChange={(value) => {
-                      setPermissionType(value as "public" | "specific");
-                      setFormData({ ...formData, is_public: value === "public" });
-                    }}
-                    className="space-y-3"
-                  >
-                    <div className="flex items-center space-x-2">
-                      <RadioGroupItem value="public" id="public" />
-                      <Label htmlFor="public" className="text-sm font-medium cursor-pointer">
-                        {t("workflowEditor.public")}
-                      </Label>
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      <RadioGroupItem value="specific" id="specific" />
-                      <Label htmlFor="specific" className="text-sm font-medium cursor-pointer">
-                        {t("workflowEditor.specific")}
-                      </Label>
-                    </div>
-                  </RadioGroup>
-
-                  {permissionType === "specific" && (
-                    <div className="space-y-4 pl-6 border-l-2 border-muted bg-muted/20 p-4 rounded-md">
-                      <div className="space-y-3">
-                        <div className="space-y-2">
-                          <Label className="text-sm font-medium">{t("workflowEditor.allowedUsers")}</Label>
-                          <Select onValueChange={(value) => {
-                            if (!selectedUsers.includes(value)) {
-                              setSelectedUsers([...selectedUsers, value]);
-                            }
-                          }}>
-                            <SelectTrigger className="h-9">
-                              <SelectValue placeholder={t("workflowEditor.selectUsers")} />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {users.filter(user => !selectedUsers.includes(user.id)).map((user) => (
-                                <SelectItem key={user.id} value={user.id}>
-                                  {user.full_name || user.email}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                          {selectedUsers.length > 0 && (
-                            <div className="flex flex-wrap gap-2">
-                              {selectedUsers.map((userId) => {
-                                const user = users.find(u => u.id === userId);
-                                return (
-                                  <Badge key={userId} variant="secondary" className="flex items-center gap-1 text-xs">
-                                    {user?.full_name || user?.email}
-                                    <X
-                                      className="h-3 w-3 cursor-pointer hover:text-destructive"
-                                      onClick={() => setSelectedUsers(selectedUsers.filter(id => id !== userId))}
-                                    />
-                                  </Badge>
-                                );
-                              })}
-                            </div>
-                          )}
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium">Visibility</Label>
+                      <RadioGroup
+                        value={visibilityScope}
+                        onValueChange={(value) => {
+                          setVisibilityScope(value as "all_company" | "specific");
+                        }}
+                        className="space-y-2"
+                      >
+                        <div className="flex items-center space-x-2">
+                          <RadioGroupItem value="all_company" id="visibility-all-company" />
+                          <Label htmlFor="visibility-all-company" className="text-sm cursor-pointer">
+                            All company
+                          </Label>
                         </div>
-
-                        <div className="space-y-2">
-                          <Label className="text-sm font-medium">{t("workflowEditor.allowedGroups")}</Label>
-                          <Select onValueChange={(value) => {
-                            if (!selectedGroups.includes(value)) {
-                              setSelectedGroups([...selectedGroups, value]);
-                            }
-                          }}>
-                            <SelectTrigger className="h-9">
-                              <SelectValue placeholder={t("workflowEditor.selectGroups")} />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {groups.filter(group => !selectedGroups.includes(group.id)).map((group) => (
-                                <SelectItem key={group.id} value={group.id}>
-                                  {group.name}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                          {selectedGroups.length > 0 && (
-                            <div className="flex flex-wrap gap-2">
-                              {selectedGroups.map((groupId) => {
-                                const group = groups.find(g => g.id === groupId);
-                                return (
-                                  <Badge key={groupId} variant="secondary" className="flex items-center gap-1 text-xs">
-                                    {group?.name}
-                                    <X
-                                      className="h-3 w-3 cursor-pointer hover:text-destructive"
-                                      onClick={() => setSelectedGroups(selectedGroups.filter(id => id !== groupId))}
-                                    />
-                                  </Badge>
-                                );
-                              })}
-                            </div>
-                          )}
+                        <div className="flex items-center space-x-2">
+                          <RadioGroupItem value="specific" id="visibility-specific" />
+                          <Label htmlFor="visibility-specific" className="text-sm cursor-pointer">
+                            Specific users or groups
+                          </Label>
                         </div>
+                      </RadioGroup>
+                    </div>
+
+                    {visibilityScope === "specific" && (
+                      <div className="pl-6 border-l-2 border-muted bg-muted/20 p-4 rounded-md">
+                        <PermissionTargetPicker
+                          users={users}
+                          groups={groups}
+                          selectedUsers={visibilityUsers}
+                          selectedGroups={visibilityGroups}
+                          onSelectedUsersChange={setVisibilityUsers}
+                          onSelectedGroupsChange={setVisibilityGroups}
+                          confirmBeforeRemove
+                          labels={{
+                            users: "Visible to users",
+                            groups: "Visible to groups",
+                            usersPlaceholder: t("workflowEditor.selectUsers"),
+                            groupsPlaceholder: t("workflowEditor.selectGroups"),
+                          }}
+                        />
                       </div>
+                    )}
+
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium">Start permission</Label>
+                      <RadioGroup
+                        value={startScope}
+                        onValueChange={(value) => {
+                          const nextScope = value as "public" | "specific";
+                          setStartScope(nextScope);
+                          setFormData({ ...formData, is_public: nextScope === "public" });
+                        }}
+                        className="space-y-2"
+                      >
+                        <div className="flex items-center space-x-2">
+                          <RadioGroupItem value="public" id="start-public" />
+                          <Label htmlFor="start-public" className="text-sm cursor-pointer">
+                            Public (all company)
+                          </Label>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <RadioGroupItem value="specific" id="start-specific" />
+                          <Label htmlFor="start-specific" className="text-sm cursor-pointer">
+                            Specific users or groups
+                          </Label>
+                        </div>
+                      </RadioGroup>
                     </div>
-                  )}
+
+                    {startScope === "specific" && (
+                      <div className="pl-6 border-l-2 border-muted bg-muted/20 p-4 rounded-md">
+                        <PermissionTargetPicker
+                          users={users}
+                          groups={groups}
+                          selectedUsers={startUsers}
+                          selectedGroups={startGroups}
+                          onSelectedUsersChange={setStartUsers}
+                          onSelectedGroupsChange={setStartGroups}
+                          confirmBeforeRemove
+                          labels={{
+                            users: "Can start (users)",
+                            groups: "Can start (groups)",
+                            usersPlaceholder: t("workflowEditor.selectUsers"),
+                            groupsPlaceholder: t("workflowEditor.selectGroups"),
+                          }}
+                        />
+                      </div>
+                    )}
+                  </div>
                 </div>
               </TabsContent>
 

@@ -13,7 +13,10 @@ const shouldPollForStep = (executionSteps: any[] | undefined): boolean => {
   if (!executionSteps) return false;
 
   const runningStep = executionSteps.find((s: any) => s.status === "running");
-  if (!runningStep) return false;
+  if (!runningStep) {
+    // Keep polling while waiting for an assigned pending step to turn running.
+    return executionSteps.some((s: any) => s.status === "pending");
+  }
 
   const step = runningStep.step || runningStep.workflow_steps;
   const stepType = step?.step_type;

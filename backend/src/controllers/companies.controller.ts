@@ -34,6 +34,20 @@ async function ensureCompanyAccess(req: AuthRequest, companyId: string, requireA
   return { userCompany };
 }
 
+async function getUserGroupIdsForCompany(userId: string, companyId: string): Promise<string[]> {
+  const memberships = await prisma.profileGroupMember.findMany({
+    where: {
+      profile_id: userId,
+      group: { company_id: companyId },
+    },
+    select: { group_id: true },
+  });
+
+  return memberships
+    .map((membership) => membership.group_id)
+    .filter((id): id is string => id !== null);
+}
+
 export const companiesController = {
   /**
    * GET /api/companies
@@ -385,6 +399,7 @@ export const companiesController = {
   async listExecutions(req: AuthRequest, res: Response) {
     try {
       const { companyId } = req.params;
+      const userId = req.user?.id;
       const workflowId = req.query.workflowId as string | undefined;
       const status = req.query.status as string | undefined;
       const categoryId = req.query.categoryId as string | undefined;
@@ -398,8 +413,11 @@ export const companiesController = {
       if (access.error) {
         return res.status(access.error.status).json(access.error.body);
       }
+      if (!req.user?.super_admin && !userId) {
+        return res.status(401).json({ error: 'Unauthorized', details: 'Authentication required' });
+      }
 
-      const where: { company_id: string; workflow_id?: string; status?: string; workflow?: { category_id: string | null } } = {
+      const where: Prisma.WorkflowExecutionWhereInput = {
         company_id: companyId,
       };
       if (workflowId) where.workflow_id = workflowId;
@@ -408,21 +426,143 @@ export const companiesController = {
         where.workflow = { category_id: categoryId || null };
       }
 
+      const isPrivileged = req.user?.super_admin === true;
+      let userGroupIds: string[] = [];
+      if (!isPrivileged && userId) {
+        userGroupIds = await getUserGroupIdsForCompany(userId, companyId);
+        const existingAnd = Array.isArray(where.AND)
+          ? where.AND
+          : (where.AND ? [where.AND] : []);
+        const visibilityPermissionTypes = ['visibility', 'view'];
+        const assignmentFilters: Prisma.WorkflowExecutionStepWhereInput[] = [
+          { assigned_to_user_id: userId },
+        ];
+        if (userGroupIds.length > 0) {
+          assignmentFilters.push({ assigned_to_group_id: { in: userGroupIds } });
+        }
+
+        where.AND = [
+          ...existingAnd,
+          {
+            OR: [
+              {
+                workflow: {
+                  OR: [
+                    { visibility_scope: 'all_company' },
+                    { is_public: true }, // Legacy compatibility
+                    { permissions: { some: { user_id: userId, permission_type: { in: visibilityPermissionTypes } } } },
+                    ...(userGroupIds.length > 0
+                      ? [{ permissions: { some: { group_id: { in: userGroupIds }, permission_type: { in: visibilityPermissionTypes } } } }]
+                      : []),
+                  ],
+                },
+              },
+              {
+                execution_steps: {
+                  some: {
+                    OR: assignmentFilters,
+                  },
+                },
+              },
+            ],
+          },
+        ];
+      }
+
       const executions = await prisma.workflowExecution.findMany({
-        where: where as Prisma.WorkflowExecutionWhereInput,
+        where,
         orderBy: { created_at: 'desc' },
         include: {
           workflow: {
             select: { id: true, name: true, category_id: true, icon: true },
           },
           current_step: { select: { name: true } },
+          ...(!isPrivileged && userId
+            ? {
+                execution_steps: {
+                  select: {
+                    step: { select: { name: true } },
+                    assigned_user: { select: { full_name: true, email: true } },
+                    assigned_group: { select: { name: true } },
+                    status: true,
+                    assigned_to_user_id: true,
+                    assigned_to_group_id: true,
+                  },
+                },
+              }
+            : {}),
           ...(includeData ? { execution_data_records: true } : {}),
         },
       });
 
-      return res.json(executions.map((e) => {
+      const filteredExecutions = (!isPrivileged && userId)
+        ? executions.filter((execution: any) => {
+            const steps = (execution.execution_steps || []) as Array<{
+              status: string;
+              assigned_to_user_id: string | null;
+              assigned_to_group_id: string | null;
+            }>;
+            const isAssigned = (step: { assigned_to_user_id: string | null; assigned_to_group_id: string | null }) =>
+              step.assigned_to_user_id === userId ||
+              (step.assigned_to_group_id && userGroupIds.includes(step.assigned_to_group_id));
+
+            if (execution.status === 'completed') {
+              return steps.some(isAssigned);
+            }
+
+            const runningAssigned = steps.some((step) => step.status === 'running' && isAssigned(step));
+            if (runningAssigned) return true;
+
+            // Fallback for workflows waiting to start/advance.
+            return steps.some((step) => step.status === 'pending' && isAssigned(step));
+          })
+        : executions;
+
+      return res.json(filteredExecutions.map((e: any) => {
         const ex = e as typeof e & { current_step?: { name: string | null } };
-        return { ...ex, current_step_name: ex.current_step?.name ?? null };
+        const executionSteps = ((e.execution_steps || []) as Array<{
+          status: string;
+          step?: { name?: string | null } | null;
+          assigned_to_user_id: string | null;
+          assigned_to_group_id: string | null;
+          assigned_user?: { full_name: string | null; email: string } | null;
+          assigned_group?: { name: string } | null;
+        }>);
+        const runningSteps = executionSteps.filter((step) => step.status === 'running');
+        const currentStepNames = runningSteps
+          .map((step) => step.step?.name)
+          .filter((name): name is string => !!name);
+
+        const assignees: Array<{ type: 'user' | 'group'; name: string }> = [];
+        const assigneeKeys = new Set<string>();
+        runningSteps.forEach((step) => {
+          if (step.assigned_to_user_id) {
+            const name = step.assigned_user?.full_name || step.assigned_user?.email || step.assigned_to_user_id;
+            const key = `user:${name}`;
+            if (!assigneeKeys.has(key)) {
+              assigneeKeys.add(key);
+              assignees.push({ type: 'user', name });
+            }
+          }
+          if (step.assigned_to_group_id) {
+            const name = step.assigned_group?.name || step.assigned_to_group_id;
+            const key = `group:${name}`;
+            if (!assigneeKeys.has(key)) {
+              assigneeKeys.add(key);
+              assignees.push({ type: 'group', name });
+            }
+          }
+        });
+
+        if ('execution_steps' in ex) {
+          delete (ex as any).execution_steps;
+        }
+        return {
+          ...ex,
+          current_step_name: currentStepNames[0] ?? ex.current_step?.name ?? null,
+          current_step_names: currentStepNames.length > 0 ? currentStepNames : undefined,
+          assignees: assignees.length > 0 ? assignees : undefined,
+        };
       }));
     } catch (error) {
       console.error('listExecutions error:', error);
@@ -439,13 +579,31 @@ export const companiesController = {
   async listExecutionSteps(req: AuthRequest, res: Response) {
     try {
       const { companyId } = req.params;
+      const userId = req.user?.id;
       const status = (req.query.status as string) || 'running';
       if (!companyId) return res.status(400).json({ error: 'Missing company ID' });
       const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
+      if (!req.user?.super_admin && !userId) {
+        return res.status(401).json({ error: 'Unauthorized', details: 'Authentication required' });
+      }
+
+      const isPrivileged = req.user?.super_admin === true;
+      const stepWhere: Prisma.WorkflowExecutionStepWhereInput = {
+        company_id: companyId,
+        status: status as any,
+      };
+
+      if (!isPrivileged && userId) {
+        const userGroupIds = await getUserGroupIdsForCompany(userId, companyId);
+        stepWhere.OR = [
+          { assigned_to_user_id: userId },
+          ...(userGroupIds.length > 0 ? [{ assigned_to_group_id: { in: userGroupIds } }] : []),
+        ];
+      }
 
       const steps = await prisma.workflowExecutionStep.findMany({
-        where: { company_id: companyId, status: status as any },
+        where: stepWhere,
         select: {
           execution_id: true,
           assigned_to_user_id: true,

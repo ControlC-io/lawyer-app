@@ -24,6 +24,42 @@ async function ensureCompanyAccess(req: AuthRequest, companyId: string, requireA
   return { userCompany };
 }
 
+type WorkflowPermissionType = 'visibility' | 'start';
+
+async function getUserGroupIds(userId: string): Promise<string[]> {
+  if (!prisma.profileGroupMember || typeof prisma.profileGroupMember.findMany !== 'function') {
+    return [];
+  }
+
+  const groups = await prisma.profileGroupMember.findMany({
+    where: { profile_id: userId },
+    select: { group_id: true },
+  });
+
+  return groups.map((g) => g.group_id).filter((id): id is string => id !== null);
+}
+
+function getPermissionTypeFallbacks(type: WorkflowPermissionType): string[] {
+  if (type === 'visibility') return ['visibility', 'view'];
+  return ['start', 'execute'];
+}
+
+function normalizeWorkflowPermissionType(rawType: unknown): string {
+  if (typeof rawType !== 'string') return 'view';
+  const type = rawType.trim().toLowerCase();
+  if (type === 'visibility') return 'visibility';
+  if (type === 'start') return 'start';
+  if (type === 'execute') return 'execute';
+  if (type === 'view') return 'view';
+  return 'view';
+}
+
+function legacyWorkflowPermissionType(type: string): string {
+  if (type === 'visibility') return 'view';
+  if (type === 'start') return 'execute';
+  return type;
+}
+
 export const workflowDefinitionController = {
   /** GET /api/companies/:companyId/workflows - list workflows user has permission to execute */
   async listWorkflows(req: AuthRequest, res: Response) {
@@ -41,12 +77,7 @@ export const workflowDefinitionController = {
         return res.status(401).json({ error: 'Unauthorized' });
       }
 
-      // Get user's group IDs for permission checking
-      const userGroups = await prisma.profileGroupMember.findMany({
-        where: { profile_id: userId },
-        select: { group_id: true },
-      });
-      const userGroupIds = userGroups.map((g) => g.group_id).filter((id): id is string => id !== null);
+      const userGroupIds = await getUserGroupIds(userId);
 
       // Build the base where clause
       const baseWhere: { company_id: string; category_id?: string | null } = { company_id: companyId };
@@ -54,18 +85,17 @@ export const workflowDefinitionController = {
         baseWhere.category_id = (rawCategoryId === '' || rawCategoryId === 'null') ? null : rawCategoryId;
       }
 
-      // Fetch workflows that user has permission to execute:
-      // - is_public = true (available to all company users), OR
-      // - user has a direct permission, OR
-      // - user belongs to a group with permission
+      const visibilityTypes = getPermissionTypeFallbacks('visibility');
       const workflows = await prisma.workflow.findMany({
         where: {
           ...baseWhere,
           OR: [
+            { visibility_scope: 'all_company' },
+            // Backward compatibility for records created before visibility scopes.
             { is_public: true },
-            { permissions: { some: { user_id: userId } } },
+            { permissions: { some: { user_id: userId, permission_type: { in: visibilityTypes } } } },
             ...(userGroupIds.length > 0
-              ? [{ permissions: { some: { group_id: { in: userGroupIds } } } }]
+              ? [{ permissions: { some: { group_id: { in: userGroupIds }, permission_type: { in: visibilityTypes } } } }]
               : []),
           ],
         },
@@ -136,7 +166,7 @@ export const workflowDefinitionController = {
 
       const workflow = await prisma.workflow.findFirst({
         where: { id: workflowId, company_id: companyId },
-        select: { id: true, is_active: true },
+        select: { id: true, is_active: true, is_public: true, start_permission_scope: true },
       });
       if (!workflow) {
         return res.status(404).json({ error: 'Workflow not found or access denied' });
@@ -146,6 +176,35 @@ export const workflowDefinitionController = {
           error: 'Workflow is not active',
           details: 'This workflow cannot be started because it is inactive',
         });
+      }
+
+      const startPermissionTypes = getPermissionTypeFallbacks('start');
+      const canStartByScope = workflow.start_permission_scope === 'public' || workflow.is_public === true;
+      const supportsWorkflowPermissions = !!(
+        prisma.workflowPermission &&
+        typeof prisma.workflowPermission.findFirst === 'function'
+      );
+
+      if (!canStartByScope && supportsWorkflowPermissions) {
+        const userGroupIds = await getUserGroupIds(userId);
+        const explicitStartPermission = await prisma.workflowPermission.findFirst({
+          where: {
+            workflow_id: workflowId,
+            permission_type: { in: startPermissionTypes },
+            OR: [
+              { user_id: userId },
+              ...(userGroupIds.length > 0 ? [{ group_id: { in: userGroupIds } }] : []),
+            ],
+          },
+          select: { id: true },
+        });
+
+        if (!explicitStartPermission) {
+          return res.status(403).json({
+            error: 'Forbidden',
+            details: 'You do not have permission to start this workflow',
+          });
+        }
       }
 
       const executionId = await workflowService.createExecutionAndStart(companyId, workflowId, {
@@ -183,6 +242,8 @@ export const workflowDefinitionController = {
           name: typeof body.name === 'string' ? body.name.trim() : 'New Workflow',
           description: typeof body.description === 'string' ? body.description : null,
           is_public: !!body.is_public,
+          visibility_scope: body.visibility_scope === 'specific' ? 'specific' : 'all_company',
+          start_permission_scope: body.start_permission_scope === 'specific' ? 'specific' : 'public',
           api_enabled: !!body.api_enabled,
           file_enabled: !!body.file_enabled,
           is_active: body.is_active !== false,
@@ -215,6 +276,12 @@ export const workflowDefinitionController = {
       if (typeof body.name === 'string') updateData.name = body.name.trim();
       if (typeof body.description === 'string') updateData.description = body.description;
       if (typeof body.is_public === 'boolean') updateData.is_public = body.is_public;
+      if (typeof body.visibility_scope === 'string') {
+        updateData.visibility_scope = body.visibility_scope === 'specific' ? 'specific' : 'all_company';
+      }
+      if (typeof body.start_permission_scope === 'string') {
+        updateData.start_permission_scope = body.start_permission_scope === 'specific' ? 'specific' : 'public';
+      }
       if (typeof body.api_enabled === 'boolean') updateData.api_enabled = body.api_enabled;
       if (typeof body.file_enabled === 'boolean') updateData.file_enabled = body.file_enabled;
       if (typeof body.is_active === 'boolean') updateData.is_active = body.is_active;
@@ -338,6 +405,38 @@ export const workflowDefinitionController = {
 
       if (!Array.isArray(steps)) {
         return res.status(400).json({ error: 'Invalid body', details: 'steps must be an array' });
+      }
+
+      const isStepAssigned = (step: Record<string, any>): boolean => {
+        const config = (step.config ?? {}) as Record<string, any>;
+        const assignToExecutionCreator = config.assign_to_execution_creator !== false;
+        return Boolean(
+          assignToExecutionCreator ||
+          step.assigned_to_user_id ||
+          step.assigned_to_group_id ||
+          config.assigned_to_user_id ||
+          config.assigned_to_group_id
+        );
+      };
+
+      for (const step of steps as Array<Record<string, any>>) {
+        const stepType = step.step_type || 'action';
+        const actionType = step.action_type || 'manual';
+        const decisionNodeType = step.decision_node_type || 'Human';
+        const config = (step.config ?? {}) as Record<string, any>;
+        const isExternalForm = stepType === 'edit_form' && config.allow_external_assignment === true;
+
+        const requiresAssignment =
+          (stepType === 'action' && actionType === 'manual') ||
+          (stepType === 'decision' && ['Human', 'Agent_Human', 'Agent + Human'].includes(decisionNodeType)) ||
+          (stepType === 'edit_form' && !isExternalForm);
+
+        if (requiresAssignment && !isStepAssigned(step)) {
+          return res.status(400).json({
+            error: 'Invalid step assignment',
+            details: `Step "${step.name || 'Unnamed step'}" requires a user or group assignment`,
+          });
+        }
       }
 
       const existing = await prisma.workflowStep.findMany({
@@ -699,6 +798,7 @@ export const workflowDefinitionController = {
     try {
       const { companyId, workflowId } = req.params;
       const { user_id, group_id, permission_type } = req.body || {};
+      const normalizedType = normalizeWorkflowPermissionType(permission_type);
       if (!companyId || !workflowId) {
         return res.status(400).json({ error: 'Missing company ID or workflow ID' });
       }
@@ -719,15 +819,36 @@ export const workflowDefinitionController = {
         return res.status(404).json({ error: 'Workflow not found', details: 'Workflow not found or access denied' });
       }
 
-      const perm = await prisma.workflowPermission.create({
-        data: {
-          workflow_id: workflowId,
-          company_id: companyId,
-          user_id: user_id || null,
-          group_id: group_id || null,
-          permission_type: typeof permission_type === 'string' ? permission_type : 'view',
-        },
-      });
+      let perm;
+      try {
+        perm = await prisma.workflowPermission.create({
+          data: {
+            workflow_id: workflowId,
+            company_id: companyId,
+            user_id: user_id || null,
+            group_id: group_id || null,
+            permission_type: normalizedType,
+          },
+        });
+      } catch (error: any) {
+        const pgCode = error?.code || error?.meta?.code || error?.meta?.cause?.code;
+        const legacyType = legacyWorkflowPermissionType(normalizedType);
+        const isPermissionConstraintError =
+          (pgCode === '23514' || `${error?.message || ''}`.includes('workflow_permissions_permission_type_check')) &&
+          legacyType !== normalizedType;
+
+        if (!isPermissionConstraintError) throw error;
+
+        perm = await prisma.workflowPermission.create({
+          data: {
+            workflow_id: workflowId,
+            company_id: companyId,
+            user_id: user_id || null,
+            group_id: group_id || null,
+            permission_type: legacyType,
+          },
+        });
+      }
       return res.status(201).json(perm);
     } catch (error) {
       console.error('addPermission error:', error);

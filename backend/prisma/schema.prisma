@@ -479,6 +479,8 @@ model Workflow {
   company_id        String?            @db.Uuid
   file_enabled      Boolean            @default(false)
   is_public         Boolean            @default(false)
+  visibility_scope  String             @default("all_company")
+  start_permission_scope String        @default("public")
   api_enabled       Boolean            @default(false)
   data_structure    Json?              @default("[]")
   category_id       String?            @db.Uuid

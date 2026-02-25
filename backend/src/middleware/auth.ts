@@ -43,34 +43,8 @@ export const authMiddleware = async (req: AuthRequest, res: Response, next: Next
     }
   }
 
-  // 2. Check for x-api-key: super_admin first, then company
-  if (apiKey && typeof apiKey === 'string') {
-    if (superAdminApiKey && apiKey === superAdminApiKey) {
-      req.user = {
-        id: SUPER_ADMIN_API_USER_ID,
-        email: 'superadmin@api',
-        super_admin: true,
-      };
-      return next();
-    }
-    try {
-      const company = await prisma.company.findUnique({
-        where: { api_key: apiKey },
-      });
-
-      if (company && company.is_active) {
-        req.company = {
-          id: company.id,
-          name: company.name,
-        };
-        return next();
-      }
-    } catch (error) {
-      console.error('API Key validation error:', error);
-    }
-  }
-
-  // 3. Check for JWT (User authorization)
+  // 2. Check for JWT (User authorization) first when present.
+  // This prevents user-scoped endpoints from being widened by x-api-key.
   if (authHeader && authHeader.startsWith('Bearer ')) {
     const token = authHeader.split(' ')[1];
 
@@ -96,7 +70,37 @@ export const authMiddleware = async (req: AuthRequest, res: Response, next: Next
         return next();
       }
     } catch (error) {
-      return res.status(401).json({ error: 'Invalid or expired token' });
+      // If an API key is also present, allow fallback to API key auth.
+      if (!apiKey) {
+        return res.status(401).json({ error: 'Invalid or expired token' });
+      }
+    }
+  }
+
+  // 3. Check for x-api-key: super_admin first, then company
+  if (apiKey && typeof apiKey === 'string') {
+    if (superAdminApiKey && apiKey === superAdminApiKey) {
+      req.user = {
+        id: SUPER_ADMIN_API_USER_ID,
+        email: 'superadmin@api',
+        super_admin: true,
+      };
+      return next();
+    }
+    try {
+      const company = await prisma.company.findUnique({
+        where: { api_key: apiKey },
+      });
+
+      if (company && company.is_active) {
+        req.company = {
+          id: company.id,
+          name: company.name,
+        };
+        return next();
+      }
+    } catch (error) {
+      console.error('API Key validation error:', error);
     }
   }
 

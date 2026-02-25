@@ -1031,7 +1031,7 @@ export const ExecutionDataPanel = ({
       // For Array fields, use arrayItems state
       const isArray = (def.type || def.field_type) === "array";
       const arrayValue = isArray ? form.arrayItems[fieldUuid] || [] : undefined;
-      const disabled = fieldConfig?.readonly === true;
+      const disabled = fieldConfig?.readonly === true || !canCompleteStep;
 
       // Determine required state (fully driven by centralized rules)
       const required = evaluateFieldRules(fieldUuid, "required", renderFieldRules, currentValues, false);
@@ -1357,7 +1357,7 @@ export const ExecutionDataPanel = ({
             // For Array fields, use arrayItems state
             const isArray = (def.type || def.field_type) === "array";
             const arrayValue = isArray ? form.arrayItems[fieldUuid] || [] : undefined;
-            const disabled = fieldConfig?.readonly === true;
+            const disabled = fieldConfig?.readonly === true || !canCompleteStep;
 
             // Determine required state (fully driven by centralized rules)
             const required = evaluateFieldRules(fieldUuid, "required", renderFieldRules, currentValues, false);
@@ -1856,6 +1856,14 @@ export const ExecutionDataPanel = ({
                     size="sm"
                     variant="outline"
                     onClick={async () => {
+                      if (!canCompleteStep) {
+                        toast({
+                          title: t("common.error"),
+                          description: t("executionDataPanel.unauthorizedStep"),
+                          variant: "destructive"
+                        });
+                        return;
+                      }
                       setIsSaving(true);
                       try {
                         await saveFormValues();
@@ -1874,7 +1882,7 @@ export const ExecutionDataPanel = ({
                         setIsSaving(false);
                       }
                     }}
-                    disabled={isSaving}
+                    disabled={!canCompleteStep || isSaving}
                   >
                     {isSaving ? (
                       <>

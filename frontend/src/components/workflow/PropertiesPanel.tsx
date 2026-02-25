@@ -22,6 +22,7 @@ import { FieldRulesEditor } from "./FieldRulesEditor";
 import { FieldValidationsEditor } from "./FieldValidationsEditor";
 import { getIconComponent } from "@/lib/iconUtils";
 import { Folder } from "lucide-react";
+import { PermissionTargetPicker } from "./PermissionTargetPicker";
 
 type KeyValuePair = { key: string; value: string; mode?: "static" | "bind" };
 
@@ -64,6 +65,11 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
 
   // Default to assign to execution creator (true) if not set
   const assignToExecutionCreator = step.config.assign_to_execution_creator !== false;
+  const requiresExplicitAssignment =
+    (step.step_type === "action" && (step.action_type || "manual") === "manual") ||
+    (step.step_type === "decision" && ["Human", "Agent_Human", "Agent + Human"].includes(step.decision_node_type || "Human")) ||
+    (step.step_type === "edit_form" && step.config.allow_external_assignment !== true);
+  const hasExplicitAssignment = Boolean(step.config.assigned_to_user_id || step.config.assigned_to_group_id);
   const [selectedConfigId, setSelectedConfigId] = useState<string>(
     step.config.api_configuration_id || "none"
   );
@@ -651,67 +657,50 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
 
             {!assignToExecutionCreator && (
               <>
-                <div className="space-y-2">
-                  <Label htmlFor="assigned-user">Assigned to User</Label>
-                  <Select
-                    value={step.config.assigned_to_user_id || "none"}
-                    onValueChange={(value) => {
-                      // Clear group when user is selected
-                      const newConfig = {
+                <PermissionTargetPicker
+                  users={users}
+                  groups={groups}
+                  selectedUsers={step.config.assigned_to_user_id ? [step.config.assigned_to_user_id] : []}
+                  selectedGroups={step.config.assigned_to_group_id ? [step.config.assigned_to_group_id] : []}
+                  onSelectedUsersChange={(ids) => {
+                    const selectedId = ids[ids.length - 1] || "";
+                    onUpdateStep({
+                      ...step,
+                      config: {
                         ...step.config,
-                        assigned_to_user_id: value === "none" ? "" : value,
-                        assigned_to_group_id: value !== "none" ? "" : step.config.assigned_to_group_id,
-                      };
-                      onUpdateStep({
-                        ...step,
-                        config: newConfig,
-                      });
-                    }}
-                  >
-                    <SelectTrigger id="assigned-user">
-                      <SelectValue placeholder="Select user" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">No user assigned</SelectItem>
-                      {users.map((user) => (
-                        <SelectItem key={user.id} value={user.id}>
-                          {user.full_name || user.email}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+                        assigned_to_user_id: selectedId,
+                        assigned_to_group_id: selectedId ? "" : step.config.assigned_to_group_id,
+                      },
+                    });
+                  }}
+                  onSelectedGroupsChange={(ids) => {
+                    const selectedId = ids[ids.length - 1] || "";
+                    onUpdateStep({
+                      ...step,
+                      config: {
+                        ...step.config,
+                        assigned_to_group_id: selectedId,
+                        assigned_to_user_id: selectedId ? "" : step.config.assigned_to_user_id,
+                      },
+                    });
+                  }}
+                  allowNoneOption
+                  noneLabel="No assignment"
+                  labels={{
+                    users: "Assigned user",
+                    groups: "Assigned group",
+                    usersPlaceholder: "Select user",
+                    groupsPlaceholder: "Select group",
+                  }}
+                />
 
-                <div className="space-y-2">
-                  <Label htmlFor="assigned-group">Assigned to Group</Label>
-                  <Select
-                    value={step.config.assigned_to_group_id || "none"}
-                    onValueChange={(value) => {
-                      // Clear user when group is selected
-                      const newConfig = {
-                        ...step.config,
-                        assigned_to_group_id: value === "none" ? "" : value,
-                        assigned_to_user_id: value !== "none" ? "" : step.config.assigned_to_user_id,
-                      };
-                      onUpdateStep({
-                        ...step,
-                        config: newConfig,
-                      });
-                    }}
-                  >
-                    <SelectTrigger id="assigned-group">
-                      <SelectValue placeholder="Select group" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">No group assigned</SelectItem>
-                      {groups.map((group) => (
-                        <SelectItem key={group.id} value={group.id}>
-                          {group.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+                {requiresExplicitAssignment && !hasExplicitAssignment && (
+                  <Alert>
+                    <AlertDescription>
+                      This step type requires an explicit user or group assignment.
+                    </AlertDescription>
+                  </Alert>
+                )}
               </>
             )}
           </TabsContent>
