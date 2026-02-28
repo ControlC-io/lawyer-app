@@ -18,6 +18,8 @@ interface MultipleFilesFieldProps {
   required?: boolean;
   isUploading?: boolean;
   signedUrls?: Record<number, string>; // Map of index to signed URL
+  /** When set (e.g. portal primary color), upload buttons use company primary for border/hover */
+  primaryColor?: string;
 }
 
 // MIME types and corresponding extensions for native file picker (accept attribute).
@@ -131,6 +133,9 @@ const validateFileType = (file: File, allowedTypes?: string[]): boolean => {
   });
 };
 
+const portalFileTriggerProps = (primaryColor?: string) =>
+  primaryColor ? { "data-portal-file-trigger": "" as const } : {};
+
 export const MultipleFilesField = ({
   field,
   value,
@@ -141,8 +146,11 @@ export const MultipleFilesField = ({
   disabled,
   required,
   isUploading,
-  signedUrls = {}
+  signedUrls = {},
+  primaryColor
 }: MultipleFilesFieldProps) => {
+  const fileTriggerProps = portalFileTriggerProps(primaryColor);
+  const wrapperStyle = primaryColor ? ({ "--portal-primary": primaryColor } as React.CSSProperties) : undefined;
   const inputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const isMobile = useIsMobile();
@@ -355,7 +363,7 @@ export const MultipleFilesField = ({
   };
 
   return (
-    <div className="space-y-1.5">
+    <div className="space-y-1.5 w-full" style={wrapperStyle}>
       <Label className="text-sm font-medium flex items-center gap-1">
         {field.label || field.name || field.id}
         {required && <span className="text-destructive">*</span>}
@@ -392,10 +400,11 @@ export const MultipleFilesField = ({
                   type="button"
                   variant="outline"
                   size="sm"
-                  className="w-full sm:w-auto"
+                  className="w-full sm:w-auto portal-primary-btn"
                   onClick={handleDownloadAsZip}
                   disabled={isDownloadingZip}
                   title="Download all files as ZIP"
+                  data-portal-color={primaryColor ? "true" : undefined}
                 >
                   {isDownloadingZip ? (
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -453,9 +462,11 @@ export const MultipleFilesField = ({
             <Button
               type="button"
               variant="outline"
-              className="flex-1"
+              className="flex-1 portal-primary-btn"
               onClick={() => inputRef.current?.click()}
               disabled={isUploading}
+              data-portal-color={primaryColor ? "true" : undefined}
+              {...fileTriggerProps}
             >
               {isUploading ? (
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -467,9 +478,11 @@ export const MultipleFilesField = ({
             <Button
               type="button"
               variant="outline"
-              className="flex-1"
+              className="flex-1 portal-primary-btn"
               onClick={() => cameraInputRef.current?.click()}
               disabled={isUploading}
+              data-portal-color={primaryColor ? "true" : undefined}
+              {...fileTriggerProps}
             >
               {isUploading ? (
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -483,9 +496,11 @@ export const MultipleFilesField = ({
           <Button
             type="button"
             variant="outline"
-            className="w-full"
+            className="w-full portal-primary-btn"
             onClick={() => inputRef.current?.click()}
             disabled={isUploading}
+            data-portal-color={primaryColor ? "true" : undefined}
+            {...fileTriggerProps}
           >
             {isUploading ? (
               <Loader2 className="h-4 w-4 mr-2 animate-spin" />

@@ -142,6 +142,23 @@ router.get(
 );
 
 /**
+ * POST /api/companies/:companyId/portal-logo
+ */
+router.post(
+  '/:companyId/portal-logo',
+  filesController.uploadMiddleware,
+  asyncHandler(companiesController.uploadPortalLogo)
+);
+
+/**
+ * DELETE /api/companies/:companyId/portal-logo
+ */
+router.delete(
+  '/:companyId/portal-logo',
+  asyncHandler(companiesController.deletePortalLogo)
+);
+
+/**
  * PATCH /api/companies/:companyId
  */
 router.patch(

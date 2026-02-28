@@ -88,8 +88,13 @@ export const login = async (req: Request, res: Response) => {
       token,
     });
   } catch (error) {
-    console.error('Login error:', error);
-    res.status(500).json({ message: 'Error logging in' });
+    const err = error instanceof Error ? error : new Error(String(error));
+    console.error('Login error:', err.message, err.stack);
+    const isDev = process.env.NODE_ENV !== 'production';
+    res.status(500).json({
+      message: 'Error logging in',
+      ...(isDev && { details: err.message }),
+    });
   }
 };
 

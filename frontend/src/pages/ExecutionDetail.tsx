@@ -318,12 +318,12 @@ const ExecutionDetail = () => {
     return <div className="p-6">Loading...</div>;
   }
 
-  // Filter to only show completed and running steps (exclude pending steps), sorted by creation date ascending
+  // Filter to only show completed and running steps (exclude pending steps), sorted by execution order (started_at then created_at ascending)
   const visibleSteps = (executionSteps ?? [])
     .filter((step: any) => step.status !== "pending")
     .sort((a: any, b: any) => {
-      const timeA = a.created_at ? new Date(a.created_at).getTime() : (a.started_at ? new Date(a.started_at).getTime() : 0);
-      const timeB = b.created_at ? new Date(b.created_at).getTime() : (b.started_at ? new Date(b.started_at).getTime() : 0);
+      const timeA = (a.started_at ? new Date(a.started_at).getTime() : null) ?? (a.created_at ? new Date(a.created_at).getTime() : 0);
+      const timeB = (b.started_at ? new Date(b.started_at).getTime() : null) ?? (b.created_at ? new Date(b.created_at).getTime() : 0);
       if (timeA !== timeB) return timeA - timeB;
       return (a.id ?? "").localeCompare(b.id ?? "");
     });

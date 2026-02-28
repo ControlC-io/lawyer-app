@@ -17,12 +17,14 @@ interface DateTimeFieldProps {
     disabled?: boolean;
     required?: boolean;
     labelPosition?: "top" | "side";
+    primaryColor?: string;
 }
 
-export const DateTimeField = ({ field, value, onChange, disabled, required, labelPosition = "top" }: DateTimeFieldProps) => {
+export const DateTimeField = ({ field, value, onChange, disabled, required, labelPosition = "top", primaryColor }: DateTimeFieldProps) => {
     const [open, setOpen] = useState(false);
     const { t, language } = useLanguage();
     const dateLocale = language === "fr" ? fr : enUS;
+    const wrapperStyle = primaryColor ? ({ "--portal-primary": primaryColor } as React.CSSProperties) : undefined;
 
     // Helper to parse date string or object
     // Supports ISO strings and generic date objects
@@ -83,11 +85,12 @@ export const DateTimeField = ({ field, value, onChange, disabled, required, labe
                     <Button
                         variant="outline"
                         className={cn(
-                            "flex-1 justify-start text-left font-normal",
+                            "flex-1 justify-start text-left font-normal portal-primary-btn",
                             !currentDate && "text-muted-foreground"
                         )}
                         onClick={() => !disabled && setOpen(true)}
                         disabled={disabled}
+                        data-portal-color={primaryColor ? "true" : undefined}
                     >
                         <CalendarIcon className="mr-2 h-4 w-4" />
                         {currentDate ? format(currentDate, "dd/MM/yyyy HH:mm", { locale: dateLocale }) : <span>{t("executionForm.pickDateTime")}</span>}
@@ -122,10 +125,10 @@ export const DateTimeField = ({ field, value, onChange, disabled, required, labe
 
     if (labelPosition === "side") {
         return (
-            <div className="space-y-1.5">
+            <div className="space-y-1.5 w-full" style={wrapperStyle}>
                 <div className="flex items-center gap-3">
                     {label}
-                    <div className="flex-1">
+                    <div className="flex-1 min-w-0">
                         {dateTimePicker}
                     </div>
                 </div>
@@ -137,7 +140,7 @@ export const DateTimeField = ({ field, value, onChange, disabled, required, labe
     }
 
     return (
-        <div className="space-y-1.5">
+        <div className="space-y-1.5 w-full" style={wrapperStyle}>
             {label}
             {dateTimePicker}
             {field.description && (

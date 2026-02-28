@@ -65,6 +65,7 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
 
   // Default to assign to execution creator (true) if not set
   const assignToExecutionCreator = step.config.assign_to_execution_creator !== false;
+  const isStartOrEnd = step.step_type === "start" || step.step_type === "end";
   const requiresExplicitAssignment =
     (step.step_type === "action" && (step.action_type || "manual") === "manual") ||
     (step.step_type === "decision" && ["Human", "Agent_Human", "Agent + Human"].includes(step.decision_node_type || "Human")) ||
@@ -572,17 +573,20 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
         </div>
 
         <Tabs defaultValue="configuration" className="w-full">
-          <TabsList className="grid w-full grid-cols-3">
-            <TabsTrigger value="assign">Assign</TabsTrigger>
-            <TabsTrigger value="configuration">Configuration</TabsTrigger>
-            <TabsTrigger value="output" className="flex items-center gap-2">
-              Output
-              <Badge variant="secondary" className="h-5 px-1.5 min-w-[1.25rem]">
-                {outputs.length}
-              </Badge>
-            </TabsTrigger>
-          </TabsList>
+          {!isStartOrEnd && (
+            <TabsList className="grid w-full grid-cols-3">
+              <TabsTrigger value="assign">Assign</TabsTrigger>
+              <TabsTrigger value="configuration">Configuration</TabsTrigger>
+              <TabsTrigger value="output" className="flex items-center gap-2">
+                Output
+                <Badge variant="secondary" className="h-5 px-1.5 min-w-[1.25rem]">
+                  {outputs.length}
+                </Badge>
+              </TabsTrigger>
+            </TabsList>
+          )}
 
+          {!isStartOrEnd && (
           <TabsContent value="assign" className="space-y-4 mt-4">
             <div className="flex items-center justify-between">
               <div className="space-y-0.5">
@@ -704,7 +708,9 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
               </>
             )}
           </TabsContent>
+          )}
 
+          {!isStartOrEnd && (
           <TabsContent value="output" className="space-y-4 mt-4">
             {(step.step_type === "action" || step.step_type === "file") ? (
               <div className="space-y-3">
@@ -797,6 +803,7 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
               </>
             )}
           </TabsContent>
+          )}
 
           <TabsContent value="configuration" className="space-y-4 mt-4">
             {step.step_type === "edit_form" ? (

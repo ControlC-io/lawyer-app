@@ -12,6 +12,7 @@
     "test:coverage": "jest --coverage"
   },
   "dependencies": {
+    "dotenv": "^16.4.5",
     "@prisma/client": "^5.22.0",
     "@sendgrid/mail": "^7.7.0",
     "@yourapp/shared": "*",

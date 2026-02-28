@@ -856,7 +856,7 @@ export default function AgentConfigurations() {
                                                             <td className="p-3 text-right">{row.input_tokens ?? "—"}</td>
                                                             <td className="p-3 text-right">{row.thinking_tokens ?? "—"}</td>
                                                             <td className="p-3 text-right">{row.output_tokens ?? "—"}</td>
-                                                            <td className="p-3 text-right">{row.total_cost ?? "—"}</td>
+                                                            <td className="p-3 text-right">{row.total_cost != null ? Number(row.total_cost).toFixed(4) : "—"}</td>
                                                             <td className="p-3 max-w-[200px] truncate" title={row.comment ?? ""}>
                                                                 {row.comment ?? "—"}
                                                             </td>

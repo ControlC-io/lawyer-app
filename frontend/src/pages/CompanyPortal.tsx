@@ -1,12 +1,13 @@
 import { useEffect, useState, useMemo } from "react";
 import { useParams } from "react-router-dom";
-import { api } from "@/lib/api";
+import { api, getApiBase } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Loader2, ArrowLeft, ChevronLeft, ChevronRight } from "lucide-react";
+import { Loader2, ArrowLeft, ChevronLeft, ChevronRight, Folder, Play, Send } from "lucide-react";
+import { renderIcon } from "@/lib/iconUtils";
 import { toast } from "@/hooks/use-toast";
 import { FieldRenderer } from "@/components/execution/form/FieldRenderer";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { FileViewer } from "@/components/execution/FileViewer";
 import { cn } from "@/lib/utils";
 import {
@@ -54,6 +55,20 @@ interface WorkflowDetail {
 }
 
 // ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/** Softer border color from company primary (hex → rgba with alpha) */
+function primaryBorderColor(hex: string, alpha = 0.28): string {
+  const h = (hex || "#3B82F6").replace(/^#/, "");
+  if (h.length !== 6 && h.length !== 3) return `rgba(0,0,0,${alpha})`;
+  const r = h.length === 6 ? parseInt(h.slice(0, 2), 16) : parseInt(h[0] + h[0], 16);
+  const g = h.length === 6 ? parseInt(h.slice(2, 4), 16) : parseInt(h[1] + h[1], 16);
+  const b = h.length === 6 ? parseInt(h.slice(4, 6), 16) : parseInt(h[2] + h[2], 16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
@@ -78,14 +93,31 @@ export default function CompanyPortal() {
   const [completed, setCompleted] = useState(false);
   const [formPageIndex, setFormPageIndex] = useState(0);
 
+  // Validation errors dialog (when submit clicked but form invalid)
+  const [validationDialogOpen, setValidationDialogOpen] = useState(false);
+
   // File preview
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [previewFile, setPreviewFile] = useState<{ url: string; name: string } | null>(null);
   const [signedUrls, setSignedUrls] = useState<Record<string, string>>({});
   const [signedUrlsMultiple, setSignedUrlsMultiple] = useState<Record<string, Record<number, string>>>({});
 
-  // Primary color from portal
+  // Primary color from portal; softer variant for borders
   const primaryColor = portal?.portal_primary_color || "#3B82F6";
+  const softBorderColor = primaryBorderColor(primaryColor);
+
+  // Resolve logo src: use same base as API so logo request hits the same origin; cache-buster so new uploads show
+  const apiBase = getApiBase();
+  const [logoCacheBuster, setLogoCacheBuster] = useState(0);
+  useEffect(() => {
+    if (portal?.logo_url) setLogoCacheBuster((t) => t + 1);
+  }, [portal?.id, portal?.logo_url]);
+  const logoSrc =
+    portal?.logo_url
+      ? (portal.logo_url.startsWith("/") ? `${apiBase}${portal.logo_url}` : portal.logo_url) +
+        (portal.logo_url.includes("?") ? "&" : "?") +
+        `v=${logoCacheBuster}`
+      : null;
 
   // Fetch portal info + workflows
   useEffect(() => {
@@ -176,11 +208,40 @@ export default function CompanyPortal() {
   // Validation
   // ---------------------------------------------------------------------------
 
+  const normalizeRuleValue = (value: any) => {
+    if (value && typeof value === "object" && "value" in value) {
+      return value.value;
+    }
+    return value;
+  };
+
+  const buildCurrentValues = (values: Record<string, any>): Record<string, any> => {
+    const normalized: Record<string, any> = {};
+    Object.entries(values).forEach(([fieldId, value]) => {
+      normalized[fieldId] = normalizeRuleValue(value);
+    });
+    return normalized;
+  };
+
+  const hasRequiredValue = (value: any): boolean => {
+    if (value === undefined || value === null) return false;
+    if (typeof value === "string") return value.trim() !== "";
+    if (Array.isArray(value)) return value.length > 0;
+    if (typeof value === "object" && "value" in value) {
+      const nestedValue = value.value;
+      if (Array.isArray(nestedValue)) return nestedValue.length > 0;
+      if (typeof nestedValue === "string") return nestedValue.trim() !== "";
+      return nestedValue !== undefined && nestedValue !== null;
+    }
+    return true;
+  };
+
   const validateForm = () => {
     if (!workflowDetail) return false;
     const stepConfig = workflowDetail.first_step.config || {};
     const formFields = stepConfig.form_fields || {};
     const extFieldRules = (stepConfig.field_rules as FieldRule[] | undefined) ?? [];
+    const currentValues = buildCurrentValues(formData);
     const newErrors: Record<string, string> = {};
     let isValid = true;
 
@@ -190,11 +251,11 @@ export default function CompanyPortal() {
     Object.keys(formFields).forEach((fieldId) => {
       const config = formFields[fieldId];
       if (config.shown === false) return;
-      if (!evaluateFieldRules(fieldId, "visibility", extFieldRules, formData, true)) return;
-      const isRequired = evaluateFieldRules(fieldId, "required", extFieldRules, formData, false);
+      if (!evaluateFieldRules(fieldId, "visibility", extFieldRules, currentValues, true)) return;
+      const isRequired = evaluateFieldRules(fieldId, "required", extFieldRules, currentValues, false);
       if (!isRequired) return;
-      const value = formData[fieldId];
-      if (value === undefined || value === null || value === "") {
+      const value = currentValues[fieldId];
+      if (!hasRequiredValue(value)) {
         const fieldDef = fields.find((f: any) => f.id === fieldId);
         newErrors[fieldId] = `${fieldDef?.name || "Field"} is required`;
         isValid = false;
@@ -203,7 +264,7 @@ export default function CompanyPortal() {
 
     const fieldValidations = (stepConfig.field_validations as FieldValidationRule[] | undefined) ?? [];
     if (fieldValidations.length > 0) {
-      const validationErrors = validateAllFields(fieldValidations, formData);
+      const validationErrors = validateAllFields(fieldValidations, currentValues);
       for (const [fieldId, fieldErrors] of Object.entries(validationErrors)) {
         const fieldDef = fields.find((f: any) => f.id === fieldId);
         newErrors[fieldId] = `${fieldDef?.name || "Field"}: ${fieldErrors.join(", ")}`;
@@ -220,7 +281,12 @@ export default function CompanyPortal() {
   // ---------------------------------------------------------------------------
 
   const handleSubmit = async () => {
-    if (!validateForm() || !workflowDetail || !slug) return;
+    if (!workflowDetail || !slug) return;
+    const valid = validateForm();
+    if (!valid) {
+      setValidationDialogOpen(true);
+      return;
+    }
     try {
       setSubmitting(true);
       const result = await api.post<{
@@ -268,17 +334,26 @@ export default function CompanyPortal() {
   const fieldRules = useMemo<FieldRule[]>(() => {
     return (workflowDetail?.first_step?.config?.field_rules as FieldRule[] | undefined) ?? [];
   }, [workflowDetail]);
+  const fieldConfigs = useMemo<Record<string, any>>(() => {
+    return (workflowDetail?.first_step?.config?.form_fields as Record<string, any> | undefined) ?? {};
+  }, [workflowDetail]);
+  const currentValues = useMemo<Record<string, any>>(() => {
+    return buildCurrentValues(formData);
+  }, [formData]);
 
   const renderField = (fieldId: string, labelPosition: "top" | "side" = "top") => {
     const fieldDef = allFields.find((f: any) => f.id === fieldId);
     if (!fieldDef) return null;
+    const fieldConfig = fieldConfigs[fieldId];
+    if (fieldConfig?.shown === false) return null;
+    if (!evaluateFieldRules(fieldId, "visibility", fieldRules, currentValues, true)) return null;
 
     const handleFileUpload = async (file: File) => {
       try {
         const fd = new FormData();
         fd.append("file", file);
         const uploadResult = await api.postFormData<{ path: string; original_name?: string }>(
-          "/api/files/upload",
+          `/api/portal/${slug}/workflows/${workflowDetail.workflow.id}/upload`,
           fd,
           { skipAuth: true }
         );
@@ -331,7 +406,7 @@ export default function CompanyPortal() {
     const isMultipleFiles = fieldType === "multiple_files";
 
     return (
-      <div className="space-y-2" key={fieldId}>
+      <div className="space-y-2 w-full min-w-0" key={fieldId}>
         <FieldRenderer
           field={fieldDef}
           value={formData[fieldId]}
@@ -350,8 +425,9 @@ export default function CompanyPortal() {
           signedUrl={signedUrls[fieldId]}
           signedUrls={isMultipleFiles ? signedUrlsMultiple[fieldId] : undefined}
           disabled={submitting}
-          required={evaluateFieldRules(fieldId, "required", fieldRules, formData, false)}
+          required={evaluateFieldRules(fieldId, "required", fieldRules, currentValues, false)}
           labelPosition={labelPosition}
+          primaryColor={primaryColor}
         />
         {errors[fieldId] && <p className="text-sm text-red-500">{errors[fieldId]}</p>}
       </div>
@@ -412,6 +488,18 @@ export default function CompanyPortal() {
           <CardContent>
             <Button
               variant="outline"
+              className="transition-colors"
+              style={{ borderColor: primaryColor, color: primaryColor }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = `${primaryColor}20`;
+                e.currentTarget.style.borderColor = primaryColor;
+                e.currentTarget.style.color = primaryColor;
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = "";
+                e.currentTarget.style.borderColor = primaryColor;
+                e.currentTarget.style.color = primaryColor;
+              }}
               onClick={() => {
                 setCompleted(false);
                 setSelectedWorkflowId(null);
@@ -453,14 +541,46 @@ export default function CompanyPortal() {
       .filter((f: any) => visibleFieldIds.includes(f.id))
       .map((f: any) => f.id);
 
-    return (
-      <div className="min-h-screen bg-gray-50">
-        {/* Header */}
-        <header className="bg-white border-b">
-          <div className="max-w-3xl mx-auto px-4 py-4 flex items-center gap-4">
+  return (
+    <div className="min-h-screen flex flex-col antialiased" style={{ background: "#f5f5f5", fontFamily: "'DM Sans', sans-serif", fontWeight: 400 }}>
+      <style>{`
+.portal-back-btn { border-color: ${softBorderColor}; color: ${primaryColor}; }
+.portal-back-btn:hover { background-color: ${primaryColor} !important; color: white !important; border-color: ${primaryColor} !important; }
+.portal-form input:focus-visible,
+.portal-form textarea:focus-visible,
+.portal-form select:focus-visible { --tw-ring-color: ${primaryColor}; }
+.portal-form .portal-primary-btn[data-portal-color="true"] { border-color: ${primaryColor}; color: ${primaryColor}; }
+.portal-form .portal-primary-btn[data-portal-color="true"]:hover:not(:disabled),
+.portal-form .portal-primary-btn[data-portal-color="true"][data-state="open"],
+.portal-form .portal-primary-btn[data-portal-color="true"][aria-expanded="true"] {
+  background-color: ${primaryColor} !important;
+  color: white !important;
+  border-color: ${primaryColor} !important;
+}
+.portal-form .portal-primary-btn[data-portal-color="true"]:focus-visible { --tw-ring-color: ${primaryColor}; }
+.portal-form button[role="combobox"] { border-color: ${softBorderColor}; color: inherit; }
+.portal-form button[role="combobox"]:hover,
+.portal-form button[role="combobox"][data-state="open"] { background-color: ${primaryColor} !important; color: white !important; border-color: ${primaryColor} !important; }
+.portal-form div.flex.gap-1[data-state] > button { border-color: ${softBorderColor}; color: inherit; }
+.portal-form div.flex.gap-1[data-state] > button:hover,
+.portal-form div.flex.gap-1[data-state="open"] > button { background-color: ${primaryColor} !important; color: white !important; border-color: ${primaryColor} !important; }
+.portal-form button[data-portal-file-trigger] { border-color: ${primaryColor}; color: ${primaryColor}; }
+.portal-form button[data-portal-file-trigger]:hover:not(:disabled) { background-color: ${primaryColor} !important; color: white !important; border-color: ${primaryColor} !important; }
+.portal-primary-options .use-portal-primary[data-selected="true"],
+.portal-primary-options .use-portal-primary:hover { background: ${primaryColor} !important; color: white !important; }
+.portal-pagination-btn { border-color: ${softBorderColor}; color: ${primaryColor}; }
+.portal-pagination-btn:hover:not(:disabled) { background-color: ${primaryColor} !important; color: white !important; border-color: ${primaryColor} !important; }
+.portal-submit-btn { background-color: ${primaryColor} !important; color: white !important; border: none; }
+.portal-submit-btn:hover:not(:disabled) { filter: brightness(0.92); }
+.portal-submit-btn:focus-visible { outline: none; box-shadow: 0 0 0 2px white, 0 0 0 4px ${primaryColor}; }
+`}</style>
+        {/* Header — soft company-color border */}
+        <header className="bg-white border-b" style={{ borderBottomColor: softBorderColor }}>
+          <div className="max-w-4xl mx-auto px-4 py-4 flex items-center gap-4">
             <Button
               variant="ghost"
               size="sm"
+              className="portal-back-btn border rounded-lg font-normal"
               onClick={() => {
                 setSelectedWorkflowId(null);
                 setWorkflowDetail(null);
@@ -472,19 +592,19 @@ export default function CompanyPortal() {
               Back
             </Button>
             <div className="flex items-center gap-3">
-              {portal.logo_url && (
-                <img src={portal.logo_url} alt={portal.name} className="h-8 w-8 object-contain rounded" />
+              {logoSrc && (
+                <img src={logoSrc} alt={portal.name} className="h-8 w-8 object-contain rounded" />
               )}
-              <span className="text-sm text-muted-foreground">{portal.name}</span>
+              <span className="text-sm text-gray-500 font-normal">{portal.name}</span>
             </div>
           </div>
         </header>
 
-        <div className="max-w-3xl mx-auto py-8 px-4">
+        <div className="max-w-4xl mx-auto py-8 px-4 flex-1 w-full">
           <div className="text-center mb-8">
-            <h1 className="text-2xl font-bold text-gray-900">{workflowDetail.workflow.name}</h1>
+            <h1 className="text-2xl font-normal text-gray-900">{workflowDetail.workflow.name}</h1>
             {workflowDetail.workflow.description && (
-              <p className="mt-2 text-gray-600">{workflowDetail.workflow.description}</p>
+              <p className="mt-2 text-gray-600 font-light">{workflowDetail.workflow.description}</p>
             )}
           </div>
 
@@ -501,8 +621,9 @@ export default function CompanyPortal() {
                   onPageChange={setFormPageIndex}
                   getStepLabel={(page: any, idx: number) => page.title || `Page ${idx + 1}`}
                   className="mb-6"
+                  primaryColor={primaryColor}
                 />
-                <form onSubmit={(e) => e.preventDefault()} className="w-full space-y-6">
+                <form onSubmit={(e) => e.preventDefault()} className="portal-form w-full space-y-6">
                   {(() => {
                     const idx = Math.min(Math.max(0, formPageIndex), formPages.length - 1);
                     const page = formPages[idx];
@@ -513,7 +634,7 @@ export default function CompanyPortal() {
                           <div key={block.id} className={cn(block.compact ? "space-y-2" : "space-y-4")}>
                             {block.title && (
                               <div className={cn(block.compact ? "pt-1 pb-0.5" : "pt-2 pb-1")}>
-                                <h3 className={cn("font-semibold border-b", block.compact ? "text-sm pb-0.5" : "text-base pb-1")}>{block.title}</h3>
+                                <h3 className={cn("font-normal border-b", block.compact ? "text-sm pb-0.5" : "text-base pb-1")} style={{ borderColor: softBorderColor }}>{block.title}</h3>
                               </div>
                             )}
                             <div
@@ -538,7 +659,7 @@ export default function CompanyPortal() {
                                   return (
                                     <div key={colIndex} className={cn("border rounded-md bg-muted/20", block.compact ? "p-2" : "p-3")}>
                                       <div className={cn("border-b", block.compact ? "mb-1 pb-1" : "mb-2 pb-2")}>
-                                        <h4 className={cn("font-semibold", block.compact ? "text-xs" : "text-sm")}>{columnName}</h4>
+                                        <h4 className={cn("font-normal", block.compact ? "text-xs" : "text-sm")}>{columnName}</h4>
                                       </div>
                                       {content}
                                     </div>
@@ -560,6 +681,7 @@ export default function CompanyPortal() {
                       type="button"
                       variant="outline"
                       size="sm"
+                      className="portal-pagination-btn"
                       disabled={formPageIndex <= 0}
                       onClick={() => setFormPageIndex((i) => Math.max(0, i - 1))}
                     >
@@ -573,6 +695,7 @@ export default function CompanyPortal() {
                       type="button"
                       variant="outline"
                       size="sm"
+                      className="portal-pagination-btn"
                       disabled={formPageIndex >= formPages.length - 1}
                       onClick={() => setFormPageIndex((i) => Math.min(formPages.length - 1, i + 1))}
                     >
@@ -584,19 +707,16 @@ export default function CompanyPortal() {
 
                 <div className="pt-4">
                   <Button
-                    className="w-full"
+                    className="w-full portal-submit-btn"
                     size="lg"
                     onClick={handleSubmit}
                     disabled={submitting}
-                    style={{ backgroundColor: primaryColor }}
+                    aria-label="Submit"
                   >
                     {submitting ? (
-                      <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Submitting...
-                      </>
+                      <Loader2 className="h-5 w-5 animate-spin" />
                     ) : (
-                      "Submit"
+                      <Send className="h-5 w-5" />
                     )}
                   </Button>
                 </div>
@@ -605,30 +725,54 @@ export default function CompanyPortal() {
           ) : (
             /* Fallback: simple list rendering */
             <Card>
-              <CardContent className="p-6 space-y-6">
+              <CardContent className="p-6">
+                <form className="portal-form w-full space-y-6" onSubmit={(e) => e.preventDefault()}>
                 {sortedFields.map((fieldId: string) => renderField(fieldId))}
                 <div className="pt-4">
                   <Button
-                    className="w-full"
+                    className="w-full portal-submit-btn"
                     size="lg"
                     onClick={handleSubmit}
                     disabled={submitting}
-                    style={{ backgroundColor: primaryColor }}
+                    aria-label="Submit"
                   >
                     {submitting ? (
-                      <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Submitting...
-                      </>
+                      <Loader2 className="h-5 w-5 animate-spin" />
                     ) : (
-                      "Submit"
+                      <Send className="h-5 w-5" />
                     )}
                   </Button>
                 </div>
+                </form>
               </CardContent>
             </Card>
           )}
         </div>
+
+        {/* Validation errors dialog */}
+        <Dialog open={validationDialogOpen} onOpenChange={setValidationDialogOpen}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Form has errors</DialogTitle>
+              <DialogDescription>
+                Please fix the following before submitting:
+              </DialogDescription>
+            </DialogHeader>
+            <ul className="list-disc list-inside space-y-1.5 text-sm text-destructive">
+              {Object.entries(errors).map(([fieldId, message]) => (
+                <li key={fieldId}>{message}</li>
+              ))}
+            </ul>
+            <DialogFooter>
+              <Button
+                onClick={() => setValidationDialogOpen(false)}
+                className="portal-submit-btn"
+              >
+                OK
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         {/* File Preview Dialog */}
         <Dialog open={isPreviewOpen} onOpenChange={setIsPreviewOpen}>
@@ -645,6 +789,25 @@ export default function CompanyPortal() {
             )}
           </DialogContent>
         </Dialog>
+
+        {/* Footer */}
+        <footer className="mt-auto border-t bg-white py-4" style={{ borderColor: softBorderColor }}>
+          <div className="max-w-4xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-center gap-3 text-sm text-gray-500 font-normal">
+            <span>This portal has been created with</span>
+            <a
+              href="https://floowly.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 font-normal text-gray-600 hover:text-gray-800 transition-colors"
+            >
+              <img
+                src="/logo.png"
+                alt="Floowly"
+                className="h-[20px] w-[60px] object-contain grayscale"
+              />
+            </a>
+          </div>
+        </footer>
       </div>
     );
   }
@@ -654,37 +817,28 @@ export default function CompanyPortal() {
   // ---------------------------------------------------------------------------
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Portal header — modern hero */}
-      <header
-        className="relative overflow-hidden border-b border-gray-200/80 bg-white"
-        style={{
-          background: `linear-gradient(135deg, ${primaryColor}08 0%, ${primaryColor}03 50%, transparent 100%)`,
-        }}
-      >
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_80%_60%_at_50%_-20%,var(--tw-gradient-from),transparent)] from-gray-100/60 to-transparent pointer-events-none" />
-        <div className="relative max-w-4xl mx-auto px-4 sm:px-6 py-10 sm:py-12">
+    <div className="min-h-screen flex flex-col antialiased" style={{ background: "#f5f5f5", fontFamily: "'DM Sans', sans-serif", fontWeight: 400 }}>
+      {/* Portal header — company-color border */}
+      <header className="relative overflow-hidden border-b bg-white" style={{ borderBottomColor: primaryColor }}>
+        <div className="relative max-w-4xl mx-auto px-1.5 py-3">
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4 sm:gap-6 text-center sm:text-left">
-            {portal.logo_url && (
-              <div
-                className="flex-shrink-0 inline-flex items-center justify-center w-20 h-20 sm:w-24 sm:h-24 rounded-2xl shadow-sm ring-1 ring-gray-200/60 bg-white"
-                style={{ boxShadow: `0 4px 14px ${primaryColor}15` }}
-              >
+            {logoSrc && (
+              <div className="flex-shrink-0 inline-flex items-center justify-center w-28 h-28 sm:w-32 sm:h-32 rounded-2xl bg-white">
                 <img
-                  src={portal.logo_url}
+                  src={logoSrc}
                   alt={portal.name}
-                  className="h-12 w-12 sm:h-14 sm:w-14 object-contain"
+                  className="h-20 w-20 sm:h-24 sm:w-24 object-contain rounded-xl"
                 />
               </div>
             )}
             <div className="min-w-0">
-              <h1 className="text-3xl sm:text-4xl font-bold tracking-tight text-gray-900">
+              <h1 className="text-3xl sm:text-4xl font-normal tracking-tight text-gray-900">
                 {portal.name}
               </h1>
             </div>
           </div>
           {portal.portal_description?.trim() && (
-            <p className="mt-4 text-center text-base sm:text-lg text-gray-600 max-w-2xl mx-auto leading-relaxed">
+            <p className="mt-4 text-center text-base sm:text-lg text-gray-600 max-w-2xl mx-auto leading-relaxed font-light">
               {portal.portal_description}
             </p>
           )}
@@ -692,48 +846,72 @@ export default function CompanyPortal() {
       </header>
 
       {/* Workflow list */}
-      <main className="max-w-4xl mx-auto px-4 py-8">
+      <main className="max-w-4xl mx-auto px-4 py-8 flex-1">
         {workflows.length === 0 ? (
-          <div className="text-center py-12 text-muted-foreground">
+          <div className="text-center py-12 text-gray-500 font-normal">
             No forms available at the moment.
           </div>
         ) : (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="flex flex-col gap-4">
             {workflows.map((wf) => (
               <Card
                 key={wf.id}
-                className="cursor-pointer hover:shadow-md transition-shadow border-2 hover:border-opacity-50"
-                style={{ borderColor: "transparent" }}
+                className="cursor-pointer transition-colors border flex flex-row items-center gap-4 p-4"
+                style={{
+                  borderColor: "rgb(228 228 231)",
+                  borderWidth: "1px",
+                  outline: "none",
+                }}
                 onClick={() => setSelectedWorkflowId(wf.id)}
-                onMouseEnter={(e) => (e.currentTarget.style.borderColor = primaryColor)}
-                onMouseLeave={(e) => (e.currentTarget.style.borderColor = "transparent")}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.borderColor = primaryColor;
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.borderColor = "rgb(228 228 231)";
+                }}
               >
-                <CardHeader className="pb-2">
-                  <div className="flex items-center gap-3">
-                    {wf.icon && <span className="text-2xl">{wf.icon}</span>}
-                    <CardTitle className="text-lg">{wf.name}</CardTitle>
+                <div className="flex items-center gap-3 flex-1 min-w-0">
+                  {wf.icon && <span className="flex-shrink-0">{renderIcon(wf.icon, "h-6 w-6", Folder)}</span>}
+                  <div className="min-w-0">
+                    <CardTitle className="text-lg font-normal">{wf.name}</CardTitle>
+                    {wf.description && (
+                      <p className="text-sm text-gray-500 line-clamp-2 mt-0.5 font-light">{wf.description}</p>
+                    )}
                   </div>
-                </CardHeader>
-                {wf.description && (
-                  <CardContent className="pt-0">
-                    <p className="text-sm text-muted-foreground line-clamp-2">{wf.description}</p>
-                  </CardContent>
-                )}
-                <CardContent className="pt-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="w-full"
-                    style={{ borderColor: primaryColor, color: primaryColor }}
+                </div>
+                <div className="flex-shrink-0">
+                  <span
+                    className="inline-flex items-center justify-center w-10 h-10 rounded-full border-2 transition-colors"
+                    style={{ borderColor: softBorderColor, color: primaryColor }}
+                    aria-label="Start"
                   >
-                    Fill out form
-                  </Button>
-                </CardContent>
+                    <Play className="h-5 w-5 fill-current" />
+                  </span>
+                </div>
               </Card>
             ))}
           </div>
         )}
       </main>
+
+      {/* Footer */}
+      <footer className="mt-auto border-t bg-white py-4" style={{ borderColor: softBorderColor }}>
+        <div className="max-w-4xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-center gap-3 text-sm text-gray-500 font-normal">
+          <span>This portal has been created with</span>
+          <a
+            href="https://floowly.com"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-2 font-normal text-gray-600 hover:text-gray-800 transition-colors"
+          >
+            <img
+              src="/logo.png"
+              alt="Floowly"
+              className="h-[20px] w-[60px] object-contain grayscale"
+            />
+          </a>
+        </div>
+      </footer>
     </div>
   );
 }

@@ -1,6 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { Copy, Eye, EyeOff, RefreshCw, Key, Shield, Users, Building, FileText, Trash2, Plus, Globe, ExternalLink } from "lucide-react";
+import { Copy, Eye, EyeOff, RefreshCw, Key, Shield, Users, Building, FileText, Trash2, Plus, Globe, ExternalLink, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -55,6 +55,11 @@ export default function OrganizationSettings() {
   const [portalDescription, setPortalDescription] = useState("");
   const [portalPrimaryColor, setPortalPrimaryColor] = useState("#3B82F6");
   const [savingPortal, setSavingPortal] = useState(false);
+  const [uploadingLogo, setUploadingLogo] = useState(false);
+  const [removingLogo, setRemovingLogo] = useState(false);
+  const [showLogoUrlInput, setShowLogoUrlInput] = useState(false);
+  const [logoVersion, setLogoVersion] = useState(0);
+  const logoFileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (companyId) {
@@ -172,17 +177,28 @@ export default function OrganizationSettings() {
       .replace(/^-|-$/g, "");
   };
 
+  // Don't send logo_url or clear_logo_upload when the current value is our API-served upload path
+  // (GET returns /api/portal/{id6}_{slug}/logo). Sending that back would clear the real upload and break the logo.
+  const isPortalLogoApiPath = (url: string) =>
+    typeof url === "string" && url.trim().startsWith("/api/portal/") && url.trim().endsWith("/logo");
+
   const handleSavePortal = async () => {
     setSavingPortal(true);
     try {
-      const updated = await api.patch<Company>(`/api/companies/${companyId}`, {
+      const payload: Record<string, unknown> = {
         portal_enabled: portalEnabled,
         slug: portalSlug || null,
-        logo_url: portalLogoUrl || null,
         portal_description: portalDescription || null,
         portal_primary_color: portalPrimaryColor || null,
-      });
+      };
+      const logoValue = portalLogoUrl?.trim() || null;
+      if (logoValue != null && !isPortalLogoApiPath(logoValue)) {
+        payload.logo_url = logoValue;
+        payload.clear_logo_upload = true;
+      }
+      const updated = await api.patch<Company>(`/api/companies/${companyId}`, payload);
       setCompany((c) => (c ? { ...c, ...updated } : null));
+      setPortalLogoUrl(updated.logo_url ?? "");
       toast.success(t("portal.settingsSaved"));
     } catch (error: any) {
       toast.error(error.message || t("portal.failedToSave"));
@@ -191,7 +207,57 @@ export default function OrganizationSettings() {
     }
   };
 
-  const portalUrl = portalSlug ? `${window.location.origin}/portal/${portalSlug}` : "";
+  const logoPreviewBase =
+    portalLogoUrl?.startsWith("/")
+      ? `${(import.meta.env.VITE_API_URL as string) || ""}${portalLogoUrl}`
+      : portalLogoUrl;
+  const logoPreviewSrc =
+    logoPreviewBase != null && logoPreviewBase !== ""
+      ? `${logoPreviewBase}${logoPreviewBase.includes("?") ? "&" : "?"}v=${logoVersion}`
+      : "";
+
+  const handleLogoFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !companyId) return;
+    setUploadingLogo(true);
+    e.target.value = "";
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await api.postFormData<{ logo_url: string }>(
+        `/api/companies/${companyId}/portal-logo`,
+        formData
+      );
+      setPortalLogoUrl(res.logo_url);
+      setLogoVersion((v) => v + 1);
+      await fetchCompanyData();
+      toast.success(t("portal.settingsSaved"));
+    } catch (err: any) {
+      toast.error(err.message || t("portal.logoUploadError"));
+    } finally {
+      setUploadingLogo(false);
+    }
+  };
+
+  const handleRemoveLogo = async () => {
+    if (!companyId) return;
+    setRemovingLogo(true);
+    try {
+      await api.delete(`/api/companies/${companyId}/portal-logo`);
+      setPortalLogoUrl("");
+      await fetchCompanyData();
+      toast.success(t("portal.settingsSaved"));
+    } catch (err: any) {
+      toast.error(err.message || t("portal.failedToSave"));
+    } finally {
+      setRemovingLogo(false);
+    }
+  };
+
+  const portalUrl =
+    company && portalSlug
+      ? `${window.location.origin}/portal/${company.id.slice(0, 6)}_${portalSlug}`
+      : "";
 
   if (loading) {
     return (
@@ -462,8 +528,13 @@ export default function OrganizationSettings() {
           {/* Slug */}
           <div className="space-y-2">
             <Label htmlFor="portal-slug">{t("portal.portalUrl")}</Label>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <span className="text-sm text-muted-foreground whitespace-nowrap">{window.location.origin}/portal/</span>
+              {company && (
+                <span className="text-sm text-muted-foreground font-mono whitespace-nowrap">
+                  {company.id.slice(0, 6)}_
+                </span>
+              )}
               <Input
                 id="portal-slug"
                 value={portalSlug}
@@ -504,25 +575,78 @@ export default function OrganizationSettings() {
             )}
           </div>
 
-          {/* Logo URL */}
+          {/* Logo: upload or URL */}
           <div className="space-y-2">
-            <Label htmlFor="portal-logo">{t("portal.logoUrl")}</Label>
-            <Input
-              id="portal-logo"
-              value={portalLogoUrl}
-              onChange={(e) => setPortalLogoUrl(e.target.value)}
-              placeholder="https://example.com/logo.png"
-            />
+            <Label>{t("portal.logoUrl")}</Label>
+            <div className="flex flex-wrap items-center gap-3">
+              <input
+                ref={logoFileInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/svg+xml,image/webp"
+                className="sr-only"
+                disabled={uploadingLogo || !portalSlug?.trim()}
+                onChange={handleLogoFileChange}
+              />
+              <Button
+                type="button"
+                variant="outline"
+                disabled={uploadingLogo || !portalSlug?.trim()}
+                onClick={() => logoFileInputRef.current?.click()}
+              >
+                {uploadingLogo ? (
+                  <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <Upload className="h-4 w-4 mr-2" />
+                )}
+                {t("portal.uploadLogo")}
+              </Button>
+              {portalLogoUrl && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  disabled={removingLogo}
+                  onClick={handleRemoveLogo}
+                >
+                  {removingLogo ? <RefreshCw className="h-4 w-4 animate-spin" /> : t("portal.removeLogo")}
+                </Button>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground">{t("portal.uploadLogoDesc")}</p>
+            {!portalSlug?.trim() && (
+              <p className="text-xs text-amber-600 dark:text-amber-500">
+                {t("portal.logoUploadError")}
+              </p>
+            )}
             {portalLogoUrl && (
               <div className="mt-2">
                 <img
-                  src={portalLogoUrl}
+                  src={logoPreviewSrc ? logoPreviewSrc : undefined}
                   alt="Logo preview"
                   className="h-12 w-12 object-contain rounded border"
                   onError={(e) => (e.currentTarget.style.display = "none")}
                 />
               </div>
             )}
+            <div className="pt-1">
+              <button
+                type="button"
+                className="text-sm text-muted-foreground hover:underline"
+                onClick={() => setShowLogoUrlInput((v) => !v)}
+              >
+                {t("portal.orUseUrl")}
+              </button>
+              {showLogoUrlInput && (
+                <div className="mt-2 flex flex-col gap-2">
+                  <Input
+                    id="portal-logo-url"
+                    value={portalLogoUrl}
+                    onChange={(e) => setPortalLogoUrl(e.target.value)}
+                    placeholder="https://example.com/logo.png"
+                  />
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Description */}

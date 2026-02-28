@@ -2163,99 +2163,87 @@ export default function WorkflowList() {
             </div>
           )}
 
-          <div className="grid gap-6 sm:grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-            {/* Render Workflows */}
+          <div className="flex flex-col gap-2">
+            {/* Render Workflows - one per line, dense */}
             {displayWorkflows.map((workflow) => {
               const WorkflowIcon = renderWorkflowIcon(workflow.icon);
               return (
                 <Card
                   key={workflow.id}
-                  className={`hover:shadow-lg transition-all duration-300 cursor-pointer group h-fit min-h-[280px] flex flex-col ${draggedWorkflowId === workflow.id ? 'opacity-50' : ''
+                  className={`hover:shadow-md transition-all duration-200 cursor-pointer group flex flex-row items-center gap-4 py-2 px-4 ${draggedWorkflowId === workflow.id ? 'opacity-50' : ''
                     }`}
                   onClick={() => navigate(`/workflow/${workflow.id}`)}
                   draggable
                   onDragStart={(e) => handleWorkflowDragStart(e, workflow.id)}
                   onDragEnd={handleWorkflowDragEnd}
                 >
-                  <CardHeader className="pb-3 flex-shrink-0">
-                    <div className="flex items-start justify-between gap-3 mb-2">
-                      <div className="flex items-center gap-3 flex-1 min-w-0">
-                        {WorkflowIcon && (
-                          <span className="flex-shrink-0 flex items-center justify-center text-primary">
-                            {WorkflowIcon}
-                          </span>
-                        )}
-                        <div className="flex-1 min-w-0">
-                          <CardTitle className="text-lg leading-tight break-words font-semibold">
-                            {workflow.name}
-                          </CardTitle>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-1 flex-shrink-0">
-                        <div className="opacity-40 group-hover:opacity-100 transition-opacity cursor-grab active:cursor-grabbing text-muted-foreground hover:text-foreground" title="Drag to move to category">
-                          <GripVertical className="h-4 w-4" />
-                        </div>
-                      </div>
+                  <div className="opacity-40 group-hover:opacity-100 transition-opacity cursor-grab active:cursor-grabbing text-muted-foreground hover:text-foreground flex-shrink-0" title="Drag to move to category" onClick={(e) => e.stopPropagation()}>
+                    <GripVertical className="h-4 w-4" />
+                  </div>
+                  {WorkflowIcon && (
+                    <span className="flex-shrink-0 flex items-center justify-center text-primary">
+                      {WorkflowIcon}
+                    </span>
+                  )}
+                  <div className="flex-1 min-w-0 flex flex-col sm:flex-row sm:items-center sm:gap-4 gap-0.5 py-1">
+                    <div className="min-w-0">
+                      <CardTitle className="text-base leading-tight break-words font-semibold">
+                        {workflow.name}
+                      </CardTitle>
+                      {workflow.description && (
+                        <CardDescription className="text-xs text-muted-foreground truncate">
+                          {workflow.description}
+                        </CardDescription>
+                      )}
                     </div>
-                    <CardDescription className="text-sm text-muted-foreground mt-1">
-                      {workflow.description || "No description provided"}
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="pt-0 flex-1 flex flex-col justify-end">
-                    <div className="flex flex-col gap-3">
-                      <div className="flex items-center justify-between text-[10px] text-muted-foreground uppercase tracking-wider">
-                        <span>{workflow.step_count} steps</span>
-                        <span>
-                          Updated {formatDistanceToNow(new Date(workflow.updated_at))} ago
-                        </span>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-                          <Switch
-                            checked={workflow.is_active ?? true}
-                            onCheckedChange={() => {
-                              const syntheticEvent = { stopPropagation: () => { } } as React.MouseEvent;
-                              handleToggleActive(syntheticEvent, workflow);
-                            }}
-                            className="data-[state=checked]:bg-primary"
-                          />
-                          <span className="text-xs font-medium text-muted-foreground">Active</span>
-                        </div>
-                        <div className="flex items-center gap-1">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (isSuperAdmin) {
-                                setWorkflowToDuplicate(workflow);
-                                setDuplicateTargetCompanyId(companyId || "");
-                                setDuplicateToCompanyDialogOpen(true);
-                              } else {
-                                handleDuplicate(workflow);
-                              }
-                            }}
-                            title={isSuperAdmin ? "Duplicate workflow (choose company)" : "Duplicate workflow"}
-                          >
-                            <Copy className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity text-destructive hover:text-destructive"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              confirmDelete(e, workflow);
-                            }}
-                            title="Delete workflow"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </div>
+                    <div className="flex flex-col gap-0.5 flex-shrink-0 text-[10px] text-muted-foreground sm:ml-auto sm:text-right">
+                      <span className="uppercase tracking-wider font-medium text-foreground/80">{workflow.step_count} steps</span>
+                      <span>Updated {formatDistanceToNow(new Date(workflow.updated_at))} ago</span>
                     </div>
-                  </CardContent>
+                  </div>
+                  <div className="flex items-center gap-1 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
+                    <div className="flex items-center gap-1.5">
+                      <Switch
+                        checked={workflow.is_active ?? true}
+                        onCheckedChange={() => {
+                          const syntheticEvent = { stopPropagation: () => { } } as React.MouseEvent;
+                          handleToggleActive(syntheticEvent, workflow);
+                        }}
+                        className="data-[state=checked]:bg-primary scale-90"
+                      />
+                      <span className="text-xs font-medium text-muted-foreground hidden sm:inline">Active</span>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (isSuperAdmin) {
+                          setWorkflowToDuplicate(workflow);
+                          setDuplicateTargetCompanyId(companyId || "");
+                          setDuplicateToCompanyDialogOpen(true);
+                        } else {
+                          handleDuplicate(workflow);
+                        }
+                      }}
+                      title={isSuperAdmin ? "Duplicate workflow (choose company)" : "Duplicate workflow"}
+                    >
+                      <Copy className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 text-destructive hover:text-destructive"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        confirmDelete(e, workflow);
+                      }}
+                      title="Delete workflow"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
                 </Card>
               );
             })}
@@ -2433,12 +2421,12 @@ export default function WorkflowList() {
                 {/* Permissions Section */}
                 <div className="space-y-4">
                   <div className="border-b pb-2">
-                    <h3 className="text-lg font-medium">Workflow Permissions</h3>
-                    <p className="text-sm text-muted-foreground">Control who can see and start this workflow</p>
+                    <h3 className="text-lg font-medium">{t("workflowEditor.permissions")}</h3>
+                    <p className="text-sm text-muted-foreground">{t("workflowEditor.permissionsDesc")}</p>
                   </div>
                   <div className="space-y-4">
                     <div className="space-y-2">
-                      <Label className="text-sm font-medium">Visibility</Label>
+                      <Label className="text-sm font-medium">{t("workflowEditor.visibility")}</Label>
                       <RadioGroup
                         value={visibilityScope}
                         onValueChange={(value) => {
@@ -2449,13 +2437,13 @@ export default function WorkflowList() {
                         <div className="flex items-center space-x-2">
                           <RadioGroupItem value="all_company" id="list-visibility-all-company" />
                           <Label htmlFor="list-visibility-all-company" className="text-sm cursor-pointer">
-                            All company
+                            {t("workflowEditor.allCompany")}
                           </Label>
                         </div>
                         <div className="flex items-center space-x-2">
                           <RadioGroupItem value="specific" id="list-visibility-specific" />
                           <Label htmlFor="list-visibility-specific" className="text-sm cursor-pointer">
-                            Specific users or groups
+                            {t("workflowEditor.specificUsersOrGroups")}
                           </Label>
                         </div>
                       </RadioGroup>
@@ -2472,17 +2460,17 @@ export default function WorkflowList() {
                           onSelectedGroupsChange={setVisibilityGroups}
                           confirmBeforeRemove
                           labels={{
-                            users: "Visible to users",
-                            groups: "Visible to groups",
-                            usersPlaceholder: "Select users...",
-                            groupsPlaceholder: "Select groups...",
+                            users: t("workflowEditor.visibleToUsers"),
+                            groups: t("workflowEditor.visibleToGroups"),
+                            usersPlaceholder: t("workflowEditor.selectUsers"),
+                            groupsPlaceholder: t("workflowEditor.selectGroups"),
                           }}
                         />
                       </div>
                     )}
 
                     <div className="space-y-2">
-                      <Label className="text-sm font-medium">Start permission</Label>
+                      <Label className="text-sm font-medium">{t("workflowEditor.startPermission")}</Label>
                       <RadioGroup
                         value={startScope}
                         onValueChange={(value) => {
@@ -2495,13 +2483,13 @@ export default function WorkflowList() {
                         <div className="flex items-center space-x-2">
                           <RadioGroupItem value="public" id="list-start-public" />
                           <Label htmlFor="list-start-public" className="text-sm cursor-pointer">
-                            Public (all company)
+                            {t("workflowEditor.allCompany")}
                           </Label>
                         </div>
                         <div className="flex items-center space-x-2">
                           <RadioGroupItem value="specific" id="list-start-specific" />
                           <Label htmlFor="list-start-specific" className="text-sm cursor-pointer">
-                            Specific users or groups
+                            {t("workflowEditor.specificUsersOrGroups")}
                           </Label>
                         </div>
                       </RadioGroup>
@@ -2518,10 +2506,10 @@ export default function WorkflowList() {
                           onSelectedGroupsChange={setStartGroups}
                           confirmBeforeRemove
                           labels={{
-                            users: "Can start (users)",
-                            groups: "Can start (groups)",
-                            usersPlaceholder: "Select users...",
-                            groupsPlaceholder: "Select groups...",
+                            users: t("workflowEditor.canStartUsers"),
+                            groups: t("workflowEditor.canStartGroups"),
+                            usersPlaceholder: t("workflowEditor.selectUsers"),
+                            groupsPlaceholder: t("workflowEditor.selectGroups"),
                           }}
                         />
                       </div>

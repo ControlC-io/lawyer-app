@@ -41,33 +41,35 @@ interface FieldRendererProps {
     array_enable_add_item?: boolean;
     array_enable_delete?: boolean;
   };
+  // Optional brand/portal primary color (e.g. company portal) for checkbox, options, etc.
+  primaryColor?: string;
 }
 
 export const FieldRenderer = (props: FieldRendererProps) => {
-  const { field, value, onChange, disabled, required, labelPosition = "top", ...otherProps } = props;
+  const { field, value, onChange, disabled, required, labelPosition = "top", primaryColor, ...otherProps } = props;
   const fieldType = field.field_type || field.type || "text";
 
   switch (fieldType) {
     case "text":
     case "email":
     case "password":
-      return <TextField field={field} value={value} onChange={onChange} disabled={disabled} required={required} labelPosition={labelPosition} />;
+      return <TextField field={field} value={value} onChange={onChange} disabled={disabled} required={required} labelPosition={labelPosition} primaryColor={primaryColor} />;
 
     case "number":
-      return <NumberField field={field} value={value} onChange={onChange} disabled={disabled} required={required} labelPosition={labelPosition} />;
+      return <NumberField field={field} value={value} onChange={onChange} disabled={disabled} required={required} labelPosition={labelPosition} primaryColor={primaryColor} />;
 
     case "boolean":
-      return <BooleanField field={field} value={value} onChange={onChange} disabled={disabled} required={required} labelPosition={labelPosition} />;
+      return <BooleanField field={field} value={value} onChange={onChange} disabled={disabled} required={required} labelPosition={labelPosition} primaryColor={primaryColor} />;
 
     case "date":
-      return <DateField field={field} value={value} onChange={onChange} disabled={disabled} required={required} labelPosition={labelPosition} />;
+      return <DateField field={field} value={value} onChange={onChange} disabled={disabled} required={required} labelPosition={labelPosition} primaryColor={primaryColor} />;
 
     case "time":
-      return <TimeField field={field} value={value} onChange={onChange} disabled={disabled} required={required} labelPosition={labelPosition} />;
+      return <TimeField field={field} value={value} onChange={onChange} disabled={disabled} required={required} labelPosition={labelPosition} primaryColor={primaryColor} />;
 
     case "datetime":
     case "datetime-local":
-      return <DateTimeField field={field} value={value} onChange={onChange} disabled={disabled} required={required} labelPosition={labelPosition} />;
+      return <DateTimeField field={field} value={value} onChange={onChange} disabled={disabled} required={required} labelPosition={labelPosition} primaryColor={primaryColor} />;
 
     case "option":
     case "multiple_option":
@@ -78,6 +80,7 @@ export const FieldRenderer = (props: FieldRendererProps) => {
         disabled={disabled}
         required={required}
         labelPosition={labelPosition}
+        primaryColor={primaryColor}
         dynamicOptions={otherProps.dynamicOptions}
         isLoadingDynamic={otherProps.isLoadingDynamic}
         dynamicError={otherProps.dynamicError}
@@ -97,6 +100,7 @@ export const FieldRenderer = (props: FieldRendererProps) => {
         onDelete={otherProps.onDelete}
         isUploading={otherProps.isUploading}
         signedUrl={otherProps.signedUrl}
+        primaryColor={primaryColor}
       />;
 
     case "multiple_files":
@@ -112,6 +116,7 @@ export const FieldRenderer = (props: FieldRendererProps) => {
         onDelete={otherProps.onDelete}
         isUploading={otherProps.isUploading}
         signedUrls={otherProps.signedUrls}
+        primaryColor={primaryColor}
       />;
 
     case "signature":
@@ -126,6 +131,7 @@ export const FieldRenderer = (props: FieldRendererProps) => {
         onView={otherProps.onViewFile}
         isUploading={otherProps.isUploading}
         signedUrl={otherProps.signedUrl}
+        primaryColor={primaryColor}
       />;
 
     case "array":
@@ -142,13 +148,14 @@ export const FieldRenderer = (props: FieldRendererProps) => {
         enableDuplicate={otherProps.fieldConfig?.array_enable_duplicate !== false}
         enableAddItem={otherProps.fieldConfig?.array_enable_add_item !== false}
         enableDelete={otherProps.fieldConfig?.array_enable_delete !== false}
+        primaryColor={primaryColor}
       />;
 
     case "html":
-      return <HtmlField field={field} value={value} onChange={onChange} disabled={disabled} required={required} labelPosition={labelPosition} />;
+      return <HtmlField field={field} value={value} onChange={onChange} disabled={disabled} required={required} labelPosition={labelPosition} primaryColor={primaryColor} />;
 
     default:
-      return <TextField field={field} value={value} onChange={onChange} disabled={disabled} required={required} labelPosition={labelPosition} />;
+      return <TextField field={field} value={value} onChange={onChange} disabled={disabled} required={required} labelPosition={labelPosition} primaryColor={primaryColor} />;
   }
 };
 

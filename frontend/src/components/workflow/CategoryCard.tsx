@@ -43,9 +43,11 @@ export function CategoryCard({
             </div>
           </div>
         </div>
-        <CardDescription className="text-sm leading-relaxed line-clamp-3 min-h-[3.5rem]">
-          {description || "No description provided"}
-        </CardDescription>
+        {description && (
+          <CardDescription className="text-sm leading-relaxed line-clamp-3 min-h-[3.5rem]">
+            {description}
+          </CardDescription>
+        )}
       </CardHeader>
       <CardContent className="pt-0 flex-1 flex flex-col justify-end">
         <div className="space-y-3">

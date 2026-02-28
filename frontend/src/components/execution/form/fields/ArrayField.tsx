@@ -18,6 +18,7 @@ interface ArrayFieldProps {
   enableDuplicate?: boolean; // Show duplicate row button (default true)
   enableAddItem?: boolean; // Show add item button (default true)
   enableDelete?: boolean; // Show delete row button (default true)
+  primaryColor?: string;
 }
 
 export const ArrayField = ({
@@ -33,7 +34,9 @@ export const ArrayField = ({
   enableDuplicate = true,
   enableAddItem = true,
   enableDelete = true,
+  primaryColor,
 }: ArrayFieldProps) => {
+  const wrapperStyle = primaryColor ? ({ "--portal-primary": primaryColor } as React.CSSProperties) : undefined;
   const showRowActions = !disabled && (enableDuplicate || enableDelete);
   const [expandedItems, setExpandedItems] = useState<Record<number, boolean>>({});
 
@@ -144,7 +147,8 @@ export const ArrayField = ({
             variant="outline"
             size="sm"
             onClick={handleAddItem}
-            className="h-8 px-2 lg:px-3"
+            className="h-8 px-2 lg:px-3 portal-primary-btn"
+            data-portal-color={primaryColor ? "true" : undefined}
           >
             <Plus className="h-4 w-4 mr-1" />
             Add Item
@@ -159,7 +163,7 @@ export const ArrayField = ({
       )}
 
       {value && value.length > 0 && (
-        <div className="space-y-2">
+    <div className="space-y-2 w-full" style={wrapperStyle}>
           {isCompactMode ? (
             <div className="border rounded-md overflow-hidden">
               <div className="overflow-x-auto">

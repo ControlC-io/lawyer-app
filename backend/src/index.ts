@@ -1,3 +1,13 @@
+import path from 'path';
+import { config } from 'dotenv';
+
+// Load .env from project root when running from backend/ (e.g. npm run dev in backend)
+const rootEnv = path.resolve(__dirname, '../../.env');
+config({ path: rootEnv });
+if (!process.env.DATABASE_URL) {
+  config(); // fallback to cwd .env
+}
+
 import { app } from './app';
 import { storageService } from './services/storage.service';
 

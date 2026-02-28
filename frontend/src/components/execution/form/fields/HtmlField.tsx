@@ -9,9 +9,11 @@ interface HtmlFieldProps {
     disabled?: boolean;
     required?: boolean;
     labelPosition?: "top" | "side";
+    primaryColor?: string;
 }
 
-export const HtmlField = ({ field, value, onChange, disabled, required, labelPosition = "top" }: HtmlFieldProps) => {
+export const HtmlField = ({ field, value, onChange, disabled, required, labelPosition = "top", primaryColor }: HtmlFieldProps) => {
+    const wrapperStyle = primaryColor ? ({ "--portal-primary": primaryColor } as React.CSSProperties) : undefined;
     const modules = {
         toolbar: [
             [{ 'header': [1, 2, 3, 4, 5, 6, false] }],
@@ -29,7 +31,7 @@ export const HtmlField = ({ field, value, onChange, disabled, required, labelPos
 
     if (disabled) {
         return (
-            <div className="space-y-1.5">
+            <div className="space-y-1.5 w-full" style={wrapperStyle}>
                 <Label className="text-sm font-medium flex items-center gap-1">
                     {field.label || field.name || field.id}
                 </Label>
@@ -45,7 +47,7 @@ export const HtmlField = ({ field, value, onChange, disabled, required, labelPos
     }
 
     return (
-        <div className="space-y-1.5">
+        <div className="space-y-1.5 w-full" style={wrapperStyle}>
             <Label className="text-sm font-medium flex items-center gap-1">
                 {field.label || field.name || field.id}
                 {required && <span className="text-destructive">*</span>}

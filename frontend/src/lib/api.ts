@@ -4,6 +4,11 @@
 
 const BASE = (import.meta.env.VITE_API_URL as string) || '';
 
+/** Base URL for API (and API-served assets like portal logo). Use this for img src etc. so they hit the same origin as API. */
+export function getApiBase(): string {
+  return BASE;
+}
+
 export interface ApiError {
   error: string;
   details?: string;

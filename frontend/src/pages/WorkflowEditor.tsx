@@ -1952,7 +1952,7 @@ export default function WorkflowEditor() {
                   </div>
                   <div className="space-y-4">
                     <div className="space-y-2">
-                      <Label className="text-sm font-medium">Visibility</Label>
+                      <Label className="text-sm font-medium">{t("workflowEditor.visibility")}</Label>
                       <RadioGroup
                         value={visibilityScope}
                         onValueChange={(value) => {
@@ -1963,13 +1963,13 @@ export default function WorkflowEditor() {
                         <div className="flex items-center space-x-2">
                           <RadioGroupItem value="all_company" id="visibility-all-company" />
                           <Label htmlFor="visibility-all-company" className="text-sm cursor-pointer">
-                            All company
+                            {t("workflowEditor.allCompany")}
                           </Label>
                         </div>
                         <div className="flex items-center space-x-2">
                           <RadioGroupItem value="specific" id="visibility-specific" />
                           <Label htmlFor="visibility-specific" className="text-sm cursor-pointer">
-                            Specific users or groups
+                            {t("workflowEditor.specificUsersOrGroups")}
                           </Label>
                         </div>
                       </RadioGroup>
@@ -1986,8 +1986,8 @@ export default function WorkflowEditor() {
                           onSelectedGroupsChange={setVisibilityGroups}
                           confirmBeforeRemove
                           labels={{
-                            users: "Visible to users",
-                            groups: "Visible to groups",
+                            users: t("workflowEditor.visibleToUsers"),
+                            groups: t("workflowEditor.visibleToGroups"),
                             usersPlaceholder: t("workflowEditor.selectUsers"),
                             groupsPlaceholder: t("workflowEditor.selectGroups"),
                           }}
@@ -1996,7 +1996,7 @@ export default function WorkflowEditor() {
                     )}
 
                     <div className="space-y-2">
-                      <Label className="text-sm font-medium">Start permission</Label>
+                      <Label className="text-sm font-medium">{t("workflowEditor.startPermission")}</Label>
                       <RadioGroup
                         value={startScope}
                         onValueChange={(value) => {
@@ -2009,13 +2009,13 @@ export default function WorkflowEditor() {
                         <div className="flex items-center space-x-2">
                           <RadioGroupItem value="public" id="start-public" />
                           <Label htmlFor="start-public" className="text-sm cursor-pointer">
-                            Public (all company)
+                            {t("workflowEditor.allCompany")}
                           </Label>
                         </div>
                         <div className="flex items-center space-x-2">
                           <RadioGroupItem value="specific" id="start-specific" />
                           <Label htmlFor="start-specific" className="text-sm cursor-pointer">
-                            Specific users or groups
+                            {t("workflowEditor.specificUsersOrGroups")}
                           </Label>
                         </div>
                       </RadioGroup>
@@ -2032,8 +2032,8 @@ export default function WorkflowEditor() {
                           onSelectedGroupsChange={setStartGroups}
                           confirmBeforeRemove
                           labels={{
-                            users: "Can start (users)",
-                            groups: "Can start (groups)",
+                            users: t("workflowEditor.canStartUsers"),
+                            groups: t("workflowEditor.canStartGroups"),
                             usersPlaceholder: t("workflowEditor.selectUsers"),
                             groupsPlaceholder: t("workflowEditor.selectGroups"),
                           }}

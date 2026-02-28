@@ -23,7 +23,7 @@ services:
       - FROM_EMAIL=${FROM_EMAIL:-}
       - APP_URL=${APP_URL:-}
       - BACKEND_URL=${BACKEND_URL:-}
-    command: npm run dev -w backend
+    command: sh -c "npm install && npm run dev -w backend"
     volumes:
       - .:/usr/src/app
       - /usr/src/app/node_modules

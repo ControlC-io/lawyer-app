@@ -452,6 +452,20 @@ export const workflowDefinitionController = {
           where: { current_step_id: { in: toDelete } },
           data: { current_step_id: null },
         });
+        // Execution steps and logs reference workflow steps; clear/delete in dependency order
+        const executionStepIds = await prisma.workflowExecutionStep.findMany({
+          where: { step_id: { in: toDelete } },
+          select: { id: true },
+        }).then((rows) => rows.map((r) => r.id));
+        if (executionStepIds.length > 0) {
+          await prisma.workflowExecutionLog.updateMany({
+            where: { step_id: { in: executionStepIds } },
+            data: { step_id: null },
+          });
+        }
+        await prisma.workflowExecutionStep.deleteMany({
+          where: { step_id: { in: toDelete } },
+        });
         await prisma.workflowStep.deleteMany({
           where: { id: { in: toDelete }, workflow_id: workflowId },
         });

@@ -9,9 +9,11 @@ interface TimeFieldProps {
     disabled?: boolean;
     required?: boolean;
     labelPosition?: "top" | "side" | "hidden";
+    primaryColor?: string;
 }
 
-export const TimeField = ({ field, value, onChange, disabled, required, labelPosition = "top" }: TimeFieldProps) => {
+export const TimeField = ({ field, value, onChange, disabled, required, labelPosition = "top", primaryColor }: TimeFieldProps) => {
+    const wrapperStyle = primaryColor ? ({ "--portal-primary": primaryColor } as React.CSSProperties) : undefined;
     const label = labelPosition !== "hidden" ? (
         <Label className={`text-sm font-medium flex items-center gap-1 ${labelPosition === "side" ? "w-32 shrink-0" : ""}`}>
             {field.label || field.name || field.id}
@@ -33,10 +35,10 @@ export const TimeField = ({ field, value, onChange, disabled, required, labelPos
 
     if (labelPosition === "side") {
         return (
-            <div className="space-y-1.5">
+            <div className="space-y-1.5 w-full" style={wrapperStyle}>
                 <div className="flex items-center gap-3">
                     {label}
-                    <div className="flex-1">
+                    <div className="flex-1 min-w-0">
                         {input}
                     </div>
                 </div>
@@ -48,7 +50,7 @@ export const TimeField = ({ field, value, onChange, disabled, required, labelPos
     }
 
     return (
-        <div className="space-y-1.5">
+        <div className="space-y-1.5 w-full" style={wrapperStyle}>
             {label}
             {input}
             {field.description && (

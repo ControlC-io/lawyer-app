@@ -138,7 +138,16 @@ export const ExecutionTimeline = ({
                 <h2 className="text-sm font-semibold mb-2">Process Timeline</h2>
                 <div className="space-y-4">
                   {(() => {
-                    const previousSteps = visibleSteps.filter((s: any) => s.status !== "running");
+                    // Sort by when the step actually ran (started_at) so order matches execution flow.
+                    // created_at is the same for all steps (created in batch), so use started_at first.
+                    const previousSteps = visibleSteps
+                      .filter((s: any) => s.status !== "running")
+                      .sort((a: any, b: any) => {
+                        const timeA = (a.started_at ? new Date(a.started_at).getTime() : null) ?? (a.created_at ? new Date(a.created_at).getTime() : 0);
+                        const timeB = (b.started_at ? new Date(b.started_at).getTime() : null) ?? (b.created_at ? new Date(b.created_at).getTime() : 0);
+                        if (timeA !== timeB) return timeA - timeB;
+                        return (a.id ?? "").localeCompare(b.id ?? "");
+                      });
                     const currentSteps = visibleSteps.filter((s: any) => s.status === "running");
 
                     const renderStep = (step: any) => {

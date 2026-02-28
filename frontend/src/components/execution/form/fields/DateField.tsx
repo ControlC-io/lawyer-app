@@ -7,7 +7,6 @@ import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Label } from "@/components/ui/label";
-import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
 interface DateFieldProps {
@@ -17,12 +16,14 @@ interface DateFieldProps {
   disabled?: boolean;
   required?: boolean;
   labelPosition?: "top" | "side" | "hidden";
+  primaryColor?: string;
 }
 
-export const DateField = ({ field, value, onChange, disabled, required, labelPosition = "top" }: DateFieldProps) => {
+export const DateField = ({ field, value, onChange, disabled, required, labelPosition = "top", primaryColor }: DateFieldProps) => {
   const [open, setOpen] = useState(false);
   const { t, language } = useLanguage();
   const dateLocale = language === "fr" ? fr : enUS;
+  const wrapperStyle = primaryColor ? ({ "--portal-primary": primaryColor } as React.CSSProperties) : undefined;
 
   // Parse value to Date object if it exists
   // Handle DD/MM/YYYY format as well as ISO format
@@ -59,11 +60,12 @@ export const DateField = ({ field, value, onChange, disabled, required, labelPos
           <Button
             variant="outline"
             className={cn(
-              "flex-1 justify-start text-left font-normal",
+              "flex-1 justify-start text-left font-normal portal-primary-btn",
               !validDate && "text-muted-foreground"
             )}
             onClick={() => !disabled && setOpen(true)}
             disabled={disabled}
+            data-portal-color={primaryColor ? "true" : undefined}
           >
             <CalendarIcon className="mr-2 h-4 w-4" />
             {validDate ? format(validDate, "dd/MM/yyyy", { locale: dateLocale }) : <span>{t("executionForm.pickDate")}</span>}
@@ -85,10 +87,10 @@ export const DateField = ({ field, value, onChange, disabled, required, labelPos
 
   if (labelPosition === "side") {
     return (
-      <div className="space-y-1.5">
+      <div className="space-y-1.5 w-full" style={wrapperStyle}>
         <div className="flex items-center gap-3">
           {label}
-          <div className="flex-1">
+          <div className="flex-1 min-w-0">
             {datePicker}
           </div>
         </div>
@@ -100,7 +102,7 @@ export const DateField = ({ field, value, onChange, disabled, required, labelPos
   }
 
   return (
-    <div className="space-y-1.5">
+    <div className="space-y-1.5 w-full" style={wrapperStyle}>
       {label}
       {datePicker}
       {field.description && (

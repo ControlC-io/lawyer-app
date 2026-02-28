@@ -12,7 +12,7 @@ import { FileViewer } from "@/components/execution/FileViewer";
 import { cn } from "@/lib/utils";
 import { getFormPagesFromConfig, evaluateFieldRules, validateAllFields, type FieldRule, type FieldValidationRule } from "@/lib/formConfig";
 import { FormPageStepper } from "@/components/execution/FormPageStepper";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, Send } from "lucide-react";
 
 interface ExecutionData {
     execution_step_id: string;
@@ -119,11 +119,40 @@ export const ExternalForm = () => {
         }
     };
 
+    const normalizeRuleValue = (value: any) => {
+        if (value && typeof value === "object" && "value" in value) {
+            return value.value;
+        }
+        return value;
+    };
+
+    const buildCurrentValues = (values: Record<string, any>): Record<string, any> => {
+        const normalized: Record<string, any> = {};
+        Object.entries(values).forEach(([fieldId, value]) => {
+            normalized[fieldId] = normalizeRuleValue(value);
+        });
+        return normalized;
+    };
+
+    const hasRequiredValue = (value: any): boolean => {
+        if (value === undefined || value === null) return false;
+        if (typeof value === "string") return value.trim() !== "";
+        if (Array.isArray(value)) return value.length > 0;
+        if (typeof value === "object" && "value" in value) {
+            const nestedValue = value.value;
+            if (Array.isArray(nestedValue)) return nestedValue.length > 0;
+            if (typeof nestedValue === "string") return nestedValue.trim() !== "";
+            return nestedValue !== undefined && nestedValue !== null;
+        }
+        return true;
+    };
+
     const validateForm = () => {
         if (!data) return false;
 
         const formFields = data.step_config?.form_fields || {};
         const extFieldRules = (data.step_config?.field_rules as FieldRule[] | undefined) ?? [];
+        const currentValues = buildCurrentValues(formData);
         const newErrors: Record<string, string> = {};
         let isValid = true;
 
@@ -135,15 +164,14 @@ export const ExternalForm = () => {
             if (config.shown === false) return;
 
             // Check visibility via centralized rules
-            if (!evaluateFieldRules(fieldId, "visibility", extFieldRules, formData, true)) return;
+            if (!evaluateFieldRules(fieldId, "visibility", extFieldRules, currentValues, true)) return;
 
             // Check required (fully driven by centralized rules)
-            const isRequired = evaluateFieldRules(fieldId, "required", extFieldRules, formData, false);
+            const isRequired = evaluateFieldRules(fieldId, "required", extFieldRules, currentValues, false);
             if (!isRequired) return;
 
-            const value = formData[fieldId];
-            // Simple validation for required fields
-            if (value === undefined || value === null || value === "") {
+            const value = currentValues[fieldId];
+            if (!hasRequiredValue(value)) {
                 const fieldDef = fields.find((f: any) => f.id === fieldId);
                 newErrors[fieldId] = `${fieldDef?.name || 'Field'} is required`;
                 isValid = false;
@@ -153,7 +181,7 @@ export const ExternalForm = () => {
         // Field-level validation rules (format, length, range, etc.)
         const fieldValidations = (data.step_config?.field_validations as FieldValidationRule[] | undefined) ?? [];
         if (fieldValidations.length > 0) {
-            const validationErrors = validateAllFields(fieldValidations, formData);
+            const validationErrors = validateAllFields(fieldValidations, currentValues);
             for (const [fieldId, fieldErrors] of Object.entries(validationErrors)) {
                 const fieldDef = fields.find((f: any) => f.id === fieldId);
                 newErrors[fieldId] = `${fieldDef?.name || "Field"}: ${fieldErrors.join(", ")}`;
@@ -268,6 +296,33 @@ export const ExternalForm = () => {
 
     const allFields = getFieldsList();
     const renderFieldRules = (data?.step_config?.field_rules as FieldRule[] | undefined) ?? [];
+    const formFields = data.step_config?.form_fields || {};
+    const currentValues = buildCurrentValues(formData);
+
+    const uploadFile = async (file: File) => {
+        try {
+            const formDataUpload = new FormData();
+            formDataUpload.append('token', token!);
+            formDataUpload.append('file', file);
+
+            const uploadResult = await api.postFormData<{ path: string; fullPath?: string; original_name?: string }>(
+                '/api/files/upload',
+                formDataUpload,
+                { skipAuth: true }
+            );
+
+            const signedUrl = await generateSignedUrl(uploadResult.path);
+            return { ...uploadResult, signedUrl };
+        } catch (error: unknown) {
+            console.error("Upload error:", error);
+            toast({
+                title: "Upload Failed",
+                description: error instanceof Error ? error.message : "Failed to upload file",
+                variant: "destructive"
+            });
+            return null;
+        }
+    };
 
     // Helper to render fields
     const renderField = (fieldId: string, labelPosition: "top" | "side" = "top") => {
@@ -275,24 +330,16 @@ export const ExternalForm = () => {
 
         if (!fieldDef) return null;
 
+        const fieldConfig = formFields[fieldId];
+        // Fields in blocks are visible by default (shown: true), but we still check if explicitly hidden
+        if (fieldConfig?.shown === false) return null;
+
+        // Check visibility via centralized rules
+        if (!evaluateFieldRules(fieldId, "visibility", renderFieldRules, currentValues, true)) return null;
+
         const handleFileUpload = async (file: File) => {
-            try {
-                // Set uploading state for this specific field if possible
-                // For now, global submitting state or we'd need per-field state
-                // Ideally FieldRenderer supports individual loading, but we are passing props.
-                // We'll trust the user interface feedback for now or could add local state map.
-
-                const formDataUpload = new FormData();
-                formDataUpload.append('token', token!);
-                formDataUpload.append('file', file);
-
-                const uploadResult = await api.postFormData<{ path: string; fullPath?: string; original_name?: string }>(
-                    '/api/files/upload',
-                    formDataUpload,
-                    { skipAuth: true }
-                );
-
-                const signedUrl = await generateSignedUrl(uploadResult.path);
+            const uploadResult = await uploadFile(file);
+            if (!uploadResult) return;
 
                 // Update form data with the file path and original name
                 const fieldType = fieldDef.field_type || fieldDef.type;
@@ -316,7 +363,7 @@ export const ExternalForm = () => {
                         const newOriginalNames = [...currentOriginalNames, uploadResult.original_name || file.name];
                         
                         // Update signed URLs for multiple files
-                        if (signedUrl) {
+                        if (uploadResult.signedUrl) {
                             setSignedUrlsMultiple(prev => {
                                 const current = prev[fieldId] || {};
                                 const newIndex = newFiles.length - 1;
@@ -324,7 +371,7 @@ export const ExternalForm = () => {
                                     ...prev,
                                     [fieldId]: {
                                         ...current,
-                                        [newIndex]: signedUrl
+                                        [newIndex]: uploadResult.signedUrl!
                                     }
                                 };
                             });
@@ -349,10 +396,10 @@ export const ExternalForm = () => {
                     }));
 
                     // Store signed URL for single file
-                    if (signedUrl) {
+                    if (uploadResult.signedUrl) {
                         setSignedUrls(prev => ({
                             ...prev,
-                            [fieldId]: signedUrl
+                            [fieldId]: uploadResult.signedUrl!
                         }));
                     }
                 }
@@ -361,15 +408,6 @@ export const ExternalForm = () => {
                     title: "Success",
                     description: "File uploaded successfully"
                 });
-
-            } catch (error: unknown) {
-                console.error("Upload error:", error);
-                toast({
-                    title: "Upload Failed",
-                    description: error instanceof Error ? error.message : "Failed to upload file",
-                    variant: "destructive"
-                });
-            }
         };
 
         const fieldType = fieldDef.field_type || fieldDef.type;
@@ -399,7 +437,7 @@ export const ExternalForm = () => {
                     signedUrls={isMultipleFiles ? signedUrlsForField : undefined}
                     // Basic props
                     disabled={submitting}
-                    required={evaluateFieldRules(fieldId, "required", renderFieldRules, formData, false)}
+                    required={evaluateFieldRules(fieldId, "required", renderFieldRules, currentValues, false)}
                     labelPosition={labelPosition}
                 // We might need to mock or omit some complex props like dynamicOptions for external view for now
                 // unless we expose those APIs publicly too
@@ -411,7 +449,6 @@ export const ExternalForm = () => {
         );
     };
 
-    const formFields = data.step_config?.form_fields || {};
     const formPages = getFormPagesFromConfig(data.step_config || {});
 
     // If form has page/block structure, collect field IDs from pages → blocks; otherwise from formFields
@@ -555,14 +592,12 @@ export const ExternalForm = () => {
                                     size="lg"
                                     onClick={handleSubmit}
                                     disabled={submitting}
+                                    aria-label="Submit"
                                 >
                                     {submitting ? (
-                                        <>
-                                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                            Submitting...
-                                        </>
+                                        <Loader2 className="h-5 w-5 animate-spin" />
                                     ) : (
-                                        "Submit"
+                                        <Send className="h-5 w-5" />
                                     )}
                                 </Button>
                             </div>
@@ -608,14 +643,12 @@ export const ExternalForm = () => {
                                 size="lg"
                                 onClick={handleSubmit}
                                 disabled={submitting}
+                                aria-label="Submit"
                             >
                                 {submitting ? (
-                                    <>
-                                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                        Submitting...
-                                    </>
+                                    <Loader2 className="h-5 w-5 animate-spin" />
                                 ) : (
-                                    "Submit"
+                                    <Send className="h-5 w-5" />
                                 )}
                             </Button>
                         </div>

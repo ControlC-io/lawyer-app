@@ -68,6 +68,7 @@ model Company {
   is_active             Boolean?               @default(true)
   slug                  String?                @unique
   logo_url              String?
+  logo_storage_path     String?
   portal_description    String?
   portal_primary_color  String?
   portal_enabled        Boolean                @default(false)

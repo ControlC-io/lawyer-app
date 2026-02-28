@@ -15,6 +15,7 @@ interface OptionFieldProps {
   disabled?: boolean;
   required?: boolean;
   labelPosition?: "top" | "side" | "hidden";
+  primaryColor?: string;
   dynamicOptions?: string[];
   isLoadingDynamic?: boolean;
   dynamicError?: { message: string; type: string };
@@ -28,12 +29,14 @@ export const OptionField = ({
   disabled, 
   required,
   labelPosition = "top",
+  primaryColor,
   dynamicOptions,
   isLoadingDynamic,
   dynamicError,
   onRetryDynamic
 }: OptionFieldProps) => {
   const [open, setOpen] = useState(false);
+  const wrapperStyle = primaryColor ? ({ "--portal-primary": primaryColor } as React.CSSProperties) : undefined;
   // Check both field_type and type for compatibility
   const fieldType = field.field_type || field.type || "option";
   const isMultiple = fieldType === "multiple_option";
@@ -68,7 +71,7 @@ export const OptionField = ({
     };
 
     return (
-      <div className="space-y-1.5">
+      <div className="space-y-1.5 w-full" style={wrapperStyle}>
         {labelPosition !== "hidden" && (
           <Label className="text-sm font-medium flex items-center gap-1">
             {field.label || field.name || field.id}
@@ -115,9 +118,10 @@ export const OptionField = ({
         ) : shouldShowFetchButton ? (
           <Button
             variant="outline"
-            className="w-full"
+            className="w-full portal-primary-btn"
             onClick={(e) => { e.preventDefault(); onRetryDynamic?.(); }}
             disabled={disabled || isLoadingDynamic}
+            data-portal-color={primaryColor ? "true" : undefined}
           >
             <Download className="mr-2 h-4 w-4" />
             Fetch Options
@@ -129,8 +133,9 @@ export const OptionField = ({
                 variant="outline"
                 role="combobox"
                 aria-expanded={open}
-                className="w-full justify-between min-h-[2.5rem] h-auto"
+                className="w-full justify-between min-h-[2.5rem] h-auto portal-primary-btn"
                 disabled={disabled || isLoadingDynamic}
+                data-portal-color={primaryColor ? "true" : undefined}
               >
                 <span className="truncate">
                   {isLoadingDynamic 
@@ -142,7 +147,11 @@ export const OptionField = ({
                 <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
               </Button>
             </PopoverTrigger>
-          <PopoverContent className="w-full p-0" align="start">
+          <PopoverContent
+            className={cn("w-full p-0", primaryColor && "portal-primary-options")}
+            style={primaryColor ? { ["--portal-primary" as string]: primaryColor } : undefined}
+            align="start"
+          >
             <Command>
               <CommandInput placeholder="Search options..." disabled={isLoadingDynamic} />
               <CommandList>
@@ -163,6 +172,7 @@ export const OptionField = ({
                           key={option}
                           value={option}
                           onSelect={() => handleSelect(option)}
+                          className={cn(primaryColor && "use-portal-primary")}
                         >
                           <Check
                             className={cn(
@@ -223,7 +233,7 @@ export const OptionField = ({
   };
 
   return (
-    <div className="space-y-1.5">
+    <div className="space-y-1.5 w-full" style={wrapperStyle}>
       {labelPosition !== "hidden" && (
         <Label className="text-sm font-medium flex items-center gap-1">
           {field.label || field.name || field.id}
@@ -265,9 +275,10 @@ export const OptionField = ({
       ) : shouldShowFetchButton ? (
         <Button
           variant="outline"
-          className="w-full"
+          className="w-full portal-primary-btn"
           onClick={(e) => { e.preventDefault(); onRetryDynamic?.(); }}
           disabled={disabled || isLoadingDynamic}
+          data-portal-color={primaryColor ? "true" : undefined}
         >
           <Download className="mr-2 h-4 w-4" />
           Fetch Options
@@ -279,8 +290,9 @@ export const OptionField = ({
               variant="outline"
               role="combobox"
               aria-expanded={open}
-              className="w-full justify-between"
+              className="w-full justify-between portal-primary-btn"
               disabled={disabled || isLoadingDynamic}
+              data-portal-color={primaryColor ? "true" : undefined}
             >
               <span className="truncate">
                 {displayValue}
@@ -288,7 +300,11 @@ export const OptionField = ({
               <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
             </Button>
           </PopoverTrigger>
-        <PopoverContent className="w-full p-0" align="start">
+        <PopoverContent
+          className={cn("w-full p-0", primaryColor && "portal-primary-options")}
+          style={primaryColor ? { ["--portal-primary" as string]: primaryColor } : undefined}
+          align="start"
+        >
           <Command>
             <CommandInput placeholder="Search options..." disabled={isLoadingDynamic} />
             <CommandList>
@@ -309,6 +325,7 @@ export const OptionField = ({
                         key={option}
                         value={option}
                         onSelect={() => handleSingleSelect(option)}
+                        className={cn(primaryColor && "use-portal-primary")}
                       >
                         <Check
                           className={cn(

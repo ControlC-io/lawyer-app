@@ -237,7 +237,7 @@ export default function AgentUsage() {
                             {row.workflow_execution_id ?? "—"}
                           </td>
                           <td className="p-3">{row.model_name ?? "—"}</td>
-                          <td className="p-3 text-right">{row.total_cost ?? "—"}</td>
+                          <td className="p-3 text-right">{row.total_cost != null ? Number(row.total_cost).toFixed(4) : "—"}</td>
                           <td className="p-3 max-w-[200px] truncate" title={row.comment ?? ""}>
                             {row.comment ?? "—"}
                           </td>

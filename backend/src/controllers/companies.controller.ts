@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 import { canUserAccessFolder, getUserGroupIdsInCompany } from '../lib/folderAccess';
+import { storageService } from '../services/storage.service';
 
 /**
  * Ensure the authenticated user has access to the company (member of company).
@@ -97,6 +98,7 @@ export const companiesController = {
           is_active: true,
           slug: true,
           logo_url: true,
+          logo_storage_path: true,
           portal_description: true,
           portal_primary_color: true,
           portal_enabled: true,
@@ -107,9 +109,19 @@ export const companiesController = {
         return res.status(404).json({ error: 'Company not found', details: 'Company not found' });
       }
 
+      const rawLogoUrl =
+        company.logo_storage_path && company.slug
+          ? `/api/portal/${companyId.slice(0, 6)}_${company.slug}/logo`
+          : company.logo_url ?? null;
+      const effectiveLogoUrl =
+        typeof rawLogoUrl === 'string' && rawLogoUrl.startsWith('/api/portal/') && rawLogoUrl.endsWith('/logo') && !company.logo_storage_path
+          ? null
+          : rawLogoUrl;
+
       // Return full api_key so dashboard can call execution endpoints with x-api-key
       return res.json({
         ...company,
+        logo_url: effectiveLogoUrl,
         has_api_key: !!company.api_key,
       });
     } catch (error) {
@@ -127,7 +139,7 @@ export const companiesController = {
   async updateCompany(req: AuthRequest, res: Response) {
     try {
       const { companyId } = req.params;
-      const { name, is_active, regenerate_api_key, slug, logo_url, portal_description, portal_primary_color, portal_enabled } = req.body;
+      const { name, is_active, regenerate_api_key, slug, logo_url, portal_description, portal_primary_color, portal_enabled, clear_logo_upload } = req.body;
 
       if (!companyId) {
         return res.status(400).json({ error: 'Missing company ID', details: 'companyId is required' });
@@ -163,7 +175,27 @@ export const companiesController = {
           updateData.slug = null;
         }
       }
-      if (typeof logo_url === 'string') updateData.logo_url = logo_url || null;
+      // Ignore logo_url when it is our own API path (/api/portal/.../logo) so saving portal settings doesn't overwrite or clear the uploaded logo
+      const logoUrlTrimmed = typeof logo_url === 'string' ? logo_url.trim() : '';
+      const isOurPortalLogoPath = logoUrlTrimmed.startsWith('/api/portal/') && logoUrlTrimmed.endsWith('/logo');
+      if (typeof logo_url === 'string' && !isOurPortalLogoPath) {
+        updateData.logo_url = logo_url.trim() || null;
+      }
+      if (clear_logo_upload === true && !isOurPortalLogoPath) {
+        const current = await prisma.company.findUnique({
+          where: { id: companyId },
+          select: { logo_storage_path: true },
+        });
+        if (current?.logo_storage_path) {
+          const bucket = storageService.getBucketName();
+          try {
+            await storageService.deleteFile(bucket, current.logo_storage_path);
+          } catch (e) {
+            console.error('deletePortalLogo: failed to delete from MinIO:', e);
+          }
+          updateData.logo_storage_path = null;
+        }
+      }
       // Allow clearing portal description: accept string (trimmed) or null/empty
       if ('portal_description' in req.body) {
         updateData.portal_description =
@@ -191,15 +223,156 @@ export const companiesController = {
           api_key: true,
           slug: true,
           logo_url: true,
+          logo_storage_path: true,
           portal_description: true,
           portal_primary_color: true,
           portal_enabled: true,
         },
       });
 
-      return res.json(company);
+      const rawLogoUrl =
+        company.logo_storage_path && company.slug
+          ? `/api/portal/${companyId.slice(0, 6)}_${company.slug}/logo`
+          : company.logo_url ?? null;
+      const effectiveLogoUrl =
+        typeof rawLogoUrl === 'string' && rawLogoUrl.startsWith('/api/portal/') && rawLogoUrl.endsWith('/logo') && !company.logo_storage_path
+          ? null
+          : rawLogoUrl;
+
+      return res.json({ ...company, logo_url: effectiveLogoUrl });
     } catch (error) {
       console.error('updateCompany error:', error);
+      return res.status(500).json({
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  },
+
+  /**
+   * POST /api/companies/:companyId/portal-logo
+   * Upload portal logo (JWT, company admin). Requires company slug to be set.
+   */
+  async uploadPortalLogo(req: AuthRequest, res: Response) {
+    try {
+      const { companyId } = req.params;
+      const file = (req as unknown as { file?: Express.Multer.File }).file;
+
+      if (!companyId) {
+        return res.status(400).json({ error: 'Missing company ID', details: 'companyId is required' });
+      }
+      if (!file || !file.buffer) {
+        return res.status(400).json({ error: 'Missing file', details: 'A logo image file is required' });
+      }
+
+      const allowedTypes = ['image/png', 'image/jpeg', 'image/svg+xml', 'image/webp'];
+      if (!allowedTypes.includes(file.mimetype)) {
+        return res.status(400).json({
+          error: 'Invalid file type',
+          details: 'Logo must be PNG, JPEG, SVG or WebP',
+        });
+      }
+      const maxSize = 2 * 1024 * 1024; // 2 MB
+      if (file.size > maxSize) {
+        return res.status(400).json({
+          error: 'File too large',
+          details: 'Logo must be 2 MB or less',
+        });
+      }
+
+      const access = await ensureCompanyAccess(req, companyId, true);
+      if (access.error) {
+        return res.status(access.error.status).json(access.error.body);
+      }
+
+      const company = await prisma.company.findUnique({
+        where: { id: companyId },
+        select: { id: true, slug: true, logo_storage_path: true },
+      });
+      if (!company) {
+        return res.status(404).json({ error: 'Company not found', details: 'Company not found' });
+      }
+      if (!company.slug || !company.slug.trim()) {
+        return res.status(400).json({
+          error: 'Portal slug required',
+          details: 'Set the portal URL (slug) before uploading a logo',
+        });
+      }
+
+      const extMap: Record<string, string> = {
+        'image/png': 'png',
+        'image/jpeg': 'jpg',
+        'image/svg+xml': 'svg',
+        'image/webp': 'webp',
+      };
+      const ext = extMap[file.mimetype] || 'png';
+      const path = `portal-logos/${companyId}/logo.${ext}`;
+      const bucket = storageService.getBucketName();
+
+      if (company.logo_storage_path && company.logo_storage_path !== path) {
+        try {
+          await storageService.deleteFile(bucket, company.logo_storage_path);
+        } catch (e) {
+          console.error('uploadPortalLogo: failed to delete previous logo from storage:', e);
+        }
+      }
+
+      await storageService.uploadFile(bucket, path, file.buffer, file.mimetype);
+
+      await prisma.company.update({
+        where: { id: companyId },
+        data: { logo_storage_path: path, logo_url: null },
+      });
+
+      const logoUrl = `/api/portal/${companyId.slice(0, 6)}_${company.slug}/logo`;
+      return res.json({ logo_url: logoUrl });
+    } catch (error) {
+      console.error('uploadPortalLogo error:', error);
+      return res.status(500).json({
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  },
+
+  /**
+   * DELETE /api/companies/:companyId/portal-logo
+   * Remove uploaded portal logo (JWT, company admin)
+   */
+  async deletePortalLogo(req: AuthRequest, res: Response) {
+    try {
+      const { companyId } = req.params;
+      if (!companyId) {
+        return res.status(400).json({ error: 'Missing company ID', details: 'companyId is required' });
+      }
+
+      const access = await ensureCompanyAccess(req, companyId, true);
+      if (access.error) {
+        return res.status(access.error.status).json(access.error.body);
+      }
+
+      const company = await prisma.company.findUnique({
+        where: { id: companyId },
+        select: { logo_storage_path: true },
+      });
+      if (!company) {
+        return res.status(404).json({ error: 'Company not found', details: 'Company not found' });
+      }
+      if (company.logo_storage_path) {
+        const bucket = storageService.getBucketName();
+        try {
+          await storageService.deleteFile(bucket, company.logo_storage_path);
+        } catch (e) {
+          console.error('deletePortalLogo: failed to delete from MinIO:', e);
+        }
+      }
+
+      await prisma.company.update({
+        where: { id: companyId },
+        data: { logo_storage_path: null },
+      });
+
+      return res.status(204).send();
+    } catch (error) {
+      console.error('deletePortalLogo error:', error);
       return res.status(500).json({
         error: error instanceof Error ? error.message : 'Unknown error',
       });

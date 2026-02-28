@@ -15,6 +15,7 @@ interface SignatureFieldProps {
   required?: boolean;
   isUploading?: boolean;
   signedUrl?: string;
+  primaryColor?: string;
 }
 
 export const SignatureField = ({
@@ -28,7 +29,9 @@ export const SignatureField = ({
   labelPosition = "top",
   isUploading,
   signedUrl,
+  primaryColor,
 }: SignatureFieldProps) => {
+  const wrapperStyle = primaryColor ? ({ "--portal-primary": primaryColor } as React.CSSProperties) : undefined;
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [hasSignature, setHasSignature] = useState(false);
@@ -155,7 +158,7 @@ export const SignatureField = ({
   };
 
   return (
-    <div className={cn("space-y-1.5", labelPosition === "side" && "flex items-start gap-4")}>
+    <div className={cn("space-y-1.5 w-full", labelPosition === "side" && "flex items-start gap-4")} style={wrapperStyle}>
       <Label className={cn(
         "text-sm font-medium flex items-center gap-1",
         labelPosition === "side" && "min-w-[120px] pt-2"

@@ -17,6 +17,7 @@ interface FileFieldProps {
   required?: boolean;
   isUploading?: boolean;
   signedUrl?: string;
+  primaryColor?: string;
 }
 
 // MIME types and corresponding extensions for native file picker (accept attribute).
@@ -130,6 +131,9 @@ const validateFileType = (file: File, allowedTypes?: string[]): boolean => {
   });
 };
 
+const portalFileTriggerProps = (primaryColor?: string) =>
+  primaryColor ? { "data-portal-file-trigger": "" as const } : {};
+
 export const FileField = ({
   field,
   value,
@@ -140,8 +144,10 @@ export const FileField = ({
   disabled,
   required,
   isUploading,
-  signedUrl
+  signedUrl,
+  primaryColor
 }: FileFieldProps) => {
+  const fileTriggerProps = portalFileTriggerProps(primaryColor);
   const inputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const isMobile = useIsMobile();
@@ -223,7 +229,7 @@ export const FileField = ({
   };
 
   return (
-    <div className="space-y-1.5">
+    <div className="space-y-1.5 w-full">
       <Label className="text-sm font-medium flex items-center gap-1">
         {field.label || field.name || field.id}
         {required && <span className="text-destructive">*</span>}
@@ -289,9 +295,11 @@ export const FileField = ({
               <Button
                 type="button"
                 variant="outline"
-                className="flex-1"
+                className="flex-1 portal-primary-btn"
                 onClick={() => inputRef.current?.click()}
                 disabled={disabled || isUploading}
+                data-portal-color={primaryColor ? "true" : undefined}
+                {...fileTriggerProps}
               >
                 {isUploading ? (
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -303,9 +311,11 @@ export const FileField = ({
               <Button
                 type="button"
                 variant="outline"
-                className="flex-1"
+                className="flex-1 portal-primary-btn"
                 onClick={() => cameraInputRef.current?.click()}
                 disabled={disabled || isUploading}
+                data-portal-color={primaryColor ? "true" : undefined}
+                {...fileTriggerProps}
               >
                 {isUploading ? (
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -319,9 +329,11 @@ export const FileField = ({
             <Button
               type="button"
               variant="outline"
-              className="w-full"
+              className="w-full portal-primary-btn"
               onClick={() => inputRef.current?.click()}
               disabled={disabled || isUploading}
+              data-portal-color={primaryColor ? "true" : undefined}
+              {...fileTriggerProps}
             >
               {isUploading ? (
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
