@@ -226,6 +226,43 @@ ALTER TABLE "public"."workflows" DROP CONSTRAINT "workflows_company_id_fkey";
 -- DropForeignKey
 ALTER TABLE "public"."workflows" DROP CONSTRAINT "workflows_default_status_id_fkey";
 
+-- Clean orphaned profile references (users deleted from auth or missing from profiles)
+-- so that re-adding foreign keys does not fail validation.
+UPDATE "public"."workflow_steps"
+SET "assigned_to_user_id" = NULL
+WHERE "assigned_to_user_id" IS NOT NULL
+  AND "assigned_to_user_id" NOT IN (SELECT "id" FROM "public"."profiles");
+
+UPDATE "public"."workflow_execution_steps"
+SET "assigned_to_user_id" = NULL
+WHERE "assigned_to_user_id" IS NOT NULL
+  AND "assigned_to_user_id" NOT IN (SELECT "id" FROM "public"."profiles");
+
+UPDATE "public"."files"
+SET "uploaded_by" = NULL
+WHERE "uploaded_by" IS NOT NULL
+  AND "uploaded_by" NOT IN (SELECT "id" FROM "public"."profiles");
+
+UPDATE "public"."profile_groups"
+SET "created_by" = NULL
+WHERE "created_by" IS NOT NULL
+  AND "created_by" NOT IN (SELECT "id" FROM "public"."profiles");
+
+UPDATE "public"."folder_permissions"
+SET "user_id" = NULL
+WHERE "user_id" IS NOT NULL
+  AND "user_id" NOT IN (SELECT "id" FROM "public"."profiles");
+
+UPDATE "public"."workflow_executions"
+SET "created_by" = NULL
+WHERE "created_by" IS NOT NULL
+  AND "created_by" NOT IN (SELECT "id" FROM "public"."profiles");
+
+UPDATE "public"."workflow_permissions"
+SET "user_id" = NULL
+WHERE "user_id" IS NOT NULL
+  AND "user_id" NOT IN (SELECT "id" FROM "public"."profiles");
+
 -- AddForeignKey
 ALTER TABLE "public"."profiles" ADD CONSTRAINT "profiles_id_fkey" FOREIGN KEY ("id") REFERENCES "auth"."users"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
