@@ -66,7 +66,7 @@ const App = () => (
                             <Route path="/execution-data" element={<ExecutionData />} />
                             <Route path="/workflows" element={<WorkflowList />} />
                             <Route path="/workflow/:id" element={<WorkflowEditor />} />
-                            <Route path="/documents" element={<DocumentManagement />} />
+                            <Route path="/documents" element={<PermissionRoute permission="documents.view"><DocumentManagement /></PermissionRoute>} />
                             <Route path="/data/global-variables" element={<GlobalVariables />} />
                             <Route path="/data" element={<Data />} />
                             <Route path="/data/:tableId" element={<Data />} />

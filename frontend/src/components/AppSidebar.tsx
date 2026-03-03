@@ -52,7 +52,7 @@ const menuSections: { groupLabelKey: string; items: MenuItem[] }[] = [
   {
     groupLabelKey: "sidebar.groupResources",
     items: [
-      { titleKey: "sidebar.documents", url: "/documents", icon: FolderOpen },
+      { titleKey: "sidebar.documents", url: "/documents", icon: FolderOpen, permission: "documents.view" },
       { titleKey: "sidebar.apiConfigurations", url: "/api-configurations", icon: Network, permission: "api_config.manage" },
     ],
   },
