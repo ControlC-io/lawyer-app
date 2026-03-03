@@ -940,5 +940,30 @@
       "min_selections": "Select at least {{value}} option(s)",
       "max_selections": "Select at most {{value}} option(s)"
     }
+  },
+  "rbac": {
+    "roles": "Roles",
+    "customRoles": "Custom Roles",
+    "customRolesDescription": "Create roles with specific permissions to assign to members",
+    "createRole": "Create Role",
+    "editRole": "Edit Role",
+    "roleName": "Name",
+    "roleNamePlaceholder": "e.g. Editor, Viewer, Manager",
+    "roleDescription": "Description",
+    "roleDescriptionPlaceholder": "What this role is for...",
+    "roleNameRequired": "Role name is required",
+    "roleCreated": "Role created",
+    "roleUpdated": "Role updated",
+    "roleDeleted": "Role deleted",
+    "deleteError": "Failed to delete role",
+    "confirmDelete": "Are you sure you want to delete this role?",
+    "permissions": "Permissions",
+    "permissionsHint": "Select the permissions this role grants",
+    "permissionsCount": "permissions",
+    "membersCount": "members",
+    "systemRole": "System",
+    "cannotDeleteAssigned": "Cannot delete a role with assigned users",
+    "roleAssigned": "Role updated",
+    "roleAssignError": "Failed to update role"
   }
 }

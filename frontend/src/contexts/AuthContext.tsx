@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, useCallback } from "react";
+import { createContext, useContext, useEffect, useState, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, setToken, clearToken } from "@/lib/api";
 
@@ -38,6 +38,8 @@ interface AuthContextType {
   setSelectedCompanyId: (id: string | null) => void;
   isCompanyAdmin: boolean;
   isSuperAdmin: boolean;
+  permissions: string[];
+  hasPermission: (key: string) => boolean;
   signOut: () => Promise<void>;
   refreshUserData: () => Promise<void>;
 }
@@ -52,6 +54,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [selectedCompanyId, setSelectedCompanyIdState] = useState<string | null>(null);
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  const [permissions, setPermissions] = useState<string[]>([]);
   const navigate = useNavigate();
 
   const setSelectedCompanyId = useCallback((id: string | null) => {
@@ -66,6 +69,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const isCompanyAdmin = selectedCompanyId
     ? userCompanies.some((uc) => uc.company_id === selectedCompanyId && uc.role === "company_admin")
     : false;
+
+  const hasPermission = useCallback(
+    (key: string): boolean => {
+      if (isSuperAdmin || isCompanyAdmin) return true;
+      if (permissions.includes('*')) return true;
+      return permissions.includes(key);
+    },
+    [isSuperAdmin, isCompanyAdmin, permissions],
+  );
 
   const fetchUserData = useCallback(async () => {
     setLoading(true);
@@ -125,6 +137,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [fetchUserData]);
 
+  useEffect(() => {
+    if (!selectedCompanyId || !user) {
+      setPermissions([]);
+      return;
+    }
+    const fetchPermissions = async () => {
+      try {
+        const perms = await api.get<string[]>(`/api/companies/${selectedCompanyId}/my-permissions`);
+        setPermissions(perms || []);
+      } catch {
+        setPermissions([]);
+      }
+    };
+    fetchPermissions();
+  }, [selectedCompanyId, user]);
+
   const signOut = async () => {
     clearToken();
     setUser(null);
@@ -132,6 +160,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setProfile(null);
     setUserCompanies([]);
     setSelectedCompanyIdState(null);
+    setPermissions([]);
     navigate("/auth");
   };
 
@@ -153,6 +182,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setSelectedCompanyId,
         isCompanyAdmin,
         isSuperAdmin,
+        permissions,
+        hasPermission,
         signOut,
         refreshUserData,
       }}

@@ -31,44 +31,44 @@ import { LanguageSelector } from "@/components/LanguageSelector";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { FeedbackDialog } from "@/components/FeedbackDialog";
 
-type MenuItem = { titleKey: string; url: string; icon: typeof Workflow };
+type MenuItem = { titleKey: string; url: string; icon: typeof Workflow; permission?: string };
 
 const menuSections: { groupLabelKey: string; items: MenuItem[] }[] = [
   {
     groupLabelKey: "sidebar.groupWorkflows",
     items: [
       { titleKey: "sidebar.executions", url: "/", icon: PlayCircle },
-      { titleKey: "sidebar.workflows", url: "/workflows", icon: Workflow },
+      { titleKey: "sidebar.workflows", url: "/workflows", icon: Workflow, permission: "workflows.manage" },
     ],
   },
   {
     groupLabelKey: "sidebar.groupData",
     items: [
-      { titleKey: "sidebar.executionData", url: "/execution-data", icon: Database },
-      { titleKey: "sidebar.data", url: "/data", icon: Table2 },
-      { titleKey: "sidebar.globalVariables", url: "/data/global-variables", icon: Variable },
+      { titleKey: "sidebar.executionData", url: "/execution-data", icon: Database, permission: "execution_data.view" },
+      { titleKey: "sidebar.data", url: "/data", icon: Table2, permission: "data.view" },
+      { titleKey: "sidebar.globalVariables", url: "/data/global-variables", icon: Variable, permission: "variables.view" },
     ],
   },
   {
     groupLabelKey: "sidebar.groupResources",
     items: [
       { titleKey: "sidebar.documents", url: "/documents", icon: FolderOpen },
-      { titleKey: "sidebar.apiConfigurations", url: "/api-configurations", icon: Network },
+      { titleKey: "sidebar.apiConfigurations", url: "/api-configurations", icon: Network, permission: "api_config.manage" },
     ],
   },
   {
     groupLabelKey: "sidebar.groupAdministration",
     items: [
-      { titleKey: "sidebar.usersGroups", url: "/users-groups", icon: Users },
+      { titleKey: "sidebar.usersGroups", url: "/users-groups", icon: Users, permission: "users_groups.manage" },
       { titleKey: "sidebar.userSettings", url: "/user-settings", icon: User },
-      { titleKey: "sidebar.organizationSettings", url: "/organization-settings", icon: Settings },
+      { titleKey: "sidebar.organizationSettings", url: "/organization-settings", icon: Settings, permission: "org_settings.manage" },
     ],
   },
 ];
 
 export function AppSidebar() {
   const { open } = useSidebar();
-  const { signOut, profile, loading, userCompanies, isSuperAdmin, isCompanyAdmin } = useAuth();
+  const { signOut, profile, loading, userCompanies, isSuperAdmin, isCompanyAdmin, hasPermission } = useAuth();
   const location = useLocation();
   const [startWorkflowDialogOpen, setStartWorkflowDialogOpen] = useState(false);
   const [feedbackDialogOpen, setFeedbackDialogOpen] = useState(false);
@@ -145,7 +145,9 @@ export function AppSidebar() {
               <SidebarGroupLabel>{t(section.groupLabelKey)}</SidebarGroupLabel>
               <SidebarGroupContent>
                 <SidebarMenu>
-                  {section.items.map((item) => {
+                  {section.items
+                  .filter((item) => !item.permission || hasPermission(item.permission))
+                  .map((item) => {
                     const isExecutions = item.titleKey === "sidebar.executions";
                     return (
                       <SidebarMenuItem key={item.titleKey}>
@@ -172,7 +174,7 @@ export function AppSidebar() {
                       </SidebarMenuButton>
                     </SidebarMenuItem>
                   )}
-                  {section.groupLabelKey === "sidebar.groupAdministration" && isCompanyAdmin && (
+                  {section.groupLabelKey === "sidebar.groupAdministration" && hasPermission('usage.view') && (
                     <SidebarMenuItem>
                       <SidebarMenuButton asChild isActive={location.pathname === "/agent-usage"}>
                         <Link to="/agent-usage">

@@ -374,11 +374,14 @@ export const usersController = {
           profile: {
             select: { id: true, email: true, full_name: true },
           },
+          custom_role: {
+            select: { id: true, name: true },
+          },
         },
       });
 
       const users = (userCompanies || [])
-        .map((uc) => (uc.profile ? { ...uc.profile, role: uc.role } : null))
+        .map((uc) => (uc.profile ? { ...uc.profile, role: uc.role, custom_role_id: uc.custom_role_id, custom_role: uc.custom_role } : null))
         .filter(Boolean)
         .sort((a, b) => ((a as any).full_name || '').localeCompare((b as any).full_name || ''));
 

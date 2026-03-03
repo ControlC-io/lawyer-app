@@ -940,5 +940,30 @@
       "min_selections": "Sélectionnez au moins {{value}} option(s)",
       "max_selections": "Sélectionnez au plus {{value}} option(s)"
     }
+  },
+  "rbac": {
+    "roles": "Rôles",
+    "customRoles": "Rôles personnalisés",
+    "customRolesDescription": "Créez des rôles avec des permissions spécifiques à attribuer aux membres",
+    "createRole": "Créer un rôle",
+    "editRole": "Modifier le rôle",
+    "roleName": "Nom",
+    "roleNamePlaceholder": "ex. Éditeur, Lecteur, Gestionnaire",
+    "roleDescription": "Description",
+    "roleDescriptionPlaceholder": "À quoi sert ce rôle...",
+    "roleNameRequired": "Le nom du rôle est requis",
+    "roleCreated": "Rôle créé",
+    "roleUpdated": "Rôle mis à jour",
+    "roleDeleted": "Rôle supprimé",
+    "deleteError": "Échec de la suppression du rôle",
+    "confirmDelete": "Êtes-vous sûr de vouloir supprimer ce rôle ?",
+    "permissions": "Permissions",
+    "permissionsHint": "Sélectionnez les permissions accordées par ce rôle",
+    "permissionsCount": "permissions",
+    "membersCount": "membres",
+    "systemRole": "Système",
+    "cannotDeleteAssigned": "Impossible de supprimer un rôle avec des utilisateurs assignés",
+    "roleAssigned": "Rôle mis à jour",
+    "roleAssignError": "Échec de la mise à jour du rôle"
   }
 }

@@ -99,6 +99,8 @@ model Company {
   workflow_execution_logs WorkflowExecutionLog[]
   workflow_files        WorkflowFile[]
   workflow_permissions  WorkflowPermission[]
+  roles              Role[]
+  audit_logs         AuditLog[]
 
   @@map("companies")
   @@schema("public")
@@ -444,12 +446,58 @@ model UserCompany {
   id         String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   user_id    String      @db.Uuid
   company_id String      @db.Uuid
-  role       CompanyRole @default(user)
-  created_at DateTime    @default(now()) @db.Timestamptz(6)
-  profile    Profile     @relation(fields: [user_id], references: [id])
-  company    Company     @relation(fields: [company_id], references: [id])
+  role           CompanyRole @default(user)
+  custom_role_id String?     @db.Uuid
+  created_at     DateTime    @default(now()) @db.Timestamptz(6)
+  profile        Profile     @relation(fields: [user_id], references: [id])
+  company        Company     @relation(fields: [company_id], references: [id])
+  custom_role    Role?       @relation(fields: [custom_role_id], references: [id])
 
   @@map("user_company")
+  @@schema("public")
+}
+
+model Role {
+  id          String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name        String
+  description String?
+  company_id  String           @db.Uuid
+  is_system   Boolean          @default(false)
+  created_at  DateTime         @default(now()) @db.Timestamptz(6)
+  updated_at  DateTime         @default(now()) @updatedAt @db.Timestamptz(6)
+  company     Company          @relation(fields: [company_id], references: [id])
+  permissions RolePermission[]
+  users       UserCompany[]
+
+  @@unique([company_id, name])
+  @@map("roles")
+  @@schema("public")
+}
+
+model RolePermission {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  role_id        String   @db.Uuid
+  permission_key String
+  created_at     DateTime @default(now()) @db.Timestamptz(6)
+  role           Role     @relation(fields: [role_id], references: [id], onDelete: Cascade)
+
+  @@unique([role_id, permission_key])
+  @@map("role_permissions")
+  @@schema("public")
+}
+
+model AuditLog {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  company_id  String   @db.Uuid
+  actor_id    String   @db.Uuid
+  action      String
+  target_type String
+  target_id   String   @db.Uuid
+  details     Json?
+  created_at  DateTime @default(now()) @db.Timestamptz(6)
+  company     Company  @relation(fields: [company_id], references: [id])
+
+  @@map("audit_logs")
   @@schema("public")
 }
 

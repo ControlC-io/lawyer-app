@@ -233,7 +233,7 @@ export const workflowDefinitionController = {
       if (!companyId) {
         return res.status(400).json({ error: 'Missing company ID' });
       }
-      const access = await ensureCompanyAccess(req, companyId, true);
+      const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
 
       const workflow = await prisma.workflow.create({
@@ -269,7 +269,7 @@ export const workflowDefinitionController = {
       if (!companyId || !workflowId) {
         return res.status(400).json({ error: 'Missing company ID or workflow ID' });
       }
-      const access = await ensureCompanyAccess(req, companyId, true);
+      const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
 
       const updateData: Record<string, unknown> = {};
@@ -316,7 +316,7 @@ export const workflowDefinitionController = {
       if (!companyId || !workflowId) {
         return res.status(400).json({ error: 'Missing company ID or workflow ID' });
       }
-      const access = await ensureCompanyAccess(req, companyId, true);
+      const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
 
       const workflow = await prisma.workflow.findFirst({
@@ -392,7 +392,7 @@ export const workflowDefinitionController = {
       if (!companyId || !workflowId) {
         return res.status(400).json({ error: 'Missing company ID or workflow ID' });
       }
-      const access = await ensureCompanyAccess(req, companyId, true);
+      const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
 
       const workflow = await prisma.workflow.findFirst({
@@ -518,7 +518,7 @@ export const workflowDefinitionController = {
       if (!companyId || !workflowId) {
         return res.status(400).json({ error: 'Missing company ID or workflow ID' });
       }
-      const access = await ensureCompanyAccess(req, companyId, true);
+      const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
 
       const workflow = await prisma.workflow.findFirst({
@@ -585,7 +585,7 @@ export const workflowDefinitionController = {
       if (!companyId || !workflowId) {
         return res.status(400).json({ error: 'Missing company ID or workflow ID' });
       }
-      const access = await ensureCompanyAccess(req, companyId, true);
+      const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
 
       const workflow = await prisma.workflow.findFirst({
@@ -626,7 +626,7 @@ export const workflowDefinitionController = {
       if (!companyId || !workflowId || !statusId) {
         return res.status(400).json({ error: 'Missing company ID, workflow ID or status ID' });
       }
-      const access = await ensureCompanyAccess(req, companyId, true);
+      const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
 
       const updateData: Record<string, unknown> = {};
@@ -656,7 +656,7 @@ export const workflowDefinitionController = {
       if (!companyId || !workflowId || !statusId) {
         return res.status(400).json({ error: 'Missing company ID, workflow ID or status ID' });
       }
-      const access = await ensureCompanyAccess(req, companyId, true);
+      const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
 
       const result = await prisma.workflowStatus.deleteMany({
@@ -701,7 +701,7 @@ export const workflowDefinitionController = {
       if (!companyId) {
         return res.status(400).json({ error: 'Missing company ID' });
       }
-      const access = await ensureCompanyAccess(req, companyId, true);
+      const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
 
       const category = await prisma.workflowCategory.create({
@@ -728,7 +728,7 @@ export const workflowDefinitionController = {
       if (!companyId || !categoryId) {
         return res.status(400).json({ error: 'Missing company ID or category ID' });
       }
-      const access = await ensureCompanyAccess(req, companyId, true);
+      const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
 
       const updateData: Record<string, unknown> = {};
@@ -759,7 +759,7 @@ export const workflowDefinitionController = {
       if (!companyId || !categoryId) {
         return res.status(400).json({ error: 'Missing company ID or category ID' });
       }
-      const access = await ensureCompanyAccess(req, companyId, true);
+      const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
 
       const result = await prisma.workflowCategory.deleteMany({
@@ -822,7 +822,7 @@ export const workflowDefinitionController = {
       if (user_id && group_id) {
         return res.status(400).json({ error: 'Provide only one of user_id or group_id' });
       }
-      const access = await ensureCompanyAccess(req, companyId, true);
+      const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
 
       const workflow = await prisma.workflow.findFirst({
@@ -877,7 +877,7 @@ export const workflowDefinitionController = {
       if (!companyId || !workflowId || !permissionId) {
         return res.status(400).json({ error: 'Missing company ID, workflow ID or permission ID' });
       }
-      const access = await ensureCompanyAccess(req, companyId, true);
+      const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
 
       const result = await prisma.workflowPermission.deleteMany({
