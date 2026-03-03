@@ -964,6 +964,7 @@
     "systemRole": "Système",
     "cannotDeleteAssigned": "Impossible de supprimer un rôle avec des utilisateurs assignés",
     "roleAssigned": "Rôle mis à jour",
-    "roleAssignError": "Échec de la mise à jour du rôle"
+    "roleAssignError": "Échec de la mise à jour du rôle",
+    "noRolesDescription": "Aucun rôle personnalisé pour le moment. Créez-en un pour attribuer des permissions granulaires aux membres."
   }
 }
