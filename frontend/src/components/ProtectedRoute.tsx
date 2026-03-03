@@ -74,3 +74,27 @@ export function CompanyAdminRoute({ children }: CompanyAdminRouteProps) {
 
   return <>{children}</>;
 }
+
+interface PermissionRouteProps {
+  children: React.ReactNode;
+  permission: string;
+}
+
+/** Renders children only if user has the specified permission; otherwise redirects to home. */
+export function PermissionRoute({ children, permission }: PermissionRouteProps) {
+  const { hasPermission, loading, selectedCompanyId } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  if (!selectedCompanyId || !hasPermission(permission)) {
+    return <Navigate to="/" replace />;
+  }
+
+  return <>{children}</>;
+}

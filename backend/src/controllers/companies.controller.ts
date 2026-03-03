@@ -145,7 +145,7 @@ export const companiesController = {
         return res.status(400).json({ error: 'Missing company ID', details: 'companyId is required' });
       }
 
-      const access = await ensureCompanyAccess(req, companyId, true);
+      const access = await ensureCompanyAccess(req, companyId);
       if (access.error) {
         return res.status(access.error.status).json(access.error.body);
       }
@@ -279,7 +279,7 @@ export const companiesController = {
         });
       }
 
-      const access = await ensureCompanyAccess(req, companyId, true);
+      const access = await ensureCompanyAccess(req, companyId);
       if (access.error) {
         return res.status(access.error.status).json(access.error.body);
       }
@@ -344,7 +344,7 @@ export const companiesController = {
         return res.status(400).json({ error: 'Missing company ID', details: 'companyId is required' });
       }
 
-      const access = await ensureCompanyAccess(req, companyId, true);
+      const access = await ensureCompanyAccess(req, companyId);
       if (access.error) {
         return res.status(access.error.status).json(access.error.body);
       }
@@ -422,7 +422,7 @@ export const companiesController = {
         return res.status(400).json({ error: 'Missing company ID', details: 'companyId is required' });
       }
 
-      const access = await ensureCompanyAccess(req, companyId, true);
+      const access = await ensureCompanyAccess(req, companyId);
       if (access.error) {
         return res.status(access.error.status).json(access.error.body);
       }
@@ -456,7 +456,7 @@ export const companiesController = {
         return res.status(400).json({ error: 'Missing company ID or key ID', details: 'companyId and keyId are required' });
       }
 
-      const access = await ensureCompanyAccess(req, companyId, true);
+      const access = await ensureCompanyAccess(req, companyId);
       if (access.error) {
         return res.status(access.error.status).json(access.error.body);
       }
@@ -494,7 +494,7 @@ export const companiesController = {
         return res.status(400).json({ error: 'Missing company ID or key ID', details: 'companyId and keyId are required' });
       }
 
-      const access = await ensureCompanyAccess(req, companyId, true);
+      const access = await ensureCompanyAccess(req, companyId);
       if (access.error) {
         return res.status(access.error.status).json(access.error.body);
       }
@@ -525,7 +525,7 @@ export const companiesController = {
       const { companyId, fileId } = req.params;
       const { entries } = (req.body || {}) as { entries?: Array<{ key: string; value: string }> };
       if (!companyId || !fileId) return res.status(400).json({ error: 'Missing company ID or file ID' });
-      const access = await ensureCompanyAccess(req, companyId, true);
+      const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
 
       const file = await prisma.file.findFirst({ where: { id: fileId, company_id: companyId } });
@@ -834,7 +834,7 @@ export const companiesController = {
     try {
       const { companyId, userId: targetUserId } = req.params;
       if (!companyId || !targetUserId) return res.status(400).json({ error: 'Missing company ID or user ID' });
-      const access = await ensureCompanyAccess(req, companyId, true);
+      const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
       const groups = await prisma.profileGroup.findMany({ where: { company_id: companyId }, select: { id: true } });
       const groupIds = groups.map((g) => g.id);
@@ -903,7 +903,7 @@ export const companiesController = {
       const { companyId } = req.params;
       const { name, description } = req.body || {};
       if (!companyId) return res.status(400).json({ error: 'Missing company ID' });
-      const access = await ensureCompanyAccess(req, companyId, true);
+      const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
       const group = await prisma.profileGroup.create({
         data: {
@@ -925,7 +925,7 @@ export const companiesController = {
       const { companyId, groupId } = req.params;
       const { name, description } = req.body || {};
       if (!companyId || !groupId) return res.status(400).json({ error: 'Missing company ID or group ID' });
-      const access = await ensureCompanyAccess(req, companyId, true);
+      const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
       const result = await prisma.profileGroup.updateMany({
         where: { id: groupId, company_id: companyId },
@@ -947,7 +947,7 @@ export const companiesController = {
     try {
       const { companyId, groupId } = req.params;
       if (!companyId || !groupId) return res.status(400).json({ error: 'Missing company ID or group ID' });
-      const access = await ensureCompanyAccess(req, companyId, true);
+      const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
       const result = await prisma.profileGroup.deleteMany({
         where: { id: groupId, company_id: companyId },
@@ -1001,7 +1001,7 @@ export const companiesController = {
       const { companyId, groupId } = req.params;
       const { profile_id } = req.body || {};
       if (!companyId || !groupId || !profile_id) return res.status(400).json({ error: 'Missing company ID, group ID or profile_id' });
-      const access = await ensureCompanyAccess(req, companyId, true);
+      const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
       const group = await prisma.profileGroup.findFirst({ where: { id: groupId, company_id: companyId } });
       if (!group) return res.status(404).json({ error: 'Group not found' });
@@ -1025,7 +1025,7 @@ export const companiesController = {
     try {
       const { companyId, groupId, memberId } = req.params;
       if (!companyId || !groupId || !memberId) return res.status(400).json({ error: 'Missing company ID, group ID or member ID' });
-      const access = await ensureCompanyAccess(req, companyId, true);
+      const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
       const group = await prisma.profileGroup.findFirst({ where: { id: groupId, company_id: companyId } });
       if (!group) return res.status(404).json({ error: 'Group not found' });
@@ -1045,7 +1045,7 @@ export const companiesController = {
     try {
       const { companyId, groupId, profileId } = req.params;
       if (!companyId || !groupId || !profileId) return res.status(400).json({ error: 'Missing company ID, group ID or profile ID' });
-      const access = await ensureCompanyAccess(req, companyId, true);
+      const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
       const group = await prisma.profileGroup.findFirst({ where: { id: groupId, company_id: companyId } });
       if (!group) return res.status(404).json({ error: 'Group not found' });
@@ -1083,7 +1083,7 @@ export const companiesController = {
       const { companyId } = req.params;
       const body = req.body || {};
       if (!companyId) return res.status(400).json({ error: 'Missing company ID' });
-      const access = await ensureCompanyAccess(req, companyId, true);
+      const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
       const config = await prisma.apiConfiguration.create({
         data: {
@@ -1110,7 +1110,7 @@ export const companiesController = {
       const { companyId, configId } = req.params;
       const body = req.body || {};
       if (!companyId || !configId) return res.status(400).json({ error: 'Missing company ID or config ID' });
-      const access = await ensureCompanyAccess(req, companyId, true);
+      const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
       const result = await prisma.apiConfiguration.updateMany({
         where: { id: configId, company_id: companyId },
@@ -1138,7 +1138,7 @@ export const companiesController = {
     try {
       const { companyId, configId } = req.params;
       if (!companyId || !configId) return res.status(400).json({ error: 'Missing company ID or config ID' });
-      const access = await ensureCompanyAccess(req, companyId, true);
+      const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
       const result = await prisma.apiConfiguration.deleteMany({
         where: { id: configId, company_id: companyId },
@@ -1174,7 +1174,7 @@ export const companiesController = {
       const { companyId } = req.params;
       const body = req.body || {};
       if (!companyId) return res.status(400).json({ error: 'Missing company ID' });
-      const access = await ensureCompanyAccess(req, companyId, true);
+      const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
       const variable = await prisma.dataGlobalVariable.create({
         data: {
@@ -1200,7 +1200,7 @@ export const companiesController = {
       const { companyId, variableId } = req.params;
       const body = req.body || {};
       if (!companyId || !variableId) return res.status(400).json({ error: 'Missing company ID or variable ID' });
-      const access = await ensureCompanyAccess(req, companyId, true);
+      const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
       const result = await prisma.dataGlobalVariable.updateMany({
         where: { id: variableId, company_id: companyId },
@@ -1227,7 +1227,7 @@ export const companiesController = {
     try {
       const { companyId, variableId } = req.params;
       if (!companyId || !variableId) return res.status(400).json({ error: 'Missing company ID or variable ID' });
-      const access = await ensureCompanyAccess(req, companyId, true);
+      const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
       const result = await prisma.dataGlobalVariable.deleteMany({
         where: { id: variableId, company_id: companyId },
@@ -1264,7 +1264,7 @@ export const companiesController = {
       const { companyId } = req.params;
       const body = req.body || {};
       if (!companyId) return res.status(400).json({ error: 'Missing company ID' });
-      const access = await ensureCompanyAccess(req, companyId, true);
+      const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
       const table = await prisma.dataTable.create({
         data: {
@@ -1286,7 +1286,7 @@ export const companiesController = {
       const { companyId, tableId } = req.params;
       const body = req.body || {};
       if (!companyId || !tableId) return res.status(400).json({ error: 'Missing company ID or table ID' });
-      const access = await ensureCompanyAccess(req, companyId, true);
+      const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
       const result = await prisma.dataTable.updateMany({
         where: { id: tableId, company_id: companyId },
@@ -1310,7 +1310,7 @@ export const companiesController = {
     try {
       const { companyId, tableId } = req.params;
       if (!companyId || !tableId) return res.status(400).json({ error: 'Missing company ID or table ID' });
-      const access = await ensureCompanyAccess(req, companyId, true);
+      const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
       const result = await prisma.dataTable.deleteMany({
         where: { id: tableId, company_id: companyId },
@@ -1328,7 +1328,7 @@ export const companiesController = {
       const { companyId, tableId } = req.params;
       const body = req.body || {};
       if (!companyId || !tableId) return res.status(400).json({ error: 'Missing company ID or table ID' });
-      const access = await ensureCompanyAccess(req, companyId, true);
+      const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
       const source = await prisma.dataTable.findFirst({
         where: { id: tableId, company_id: companyId },
@@ -1388,7 +1388,7 @@ export const companiesController = {
       const { companyId, tableId } = req.params;
       const body = req.body || {};
       if (!companyId || !tableId) return res.status(400).json({ error: 'Missing company ID or table ID' });
-      const access = await ensureCompanyAccess(req, companyId, true);
+      const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
       const table = await prisma.dataTable.findFirst({ where: { id: tableId, company_id: companyId } });
       if (!table) return res.status(404).json({ error: 'Data table not found' });
@@ -1415,7 +1415,7 @@ export const companiesController = {
       const { companyId, tableId, fieldId } = req.params;
       const body = req.body || {};
       if (!companyId || !tableId || !fieldId) return res.status(400).json({ error: 'Missing company ID, table ID or field ID' });
-      const access = await ensureCompanyAccess(req, companyId, true);
+      const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
       const result = await prisma.dataTableField.updateMany({
         where: { id: fieldId, table_id: tableId, company_id: companyId },
@@ -1440,7 +1440,7 @@ export const companiesController = {
     try {
       const { companyId, tableId, fieldId } = req.params;
       if (!companyId || !tableId || !fieldId) return res.status(400).json({ error: 'Missing company ID, table ID or field ID' });
-      const access = await ensureCompanyAccess(req, companyId, true);
+      const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
       const result = await prisma.dataTableField.deleteMany({
         where: { id: fieldId, table_id: tableId, company_id: companyId },
@@ -1477,7 +1477,7 @@ export const companiesController = {
       const { companyId, tableId } = req.params;
       const body = req.body || {};
       if (!companyId || !tableId) return res.status(400).json({ error: 'Missing company ID or table ID' });
-      const access = await ensureCompanyAccess(req, companyId, true);
+      const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
       const table = await prisma.dataTable.findFirst({ where: { id: tableId, company_id: companyId } });
       if (!table) return res.status(404).json({ error: 'Data table not found' });
@@ -1502,7 +1502,7 @@ export const companiesController = {
       const { companyId, tableId, recordId } = req.params;
       const body = req.body || {};
       if (!companyId || !tableId || !recordId) return res.status(400).json({ error: 'Missing company ID, table ID or record ID' });
-      const access = await ensureCompanyAccess(req, companyId, true);
+      const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
       const result = await prisma.dataTableRecord.updateMany({
         where: { id: recordId, table_id: tableId, company_id: companyId },
@@ -1524,7 +1524,7 @@ export const companiesController = {
     try {
       const { companyId, tableId, recordId } = req.params;
       if (!companyId || !tableId || !recordId) return res.status(400).json({ error: 'Missing company ID, table ID or record ID' });
-      const access = await ensureCompanyAccess(req, companyId, true);
+      const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
       const result = await prisma.dataTableRecord.deleteMany({
         where: { id: recordId, table_id: tableId, company_id: companyId },
@@ -1613,7 +1613,7 @@ export const companiesController = {
       const { companyId } = req.params;
       const { name, description, parent_folder_id } = req.body || {};
       if (!companyId) return res.status(400).json({ error: 'Missing company ID' });
-      const access = await ensureCompanyAccess(req, companyId, true);
+      const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
       const folder = await prisma.folder.create({
         data: {
@@ -1635,7 +1635,7 @@ export const companiesController = {
       const { companyId, folderId } = req.params;
       const { name, description } = req.body || {};
       if (!companyId || !folderId) return res.status(400).json({ error: 'Missing company ID or folder ID' });
-      const access = await ensureCompanyAccess(req, companyId, true);
+      const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
       const result = await prisma.folder.updateMany({
         where: { id: folderId, company_id: companyId },
@@ -1657,7 +1657,7 @@ export const companiesController = {
     try {
       const { companyId, folderId } = req.params;
       if (!companyId || !folderId) return res.status(400).json({ error: 'Missing company ID or folder ID' });
-      const access = await ensureCompanyAccess(req, companyId, true);
+      const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
       const result = await prisma.folder.deleteMany({
         where: { id: folderId, company_id: companyId },
@@ -1675,7 +1675,7 @@ export const companiesController = {
     try {
       const { companyId, folderId } = req.params;
       if (!companyId || !folderId) return res.status(400).json({ error: 'Missing company ID or folder ID' });
-      const access = await ensureCompanyAccess(req, companyId, true);
+      const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
       const folder = await prisma.folder.findFirst({
         where: { id: folderId, company_id: companyId },
@@ -1710,7 +1710,7 @@ export const companiesController = {
       }
       const validTypes = ['read', 'write'];
       const type = typeof permission_type === 'string' && validTypes.includes(permission_type) ? permission_type : 'read';
-      const access = await ensureCompanyAccess(req, companyId, true);
+      const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
       const folder = await prisma.folder.findFirst({
         where: { id: folderId, company_id: companyId },
@@ -1747,7 +1747,7 @@ export const companiesController = {
     try {
       const { companyId, folderId, permissionId } = req.params;
       if (!companyId || !folderId || !permissionId) return res.status(400).json({ error: 'Missing company ID, folder ID or permission ID' });
-      const access = await ensureCompanyAccess(req, companyId, true);
+      const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
       const folder = await prisma.folder.findFirst({
         where: { id: folderId, company_id: companyId },
@@ -1828,7 +1828,7 @@ export const companiesController = {
       const { companyId } = req.params;
       const body = req.body || {};
       if (!companyId) return res.status(400).json({ error: 'Missing company ID' });
-      const access = await ensureCompanyAccess(req, companyId, true);
+      const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
       const userId = req.user?.id ?? null;
       const file = await prisma.file.create({
@@ -1918,7 +1918,7 @@ export const companiesController = {
       const { companyId } = req.params;
       const { agent_configuration_id, enabled } = req.body || {};
       if (!companyId || !agent_configuration_id) return res.status(400).json({ error: 'Missing company ID or agent_configuration_id' });
-      const access = await ensureCompanyAccess(req, companyId, true);
+      const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
       const perm = await prisma.agentPermission.create({
         data: {
@@ -1941,7 +1941,7 @@ export const companiesController = {
       const { companyId, permissionId } = req.params;
       const { enabled } = req.body || {};
       if (!companyId || !permissionId) return res.status(400).json({ error: 'Missing company ID or permission ID' });
-      const access = await ensureCompanyAccess(req, companyId, true);
+      const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
       const result = await prisma.agentPermission.updateMany({
         where: { id: permissionId, company_id: companyId },
@@ -1960,7 +1960,7 @@ export const companiesController = {
     try {
       const { companyId, permissionId } = req.params;
       if (!companyId || !permissionId) return res.status(400).json({ error: 'Missing company ID or permission ID' });
-      const access = await ensureCompanyAccess(req, companyId, true);
+      const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
       const result = await prisma.agentPermission.deleteMany({
         where: { id: permissionId, company_id: companyId },
@@ -1981,7 +1981,7 @@ export const companiesController = {
     try {
       const { companyId } = req.params;
       if (!companyId) return res.status(400).json({ error: 'Missing company ID' });
-      const access = await ensureCompanyAccess(req, companyId, true);
+      const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
 
       const list = await prisma.agentUsage.findMany({

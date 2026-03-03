@@ -1,11 +1,13 @@
 import { useMemo, useState, useEffect } from "react";
 import { Plus, Pencil, Trash2, Search, ChevronLeft, ChevronRight, Loader2, UserMinus } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
@@ -13,6 +15,10 @@ import { toast } from "sonner";
 import { useCompanyId } from "@/hooks/useCompanyId";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { useRoles } from "@/hooks/useRoles";
+import { RoleCard } from "@/components/rbac/RoleCard";
+import { RoleFormDialog } from "@/components/rbac/RoleFormDialog";
+import type { Role } from "@/hooks/useRoles";
 
 type GroupItem = {
   id: string;
@@ -26,6 +32,8 @@ type UserItem = {
   full_name: string | null;
   email: string;
   role?: string;
+  custom_role_id?: string | null;
+  custom_role?: { id: string; name: string } | null;
 };
 
 type GroupMember = {
@@ -37,11 +45,16 @@ export default function UsersGroups() {
   const companyId = useCompanyId();
   const { user, isCompanyAdmin } = useAuth();
   const { t } = useLanguage();
+  const { roles, permissionGroups, createRole, updateRole, deleteRole, assignUserRole } = useRoles();
   const [groups, setGroups] = useState<GroupItem[]>([]);
   const [users, setUsers] = useState<UserItem[]>([]);
   const [groupMembers, setGroupMembers] = useState<GroupMember[]>([]);
-  const [activeTab, setActiveTab] = useState<"users" | "groups">("users");
+  const [activeTab, setActiveTab] = useState<"users" | "groups" | "roles">("users");
   const [loading, setLoading] = useState(true);
+
+  // Roles tab state
+  const [roleDialogOpen, setRoleDialogOpen] = useState(false);
+  const [editingRole, setEditingRole] = useState<Role | null>(null);
 
   // Users tab state
   const [userQuery, setUserQuery] = useState("");
@@ -348,6 +361,7 @@ export default function UsersGroups() {
         <TabsList>
           <TabsTrigger value="users">Users</TabsTrigger>
           <TabsTrigger value="groups">Groups</TabsTrigger>
+          <TabsTrigger value="roles">{t("rbac.roles") || "Roles"}</TabsTrigger>
         </TabsList>
 
         <TabsContent value="users" className="space-y-4">
@@ -407,7 +421,45 @@ export default function UsersGroups() {
                       <TableRow key={u.id}>
                         <TableCell className="font-medium">{u.full_name || "—"}</TableCell>
                         <TableCell>{u.email}</TableCell>
-                        <TableCell className="capitalize">{u.role?.replace("_", " ") || "—"}</TableCell>
+                        <TableCell>
+                          {isCompanyAdmin && u.id !== user?.id ? (
+                            <Select
+                              value={u.custom_role_id || u.role || "user"}
+                              onValueChange={async (value) => {
+                                try {
+                                  if (value === "company_admin") {
+                                    await assignUserRole(u.id, "company_admin");
+                                  } else if (value === "user") {
+                                    await assignUserRole(u.id, "user", null);
+                                  } else {
+                                    await assignUserRole(u.id, "user", value);
+                                  }
+                                  await fetchUsers();
+                                  toast.success(t("rbac.roleAssigned") || "Role updated");
+                                } catch {
+                                  toast.error(t("rbac.roleAssignError") || "Failed to update role");
+                                }
+                              }}
+                            >
+                              <SelectTrigger className="w-[160px] h-8">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="company_admin">Admin</SelectItem>
+                                <SelectItem value="user">Member</SelectItem>
+                                {roles.filter((r) => !r.is_system).map((r) => (
+                                  <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          ) : (
+                            <Badge variant={u.role === "company_admin" ? "default" : "secondary"}>
+                              {u.role === "company_admin"
+                                ? "Admin"
+                                : u.custom_role?.name || "Member"}
+                            </Badge>
+                          )}
+                        </TableCell>
                         <TableCell>
                           {userGroups.length > 0 
                             ? userGroups.map(g => g.name).join(", ") 
@@ -653,6 +705,65 @@ export default function UsersGroups() {
               )}
             </CardContent>
           </Card>
+        </TabsContent>
+        <TabsContent value="roles" className="mt-6">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h3 className="text-lg font-semibold">{t("rbac.customRoles") || "Custom Roles"}</h3>
+              <p className="text-sm text-muted-foreground">
+                {t("rbac.customRolesDescription") || "Create roles with specific permissions to assign to members"}
+              </p>
+            </div>
+            {isCompanyAdmin && (
+              <Button onClick={() => { setEditingRole(null); setRoleDialogOpen(true); }}>
+                <Plus className="h-4 w-4 mr-2" />
+                {t("rbac.createRole") || "Create Role"}
+              </Button>
+            )}
+          </div>
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {roles.map((role) => (
+              <RoleCard
+                key={role.id}
+                role={role}
+                canManage={isCompanyAdmin}
+                onEdit={(r) => { setEditingRole(r); setRoleDialogOpen(true); }}
+                onDelete={async (r) => {
+                  if (confirm(t("rbac.confirmDelete") || `Delete role "${r.name}"?`)) {
+                    try {
+                      await deleteRole(r.id);
+                      toast.success(t("rbac.roleDeleted") || "Role deleted");
+                    } catch {
+                      toast.error(t("rbac.deleteError") || "Failed to delete role");
+                    }
+                  }
+                }}
+              />
+            ))}
+          </div>
+          {roles.length === 0 && (
+            <div className="text-center py-12">
+              <p className="text-muted-foreground mb-4">{t("rbac.noRoles") || "No roles yet"}</p>
+              {isCompanyAdmin && (
+                <Button onClick={() => { setEditingRole(null); setRoleDialogOpen(true); }}>
+                  {t("rbac.createRole") || "Create Role"}
+                </Button>
+              )}
+            </div>
+          )}
+          <RoleFormDialog
+            open={roleDialogOpen}
+            onOpenChange={setRoleDialogOpen}
+            role={editingRole}
+            permissionGroups={permissionGroups}
+            onSave={async (name, description, permissions) => {
+              if (editingRole) {
+                await updateRole(editingRole.id, { name, description, permissions });
+              } else {
+                await createRole(name, description, permissions);
+              }
+            }}
+          />
         </TabsContent>
       </Tabs>
 
