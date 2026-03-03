@@ -168,14 +168,21 @@ export async function getUserPermissions(
 /**
  * Express middleware factory: require a specific permission.
  * Handles company access check + permission check in one step.
- * API key and super admin requests bypass permission checks.
+ * API key requests are treated as company-admin for their own company only.
+ * Super admin requests bypass permission checks.
  */
 export function requirePermission(permissionKey: string) {
   return async (req: AuthRequest, res: Response, next: NextFunction) => {
     const companyId = req.params.companyId;
+    if (!companyId) {
+      return res.status(400).json({ error: 'Bad Request', details: 'Missing companyId parameter' });
+    }
 
-    // API key auth = admin equivalent (no user context)
+    // API key auth = company-admin equivalent, scoped to the authenticated company.
     if (req.company && !req.user) {
+      if (req.company.id !== companyId) {
+        return res.status(403).json({ error: 'Forbidden', details: 'API key is not valid for this company' });
+      }
       return next();
     }
 
