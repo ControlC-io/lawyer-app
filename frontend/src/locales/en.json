@@ -964,6 +964,7 @@
     "systemRole": "System",
     "cannotDeleteAssigned": "Cannot delete a role with assigned users",
     "roleAssigned": "Role updated",
-    "roleAssignError": "Failed to update role"
+    "roleAssignError": "Failed to update role",
+    "noRolesDescription": "No custom roles yet. Create one to assign granular permissions to members."
   }
 }

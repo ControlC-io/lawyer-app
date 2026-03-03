@@ -10,7 +10,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { PermissionGroupSection } from "./PermissionGroupSection";
 import type { Role, PermissionGroup } from "@/hooks/useRoles";
@@ -87,8 +86,8 @@ export function RoleFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg max-h-[85vh] flex flex-col">
-        <DialogHeader>
+      <DialogContent className="max-w-lg max-h-[85vh] flex flex-col overflow-hidden p-0">
+        <DialogHeader className="px-6 pt-6 pb-0">
           <DialogTitle className="flex items-center gap-2">
             <Shield className="h-5 w-5 text-primary" />
             {isEditing
@@ -97,45 +96,45 @@ export function RoleFormDialog({
           </DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-4 flex-1 overflow-hidden flex flex-col">
-          <div className="space-y-2">
-            <Label htmlFor="role-name">{t("rbac.roleName") || "Name"}</Label>
-            <Input
-              id="role-name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder={t("rbac.roleNamePlaceholder") || "e.g. Editor, Viewer, Manager"}
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="role-description">
-              {t("rbac.roleDescription") || "Description"}
-            </Label>
-            <Textarea
-              id="role-description"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder={t("rbac.roleDescriptionPlaceholder") || "What this role is for..."}
-              rows={2}
-            />
-          </div>
-
-          <Separator />
-
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <Label>{t("rbac.permissions") || "Permissions"}</Label>
-              <p className="text-xs text-muted-foreground">
-                {t("rbac.permissionsHint") || "Select the permissions this role grants"}
-              </p>
+        <div className="flex-1 overflow-y-auto min-h-0 px-6">
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="role-name">{t("rbac.roleName") || "Name"}</Label>
+              <Input
+                id="role-name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder={t("rbac.roleNamePlaceholder") || "e.g. Editor, Viewer, Manager"}
+              />
             </div>
-            <span className="text-xs font-medium tabular-nums text-muted-foreground">
-              {selectedPermissions.length}/{totalPermissions}
-            </span>
-          </div>
 
-          <ScrollArea className="flex-1 min-h-0 pr-3">
+            <div className="space-y-2">
+              <Label htmlFor="role-description">
+                {t("rbac.roleDescription") || "Description"}
+              </Label>
+              <Textarea
+                id="role-description"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder={t("rbac.roleDescriptionPlaceholder") || "What this role is for..."}
+                rows={2}
+              />
+            </div>
+
+            <Separator />
+
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label>{t("rbac.permissions") || "Permissions"}</Label>
+                <p className="text-xs text-muted-foreground">
+                  {t("rbac.permissionsHint") || "Select the permissions this role grants"}
+                </p>
+              </div>
+              <span className="text-xs font-medium tabular-nums text-muted-foreground">
+                {selectedPermissions.length}/{totalPermissions}
+              </span>
+            </div>
+
             <div className="space-y-1">
               {permissionGroups.map((group) => (
                 <PermissionGroupSection
@@ -146,10 +145,10 @@ export function RoleFormDialog({
                 />
               ))}
             </div>
-          </ScrollArea>
+          </div>
         </div>
 
-        <DialogFooter>
+        <DialogFooter className="px-6 pb-6 pt-4 border-t">
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
             {t("common.cancel") || "Cancel"}
           </Button>

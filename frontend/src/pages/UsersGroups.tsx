@@ -1,5 +1,5 @@
 import { useMemo, useState, useEffect } from "react";
-import { Plus, Pencil, Trash2, Search, ChevronLeft, ChevronRight, Loader2, UserMinus } from "lucide-react";
+import { Plus, Pencil, Trash2, Search, ChevronLeft, ChevronRight, Loader2, UserMinus, Shield } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -742,13 +742,13 @@ export default function UsersGroups() {
             ))}
           </div>
           {roles.length === 0 && (
-            <div className="text-center py-12">
-              <p className="text-muted-foreground mb-4">{t("rbac.noRoles") || "No roles yet"}</p>
-              {isCompanyAdmin && (
-                <Button onClick={() => { setEditingRole(null); setRoleDialogOpen(true); }}>
-                  {t("rbac.createRole") || "Create Role"}
-                </Button>
-              )}
+            <div className="flex flex-col items-center justify-center py-16 text-center">
+              <div className="rounded-full bg-muted p-3 mb-4">
+                <Shield className="h-6 w-6 text-muted-foreground" />
+              </div>
+              <p className="text-sm text-muted-foreground max-w-xs">
+                {t("rbac.noRolesDescription") || "No custom roles yet. Create one to assign granular permissions to members."}
+              </p>
             </div>
           )}
           <RoleFormDialog
