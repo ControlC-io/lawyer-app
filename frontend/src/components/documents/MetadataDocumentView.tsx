@@ -26,7 +26,17 @@ import {
   Filter,
   Search,
   CloudUpload,
+  Clock,
+  Loader2,
+  CheckCircle,
+  XCircle,
+  FileSearch,
+  ScanText,
+  Copy,
 } from "lucide-react";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Switch } from "@/components/ui/switch";
+import ReactMarkdown from "react-markdown";
 import { useToast } from "@/hooks/use-toast";
 
 interface FileType {
@@ -42,6 +52,10 @@ interface FileType {
     value: string;
     metadata?: { id: string; name: string };
   }>;
+  ocr_status?: string | null;
+  ocr_error?: string | null;
+  ocr_processed_at?: string | null;
+  ocrSnippet?: string;
 }
 
 interface MetadataKey {
@@ -68,6 +82,26 @@ function nodeDirectlyMatches(node: TreeNode, query: string): boolean {
   if (!query) return false;
   const q = query.toLowerCase();
   return node.name.toLowerCase().includes(q) || (node.keyName?.toLowerCase().includes(q) ?? false);
+}
+
+function OcrStatusBadge({ file }: { file: FileType }) {
+  if (!file.ocr_status) return null;
+  switch (file.ocr_status) {
+    case 'pending':
+      return <Badge variant="secondary" className="gap-1 text-xs"><Clock className="h-3 w-3" />Pending</Badge>;
+    case 'processing':
+      return <Badge variant="secondary" className="gap-1 text-xs bg-blue-50 text-blue-700"><Loader2 className="h-3 w-3 animate-spin" />Processing</Badge>;
+    case 'completed':
+      return <Badge variant="secondary" className="gap-1 text-xs bg-green-50 text-green-700"><CheckCircle className="h-3 w-3" />OCR</Badge>;
+    case 'failed':
+      return (
+        <Badge variant="destructive" className="gap-1 text-xs" title={file.ocr_error || 'OCR failed'}>
+          <XCircle className="h-3 w-3" />Failed
+        </Badge>
+      );
+    default:
+      return null;
+  }
 }
 
 export default function MetadataDocumentView({ companyId, canManage = false }: Props) {
@@ -99,9 +133,39 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [filterRows, setFilterRows] = useState<Array<{ key_id: string; value: string }>>([]);
   const [treeSearch, setTreeSearch] = useState("");
+  // OCR state
+  const [ocrPolling, setOcrPolling] = useState<Record<string, NodeJS.Timeout>>({});
+  const [ocrViewerOpen, setOcrViewerOpen] = useState(false);
+  const [ocrViewerData, setOcrViewerData] = useState<{ fileName: string; markdown: string; provider?: string; model?: string; processedAt?: string } | null>(null);
+  const [ocrAfterUpload, setOcrAfterUpload] = useState(false);
+  const [ocrEnabled, setOcrEnabled] = useState(false);
+  // Search state
+  const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [searchActive, setSearchActive] = useState(false);
   const { toast } = useToast();
 
   const canWriteFiles = canManage || hasWriteAccess;
+
+  // Check OCR availability on mount
+  useEffect(() => {
+    api.get<{ ocr: { enabled: boolean } }>('/health').then(data => {
+      setOcrEnabled(data?.ocr?.enabled ?? false);
+    }).catch(() => {});
+  }, []);
+
+  // Debounce search query
+  useEffect(() => {
+    const timeout = setTimeout(() => setDebouncedSearch(searchQuery), 300);
+    return () => clearTimeout(timeout);
+  }, [searchQuery]);
+
+  // Clean up OCR polling on unmount
+  useEffect(() => {
+    return () => {
+      Object.values(ocrPolling).forEach(clearInterval);
+    };
+  }, [ocrPolling]);
 
   const fetchMetadataKeys = useCallback(async () => {
     const data = await api.get<MetadataKey[]>(`/api/companies/${companyId}/files-metadata-keys`);
@@ -127,16 +191,20 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
   const fetchFiles = useCallback(async () => {
     setLoading(true);
     try {
-      const filtersParam = filters.length > 0 ? `?filters=${encodeURIComponent(JSON.stringify(filters))}` : "";
-      const data = await api.get<{ files: FileType[]; hasWriteAccess: boolean }>(`/api/companies/${companyId}/documents/flat${filtersParam}`);
+      const params = new URLSearchParams();
+      if (filters.length > 0) params.set('filters', JSON.stringify(filters));
+      if (debouncedSearch.trim()) params.set('q', debouncedSearch.trim());
+      const queryString = params.toString() ? `?${params.toString()}` : '';
+      const data = await api.get<{ files: FileType[]; hasWriteAccess: boolean; searchActive?: boolean }>(`/api/companies/${companyId}/documents/flat${queryString}`);
       setFiles(data?.files || []);
       setHasWriteAccess(data?.hasWriteAccess || false);
+      setSearchActive(data?.searchActive || false);
     } catch {
       toast({ title: "Error", description: "Failed to load files", variant: "destructive" });
     } finally {
       setLoading(false);
     }
-  }, [companyId, filters, toast]);
+  }, [companyId, filters, debouncedSearch, toast]);
 
   useEffect(() => {
     fetchMetadataKeys();
@@ -299,6 +367,9 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
     if (uploadMetadata.length > 0) {
       formData.append("metadata", JSON.stringify(uploadMetadata));
     }
+    if (ocrAfterUpload) {
+      formData.append("ocr", "true");
+    }
     try {
       await api.postFormData(`/api/companies/${companyId}/documents/upload`, formData);
       toast({ title: "Success", description: "File uploaded" });
@@ -385,6 +456,57 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
       fetchTree();
     } catch {
       toast({ title: "Error", description: "Failed to delete file", variant: "destructive" });
+    }
+  };
+
+  // OCR trigger + polling
+  const triggerOcr = async (fileId: string) => {
+    try {
+      await api.post(`/api/files/${fileId}/ocr`);
+      setFiles(prev => prev.map(f => f.id === fileId ? { ...f, ocr_status: 'pending' } : f));
+      const interval = setInterval(async () => {
+        try {
+          const result = await api.get<{ ocrStatus: string }>(`/api/files/${fileId}/ocr`);
+          if (result.ocrStatus === 'completed' || result.ocrStatus === 'failed') {
+            clearInterval(interval);
+            setOcrPolling(prev => { const next = { ...prev }; delete next[fileId]; return next; });
+            fetchFiles();
+          } else {
+            setFiles(prev => prev.map(f => f.id === fileId ? { ...f, ocr_status: result.ocrStatus } : f));
+          }
+        } catch {
+          clearInterval(interval);
+          setOcrPolling(prev => { const next = { ...prev }; delete next[fileId]; return next; });
+        }
+      }, 2000);
+      setOcrPolling(prev => ({ ...prev, [fileId]: interval }));
+    } catch {
+      toast({ title: "Error", description: "Failed to trigger OCR", variant: "destructive" });
+    }
+  };
+
+  // Bulk OCR
+  const triggerBulkOcr = async () => {
+    const ids = Array.from(selectedFileIds);
+    for (const id of ids) {
+      await triggerOcr(id);
+    }
+  };
+
+  // OCR viewer
+  const openOcrViewer = async (file: FileType) => {
+    try {
+      const result = await api.get<{ ocrMarkdown: string; ocrProvider: string; ocrModel: string; ocrProcessedAt: string }>(`/api/files/${file.id}/ocr`);
+      setOcrViewerData({
+        fileName: file.name,
+        markdown: result.ocrMarkdown,
+        provider: result.ocrProvider,
+        model: result.ocrModel,
+        processedAt: result.ocrProcessedAt,
+      });
+      setOcrViewerOpen(true);
+    } catch {
+      toast({ title: "Error", description: "Failed to load OCR content", variant: "destructive" });
     }
   };
 
@@ -562,18 +684,31 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
           </div>
           <div className="flex items-center gap-2 shrink-0">
             {canWriteFiles && selectedFileIds.size > 0 && (
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-7 text-xs"
-                onClick={() => {
-                  setBulkEntries([{ key: "", value: "" }]);
-                  setIsBulkMetadataOpen(true);
-                }}
-              >
-                <Tag className="h-3 w-3 mr-1" />
-                Tag {selectedFileIds.size}
-              </Button>
+              <>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 text-xs"
+                  onClick={() => {
+                    setBulkEntries([{ key: "", value: "" }]);
+                    setIsBulkMetadataOpen(true);
+                  }}
+                >
+                  <Tag className="h-3 w-3 mr-1" />
+                  Tag {selectedFileIds.size}
+                </Button>
+                {ocrEnabled && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-xs"
+                    onClick={triggerBulkOcr}
+                  >
+                    <ScanText className="h-3 w-3 mr-1" />
+                    Run OCR ({selectedFileIds.size})
+                  </Button>
+                )}
+              </>
             )}
             <Button
               size="sm"
@@ -691,6 +826,27 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
           </div>
         )}
 
+        {/* Search bar */}
+        <div className="px-3 py-2 border-b shrink-0">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Search document content..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-9"
+            />
+            {searchQuery && (
+              <button
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                onClick={() => setSearchQuery("")}
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+        </div>
+
         {/* File list */}
         <div className="flex-1 overflow-auto [&_>div]:overflow-visible">
           <Table>
@@ -706,6 +862,7 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
                 )}
                 <TableHead>Name</TableHead>
                 <TableHead>Metadata</TableHead>
+                <TableHead>OCR</TableHead>
                 <TableHead>Size</TableHead>
                 <TableHead>Created</TableHead>
                 <TableHead className="text-right w-28">Actions</TableHead>
@@ -726,9 +883,23 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
                     </TableCell>
                   )}
                   <TableCell className="font-medium">
-                    <div className="flex items-center gap-2">
-                      <FileIcon className="h-4 w-4 text-muted-foreground shrink-0" />
-                      <span className="truncate">{file.name}</span>
+                    <div className="flex flex-col gap-0.5">
+                      <div className="flex items-center gap-2">
+                        <FileIcon className="h-4 w-4 text-muted-foreground shrink-0" />
+                        <span className="truncate">{file.name}</span>
+                      </div>
+                      {searchActive && file.ocrSnippet && (
+                        <div className="flex items-center gap-1 ml-6">
+                          <FileSearch className="h-3 w-3 text-muted-foreground shrink-0" />
+                          <span className="text-xs text-muted-foreground">Matched in OCR content</span>
+                        </div>
+                      )}
+                      {searchActive && file.ocrSnippet && (
+                        <div
+                          className="ml-6 text-xs text-muted-foreground line-clamp-2 [&_mark]:bg-yellow-200 [&_mark]:text-yellow-900 [&_mark]:px-0.5 [&_mark]:rounded-sm"
+                          dangerouslySetInnerHTML={{ __html: file.ocrSnippet }}
+                        />
+                      )}
                     </div>
                   </TableCell>
                   <TableCell>
@@ -747,6 +918,9 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
                       )}
                     </div>
                   </TableCell>
+                  <TableCell>
+                    <OcrStatusBadge file={file} />
+                  </TableCell>
                   <TableCell className="text-sm text-muted-foreground">{formatFileSize(file.size_bytes)}</TableCell>
                   <TableCell className="text-sm text-muted-foreground">
                     {new Date(file.created_at).toLocaleDateString()}
@@ -756,6 +930,21 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
                       {canPreview(file.mime_type) && (
                         <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setPreviewFile(file)}>
                           <Eye className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
+                      {file.ocr_status === 'completed' && (
+                        <Button variant="ghost" size="icon" className="h-7 w-7" title="View OCR" onClick={() => openOcrViewer(file)}>
+                          <FileSearch className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
+                      {ocrEnabled && (!file.ocr_status || file.ocr_status === 'failed') && (
+                        <Button variant="ghost" size="icon" className="h-7 w-7" title="Run OCR" onClick={() => triggerOcr(file.id)}>
+                          <ScanText className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
+                      {ocrEnabled && file.ocr_status === 'completed' && (
+                        <Button variant="ghost" size="icon" className="h-7 w-7" title="Re-run OCR" onClick={() => triggerOcr(file.id)}>
+                          <ScanText className="h-3.5 w-3.5" />
                         </Button>
                       )}
                       <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleDownload(file)}>
@@ -773,7 +962,7 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
               })}
               {files.length === 0 && !loading && (
                 <TableRow>
-                  <TableCell colSpan={canWriteFiles ? 6 : 5} className="text-center text-muted-foreground py-12">
+                  <TableCell colSpan={canWriteFiles ? 7 : 6} className="text-center text-muted-foreground py-12">
                     {filters.length > 0 ? "No files match the current filters" : "No documents yet. Upload your first file."}
                   </TableCell>
                 </TableRow>
@@ -844,7 +1033,7 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
       {/* Upload */}
       <Dialog open={isUploadOpen} onOpenChange={(open) => {
         setIsUploadOpen(open);
-        if (!open) { setUploadFile(null); setUploadMetadata([]); setIsDragOver(false); }
+        if (!open) { setUploadFile(null); setUploadMetadata([]); setIsDragOver(false); setOcrAfterUpload(false); }
       }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
@@ -959,6 +1148,17 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
                 </Button>
               </div>
             </div>
+
+            {ocrEnabled && (
+              <div className="flex items-center space-x-2">
+                <Checkbox
+                  id="ocr-upload"
+                  checked={ocrAfterUpload}
+                  onCheckedChange={(checked) => setOcrAfterUpload(!!checked)}
+                />
+                <Label htmlFor="ocr-upload" className="text-sm">Run OCR after upload</Label>
+              </div>
+            )}
 
             <Button onClick={handleUpload} disabled={!uploadFile} className="w-full">
               <Upload className="h-4 w-4 mr-2" />
@@ -1091,6 +1291,68 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* OCR Viewer Sheet */}
+      <Sheet open={ocrViewerOpen} onOpenChange={setOcrViewerOpen}>
+        <SheetContent className="sm:max-w-xl w-full flex flex-col">
+          <SheetHeader>
+            <SheetTitle className="flex items-center gap-2">
+              <FileSearch className="h-4 w-4" />
+              {ocrViewerData?.fileName || "OCR Content"}
+            </SheetTitle>
+          </SheetHeader>
+          {ocrViewerData && (
+            <div className="flex-1 flex flex-col gap-3 overflow-hidden">
+              {/* Metadata */}
+              <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                {ocrViewerData.provider && (
+                  <Badge variant="secondary" className="text-xs">{ocrViewerData.provider}{ocrViewerData.model ? ` / ${ocrViewerData.model}` : ''}</Badge>
+                )}
+                {ocrViewerData.processedAt && (
+                  <span>Processed: {new Date(ocrViewerData.processedAt).toLocaleString()}</span>
+                )}
+              </div>
+              {/* Actions */}
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 text-xs"
+                  onClick={() => {
+                    navigator.clipboard.writeText(ocrViewerData.markdown);
+                    toast({ title: "Copied", description: "Raw Markdown copied to clipboard" });
+                  }}
+                >
+                  <Copy className="h-3 w-3 mr-1" />
+                  Copy raw Markdown
+                </Button>
+                {ocrEnabled && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-xs"
+                    onClick={() => {
+                      setOcrViewerOpen(false);
+                      // Find matching file from current files list to re-trigger OCR
+                      const matchingFile = files.find(f => f.name === ocrViewerData.fileName);
+                      if (matchingFile) triggerOcr(matchingFile.id);
+                    }}
+                  >
+                    <ScanText className="h-3 w-3 mr-1" />
+                    Re-run OCR
+                  </Button>
+                )}
+              </div>
+              {/* Markdown content */}
+              <ScrollArea className="flex-1">
+                <div className="prose prose-sm max-w-none dark:prose-invert">
+                  <ReactMarkdown>{ocrViewerData.markdown}</ReactMarkdown>
+                </div>
+              </ScrollArea>
+            </div>
+          )}
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }
