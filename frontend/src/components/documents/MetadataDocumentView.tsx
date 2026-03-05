@@ -60,7 +60,7 @@ interface TreeNode {
 
 interface Props {
   companyId: string;
-  canManageFiles?: boolean;
+  canManage?: boolean;
 }
 
 function nodeDirectlyMatches(node: TreeNode, query: string): boolean {
@@ -69,7 +69,7 @@ function nodeDirectlyMatches(node: TreeNode, query: string): boolean {
   return node.name.toLowerCase().includes(q) || (node.keyName?.toLowerCase().includes(q) ?? false);
 }
 
-export default function MetadataDocumentView({ companyId, canManageFiles = false }: Props) {
+export default function MetadataDocumentView({ companyId, canManage = false }: Props) {
   const [files, setFiles] = useState<FileType[]>([]);
   const [totalFileCount, setTotalFileCount] = useState(0);
   const [tree, setTree] = useState<TreeNode[]>([]);
@@ -556,7 +556,7 @@ export default function MetadataDocumentView({ companyId, canManageFiles = false
             )}
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            {canManageFiles && selectedFileIds.size > 0 && (
+            {canManage && selectedFileIds.size > 0 && (
               <Button
                 size="sm"
                 variant="outline"
@@ -579,7 +579,7 @@ export default function MetadataDocumentView({ companyId, canManageFiles = false
               <Filter className="h-3 w-3 mr-1" />
               Add Filter
             </Button>
-            {canManageFiles && (
+            {canManage && (
               <Button size="sm" className="h-7 text-xs" onClick={() => setIsUploadOpen(true)}>
                 <Upload className="h-3 w-3 mr-1" />
                 Upload
@@ -691,7 +691,7 @@ export default function MetadataDocumentView({ companyId, canManageFiles = false
           <Table>
             <TableHeader>
               <TableRow>
-                {canManageFiles && (
+                {canManage && (
                   <TableHead className="w-10">
                     <Checkbox
                       checked={files.length > 0 && selectedFileIds.size === files.length}
@@ -709,7 +709,7 @@ export default function MetadataDocumentView({ companyId, canManageFiles = false
             <TableBody>
               {files.map((file) => (
                 <TableRow key={file.id}>
-                  {canManageFiles && (
+                  {canManage && (
                     <TableCell>
                       <Checkbox
                         checked={selectedFileIds.has(file.id)}
@@ -732,7 +732,7 @@ export default function MetadataDocumentView({ companyId, canManageFiles = false
                       ) : (
                         <span className="text-xs text-muted-foreground/50">No metadata</span>
                       )}
-                      {canManageFiles && (
+                      {canManage && (
                         <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openMetadataDialog(file)}>
                           <Edit className="h-3 w-3" />
                         </Button>
@@ -753,7 +753,7 @@ export default function MetadataDocumentView({ companyId, canManageFiles = false
                       <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleDownload(file)}>
                         <Download className="h-3.5 w-3.5" />
                       </Button>
-                      {canManageFiles && (
+                      {canManage && (
                         <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleDelete(file.id)}>
                           <Trash2 className="h-3.5 w-3.5" />
                         </Button>
@@ -764,7 +764,7 @@ export default function MetadataDocumentView({ companyId, canManageFiles = false
               ))}
               {files.length === 0 && !loading && (
                 <TableRow>
-                  <TableCell colSpan={canManageFiles ? 6 : 5} className="text-center text-muted-foreground py-12">
+                  <TableCell colSpan={canManage ? 6 : 5} className="text-center text-muted-foreground py-12">
                     {filters.length > 0 ? "No files match the current filters" : "No documents yet. Upload your first file."}
                   </TableCell>
                 </TableRow>

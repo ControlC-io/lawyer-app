@@ -10,7 +10,7 @@ export default function DocumentManagement() {
   const companyId = useCompanyId();
   const { hasPermission } = useAuth();
 
-  const canManageFiles = hasPermission("documents.manage_files");
+  const canManage = hasPermission("documents.manage");
 
   if (!companyId) {
     return (
@@ -37,7 +37,7 @@ export default function DocumentManagement() {
             <FileText className="h-4 w-4" />
             Documents
           </TabsTrigger>
-          {canManageFiles && (
+          {canManage && (
             <TabsTrigger value="access-rules" className="gap-1.5">
               <Shield className="h-4 w-4" />
               Access Rules
@@ -46,10 +46,10 @@ export default function DocumentManagement() {
         </TabsList>
 
         <TabsContent value="documents" className="flex-1 min-h-0 min-w-0 mt-0 overflow-hidden">
-          <MetadataDocumentView companyId={companyId} canManageFiles={canManageFiles} />
+          <MetadataDocumentView companyId={companyId} canManage={canManage} />
         </TabsContent>
 
-        {canManageFiles && (
+        {canManage && (
           <TabsContent value="access-rules" className="flex-1 min-h-0 mt-0">
             <DocumentPermissionRules companyId={companyId} />
           </TabsContent>
