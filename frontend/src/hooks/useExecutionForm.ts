@@ -19,6 +19,7 @@ export const useExecutionForm = (
   const [editingValues, setEditingValues] = useState<Record<string, any>>({});
   const [arrayItems, setArrayItems] = useState<Record<string, any[]>>({});
   const [uploadingFiles, setUploadingFiles] = useState<Record<string, boolean>>({});
+  const [ocrTriggeredFiles, setOcrTriggeredFiles] = useState<Record<string, boolean>>({});
   const [signedUrls, setSignedUrls] = useState<Record<string, string>>({});
   const [multipleFilesSignedUrls, setMultipleFilesSignedUrls] = useState<Record<string, Record<number, string>>>({});
   const [dynamicOptions, setDynamicOptions] = useState<Record<string, string[]>>({});
@@ -363,7 +364,7 @@ export const useExecutionForm = (
     return btoa(binary);
   };
 
-  const handleFileUpload = async (fieldId: string, file: File) => {
+  const handleFileUpload = async (fieldId: string, file: File, ocrEnabled?: boolean) => {
     if (!file || !apiKey) return;
     setUploadingFiles((prev) => ({ ...prev, [fieldId]: true }));
     try {
@@ -375,9 +376,13 @@ export const useExecutionForm = (
       const fieldType = info.def.field_type || info.def.type;
       const buf = await file.arrayBuffer();
       const base64 = arrayBufferToBase64(buf);
+      const body: Record<string, any> = { field_name: fieldName, file_base64: base64, file_name: file.name, mime_type: file.type };
+      if (ocrEnabled) {
+        body.ocr = 'true';
+      }
       const res = await api.post<{ file_path?: string }>(
         `/api/files/workflows/executions/${executionId}/files`,
-        { field_name: fieldName, file_base64: base64, file_name: file.name, mime_type: file.type },
+        body,
         { apiKey: apiKey ?? undefined }
       );
       const filePath = res?.file_path;
@@ -387,6 +392,9 @@ export const useExecutionForm = (
         setMultipleFilesSignedUrls((prev) => ({ ...prev, [cacheKey]: { ...currentSignedUrls, 0: signedUrl } }));
       } else if (signedUrl) {
         setSignedUrls((prev) => ({ ...prev, [cacheKey]: signedUrl }));
+      }
+      if (ocrEnabled) {
+        setOcrTriggeredFiles((prev) => ({ ...prev, [fieldId]: true }));
       }
       queryClient.invalidateQueries({ queryKey: ["workflow_execution", executionId] });
       queryClient.invalidateQueries({ queryKey: ["execution_data_structures", executionId] });
@@ -601,6 +609,7 @@ export const useExecutionForm = (
     arrayItems,
     setArrayItems,
     uploadingFiles,
+    ocrTriggeredFiles,
     signedUrls,
     multipleFilesSignedUrls,
     dynamicOptions,
