@@ -420,12 +420,16 @@ export default function MetadataDocumentView({ companyId }: Props) {
 
     const hasChildFolders = node.children?.some((c) => c.type === "folder");
 
+    const isMatch = treeSearch ? nodeDirectlyMatches(node, treeSearch) : false;
+    const hasMatchingDescendant = treeSearch ? nodeMatchesSearch(node, treeSearch) : false;
+    const isDimmed = treeSearch && !isMatch && !hasMatchingDescendant;
+
     return (
       <div key={node.id}>
         <button
           className={`w-full flex items-center gap-1.5 px-2 py-1.5 text-sm hover:bg-muted/60 rounded-md transition-colors ${
             isSelected ? "bg-primary/10 text-primary font-medium" : ""
-          }`}
+          } ${isMatch ? "bg-yellow-500/10 font-medium" : ""} ${isDimmed ? "opacity-30" : ""}`}
           style={{ paddingLeft: `${depth * 16 + 8}px` }}
           onClick={() => {
             toggleNode(node.id);
