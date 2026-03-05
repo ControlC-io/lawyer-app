@@ -61,6 +61,12 @@ interface Props {
   companyId: string;
 }
 
+function nodeDirectlyMatches(node: TreeNode, query: string): boolean {
+  if (!query) return false;
+  const q = query.toLowerCase();
+  return node.name.toLowerCase().includes(q) || (node.keyName?.toLowerCase().includes(q) ?? false);
+}
+
 export default function MetadataDocumentView({ companyId }: Props) {
   const [files, setFiles] = useState<FileType[]>([]);
   const [totalFileCount, setTotalFileCount] = useState(0);
@@ -145,14 +151,6 @@ export default function MetadataDocumentView({ companyId }: Props) {
     generate();
   }, [previewFile]);
 
-  useEffect(() => {
-    setFilterRows(
-      filters
-        .filter((f) => !f.missing)
-        .map((f) => ({ key_id: f.key_id, value: f.value || "" }))
-    );
-  }, [filters]);
-
   const applyFilterRows = useCallback(
     (rows: Array<{ key_id: string; value: string }>) => {
       const cleaned = rows.filter((r) => r.key_id || r.value.trim());
@@ -176,12 +174,6 @@ export default function MetadataDocumentView({ companyId }: Props) {
     },
     []
   );
-
-  const nodeDirectlyMatches = (node: TreeNode, query: string): boolean => {
-    if (!query) return false;
-    const q = query.toLowerCase();
-    return node.name.toLowerCase().includes(q) || (node.keyName?.toLowerCase().includes(q) ?? false);
-  };
 
   useEffect(() => {
     if (!treeSearch.trim()) return;
@@ -211,11 +203,15 @@ export default function MetadataDocumentView({ companyId }: Props) {
 
   const navigateToNode = (path: Array<{ key: string; value: string; missing?: boolean }>) => {
     setSelectedNodePath(path);
-    // Convert path to filters
     const newFilters = path.map((p) =>
       p.missing ? { key_id: p.key, missing: true as const } : { key_id: p.key, value: p.value }
     );
     setFilters(newFilters);
+    setFilterRows(
+      newFilters
+        .filter((f) => !f.missing)
+        .map((f) => ({ key_id: f.key_id, value: f.value || "" }))
+    );
     setSelectedFileIds(new Set());
   };
 
