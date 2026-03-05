@@ -975,7 +975,7 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
             <DialogTitle>Edit Metadata</DialogTitle>
             <DialogDescription>Manage metadata for {editingFile?.name}</DialogDescription>
           </DialogHeader>
-          <div className="space-y-3 max-h-[50vh] overflow-auto">
+          <div className="space-y-3 max-h-[50vh] overflow-auto p-1 -m-1">
             {metadataEntries.map((entry, i) => (
               <div key={i} className="flex gap-2 min-w-0">
                 <Select value={entry.key} onValueChange={(v) => {
