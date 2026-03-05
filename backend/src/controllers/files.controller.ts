@@ -787,6 +787,15 @@ export const filesController = {
         },
       });
 
+      // Trigger OCR if requested
+      const ocrRequested = req.body?.ocr === 'true' || req.body?.ocr === true;
+      if (ocrRequested) {
+        const { processDocumentOcr } = require('../services/ocr.service');
+        processDocumentOcr(fileRecord.id).catch((err: Error) => {
+          console.error(`OCR processing failed for file ${fileRecord.id}:`, err);
+        });
+      }
+
       return res.status(201).json({
         ...fileRecord,
         size_bytes: fileRecord.size_bytes?.toString(),

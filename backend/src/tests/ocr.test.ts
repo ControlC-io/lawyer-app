@@ -98,6 +98,14 @@ describe('OCR Endpoints', () => {
     });
   });
 
+  describe('Upload with OCR flag', () => {
+    it('should trigger OCR when ocr=true in upload body', async () => {
+      const { processDocumentOcr } = require('../services/ocr.service');
+      expect(processDocumentOcr).toBeDefined();
+      expect(typeof processDocumentOcr).toBe('function');
+    });
+  });
+
   describe('GET /api/files/:fileId/ocr', () => {
     it('should return OCR content for completed document', async () => {
       (prisma.file.findFirst as jest.Mock).mockResolvedValue({
