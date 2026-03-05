@@ -2,6 +2,7 @@ import { Response } from 'express';
 import { AuthRequest, resolveCompanyForRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 import { canUserAccessFolder, getUserFolderPermissionLevel, getUserGroupIdsInCompany } from '../lib/folderAccess';
+import { canUserAccessFileByMetadata } from '../lib/documentAccess';
 import { getDocumentProxyUrl } from '../lib/documentUrl';
 import { storageService } from '../services/storage.service';
 import { workflowService } from '../services/workflow.service';
@@ -389,11 +390,16 @@ export const filesController = {
       }
       const isCompanyAdmin = userCompany.role === 'company_admin';
       const userGroupIds = await getUserGroupIdsInCompany(userId, fileRecord.company_id);
-      // Flat files (no folder_id) skip folder access check
       if (fileRecord.folder_id) {
         const allowed = await canUserAccessFolder(userId, fileRecord.company_id, fileRecord.folder_id, isCompanyAdmin, userGroupIds);
         if (!allowed) {
           return res.status(403).json({ error: 'You do not have access to this folder' });
+        }
+      } else {
+        // Flat files: check document permission rules
+        const level = await canUserAccessFileByMetadata({ userId, companyId: fileRecord.company_id, fileId, isCompanyAdmin, userGroupIds });
+        if (!level) {
+          return res.status(403).json({ error: 'You do not have access to this file' });
         }
       }
       const url = getDocumentProxyUrl(fileRecord.storage_path, Boolean(download));
@@ -831,8 +837,8 @@ export const filesController = {
 
       const isCompanyAdmin = userCompany.role === 'company_admin';
       const userGroupIds = await getUserGroupIdsInCompany(userId, companyId);
-      // Flat files (no folder_id) skip folder access check; admin or uploader can delete
       if (fileRecord.folder_id) {
+        // Folder-based files: check folder permissions
         const allowed = await canUserAccessFolder(userId, companyId, fileRecord.folder_id, isCompanyAdmin, userGroupIds);
         if (!allowed) {
           return res.status(403).json({ error: 'You do not have access to this folder' });
@@ -840,6 +846,12 @@ export const filesController = {
         const level = await getUserFolderPermissionLevel(userId, companyId, fileRecord.folder_id, isCompanyAdmin, userGroupIds);
         if (level !== 'write') {
           return res.status(403).json({ error: 'Write permission required to delete files in this folder' });
+        }
+      } else {
+        // Flat files: check document permission rules for write access
+        const level = await canUserAccessFileByMetadata({ userId, companyId, fileId, isCompanyAdmin, userGroupIds });
+        if (level !== 'write') {
+          return res.status(403).json({ error: 'Write permission required to delete this file' });
         }
       }
 

@@ -1,7 +1,7 @@
 import { Response } from 'express';
 import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
-import { getAccessibleFileIds, buildVirtualTree, getAllowedMetadataValues } from '../lib/documentAccess';
+import { getAccessibleFileIds, getAccessibleFileIdsWithLevels, buildVirtualTree, getAllowedMetadataValues, canUserAccessFileByMetadata } from '../lib/documentAccess';
 import { getUserGroupIdsInCompany } from '../lib/folderAccess';
 
 async function ensureCompanyAccess(req: AuthRequest, companyId: string) {
@@ -201,7 +201,7 @@ export const documentsController = {
       }
     }
 
-    const accessibleIds = await getAccessibleFileIds({
+    const { fileIds: accessibleIds, writeFileIds, hasAnyWriteRule } = await getAccessibleFileIdsWithLevels({
       userId,
       companyId,
       isCompanyAdmin,
@@ -210,7 +210,7 @@ export const documentsController = {
       missingKeyFilters,
     });
 
-    if (accessibleIds.length === 0) return res.json([]);
+    if (accessibleIds.length === 0) return res.json({ files: [], hasWriteAccess: hasAnyWriteRule });
 
     // For non-admins, get allowed metadata values to filter out unauthorized values
     const allowedValues = await getAllowedMetadataValues({
@@ -233,6 +233,7 @@ export const documentsController = {
     const serialized = files.map((f) => ({
       ...f,
       size_bytes: f.size_bytes != null ? Number(f.size_bytes) : 0,
+      accessLevel: writeFileIds.has(f.id) ? 'write' : 'read',
       metadata_values: allowedValues
         ? f.metadata_values.filter((mv) => {
             const allowedSet = allowedValues.get(mv.metadata_id);
@@ -241,7 +242,7 @@ export const documentsController = {
         : f.metadata_values,
     }));
 
-    return res.json(serialized);
+    return res.json({ files: serialized, hasWriteAccess: hasAnyWriteRule });
   },
 
   // ─── Virtual Tree ───
@@ -379,6 +380,31 @@ export const documentsController = {
     const userId = req.user?.id;
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
 
+    const isCompanyAdmin = access.userCompany?.role === 'company_admin' || !!req.user?.super_admin;
+    if (!isCompanyAdmin) {
+      // Check if user has any write permission rules
+      const userGroupIds = await getUserGroupIdsInCompany(userId, companyId);
+      const rules = await prisma.documentPermissionRule.findMany({
+        where: {
+          company_id: companyId,
+          permission_type: 'write',
+          assignments: {
+            some: {
+              OR: [
+                { user_id: userId },
+                ...(userGroupIds.length > 0 ? [{ group_id: { in: userGroupIds } }] : []),
+              ],
+            },
+          },
+        },
+        select: { id: true },
+        take: 1,
+      });
+      if (rules.length === 0) {
+        return res.status(403).json({ error: 'Forbidden', details: 'No write access rules assigned to you' });
+      }
+    }
+
     const file = (req as AuthRequest & { file?: Express.Multer.File }).file;
     if (!file) return res.status(400).json({ error: 'No file provided' });
 
@@ -472,14 +498,34 @@ export const documentsController = {
     });
     keys.forEach((k) => { if (k.name) keyMap.set(k.name, k.id); });
 
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+
+    const isCompanyAdmin = access.userCompany?.role === 'company_admin' || !!req.user?.super_admin;
+    const userGroupIds = await getUserGroupIdsInCompany(userId, companyId);
+
     const files = await prisma.file.findMany({
       where: { id: { in: file_ids }, company_id: companyId },
       select: { id: true },
     });
-    const validFileIds = files.map((f) => f.id);
+    let validFileIds = files.map((f) => f.id);
 
     if (validFileIds.length === 0) {
       return res.status(404).json({ error: 'No valid files found' });
+    }
+
+    // Filter to only files the user has write access to
+    if (!isCompanyAdmin) {
+      const writeChecks = await Promise.all(
+        validFileIds.map(async (fileId) => {
+          const level = await canUserAccessFileByMetadata({ userId, companyId, fileId, isCompanyAdmin, userGroupIds });
+          return level === 'write' ? fileId : null;
+        }),
+      );
+      validFileIds = writeChecks.filter((id): id is string => id !== null);
+      if (validFileIds.length === 0) {
+        return res.status(403).json({ error: 'Forbidden', details: 'No write access to the selected files' });
+      }
     }
 
     for (const fileId of validFileIds) {

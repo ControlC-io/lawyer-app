@@ -214,6 +214,100 @@ export async function getAccessibleFileIds(params: {
 }
 
 /**
+ * Same as getAccessibleFileIds but also returns the set of file IDs with write access
+ * and whether the user has any write rule at all (for upload gating).
+ */
+export async function getAccessibleFileIdsWithLevels(params: {
+  userId: string;
+  companyId: string;
+  isCompanyAdmin: boolean;
+  userGroupIds: string[];
+  metadataFilters?: PermissionCondition[];
+  missingKeyFilters?: string[];
+}): Promise<{ fileIds: string[]; writeFileIds: Set<string>; hasAnyWriteRule: boolean }> {
+  const { userId, companyId, isCompanyAdmin, userGroupIds, metadataFilters, missingKeyFilters } = params;
+
+  const allFiles = await prisma.file.findMany({
+    where: { company_id: companyId },
+    select: { id: true },
+  });
+
+  if (allFiles.length === 0) return { fileIds: [], writeFileIds: new Set(), hasAnyWriteRule: isCompanyAdmin };
+
+  const fileIds = allFiles.map((f) => f.id);
+
+  const allMetadata = await prisma.filesMetadataValue.findMany({
+    where: { files_id: { in: fileIds }, company_id: companyId },
+    select: { files_id: true, metadata_id: true, value: true },
+  });
+
+  const metadataByFile = new Map<string, Map<string, string[]>>();
+  for (const m of allMetadata) {
+    let fileMap = metadataByFile.get(m.files_id);
+    if (!fileMap) {
+      fileMap = new Map();
+      metadataByFile.set(m.files_id, fileMap);
+    }
+    const existing = fileMap.get(m.metadata_id);
+    if (existing) existing.push(m.value);
+    else fileMap.set(m.metadata_id, [m.value]);
+  }
+
+  let candidateFileIds = fileIds;
+  if (metadataFilters && metadataFilters.length > 0) {
+    candidateFileIds = candidateFileIds.filter((fid) => {
+      const fileMeta = metadataByFile.get(fid) || new Map();
+      return metadataFilters.every((f) => {
+        const values = fileMeta.get(f.key_id);
+        return values != null && values.includes(f.value);
+      });
+    });
+  }
+  if (missingKeyFilters && missingKeyFilters.length > 0) {
+    candidateFileIds = candidateFileIds.filter((fid) => {
+      const fileMeta = metadataByFile.get(fid) || new Map();
+      return missingKeyFilters.every((keyId) => !fileMeta.has(keyId));
+    });
+  }
+
+  if (isCompanyAdmin) {
+    return { fileIds: candidateFileIds, writeFileIds: new Set(candidateFileIds), hasAnyWriteRule: true };
+  }
+
+  const totalRules = await prisma.documentPermissionRule.count({
+    where: { company_id: companyId },
+  });
+  if (totalRules === 0) {
+    return { fileIds: candidateFileIds, writeFileIds: new Set(), hasAnyWriteRule: false };
+  }
+
+  const rules = await getUserRules(userId, companyId, userGroupIds);
+  if (rules.length === 0) return { fileIds: [], writeFileIds: new Set(), hasAnyWriteRule: false };
+
+  const hasAnyWriteRule = rules.some((r) => r.permission_type === 'write');
+  const accessibleIds: string[] = [];
+  const writeFileIds = new Set<string>();
+
+  for (const fid of candidateFileIds) {
+    const fileMeta = metadataByFile.get(fid) || new Map();
+    let hasAccess = false;
+    for (const rule of rules) {
+      const conditions = parseConditions(rule.conditions);
+      if (ruleMatchesFile(conditions, fileMeta)) {
+        hasAccess = true;
+        if (rule.permission_type === 'write') {
+          writeFileIds.add(fid);
+          break;
+        }
+      }
+    }
+    if (hasAccess) accessibleIds.push(fid);
+  }
+
+  return { fileIds: accessibleIds, writeFileIds, hasAnyWriteRule };
+}
+
+/**
  * Build a virtual tree from files and their metadata, grouped by the given key order.
  * Pure function - no database calls.
  * Metadata supports multiple values per key (file appears under each value's group).

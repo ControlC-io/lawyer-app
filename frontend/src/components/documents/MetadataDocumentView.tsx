@@ -37,6 +37,7 @@ interface FileType {
   size_bytes: number;
   mime_type: string;
   created_at: string;
+  accessLevel?: 'read' | 'write';
   metadata_values?: Array<{
     value: string;
     metadata?: { id: string; name: string };
@@ -87,6 +88,7 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
   const [uploadMetadata, setUploadMetadata] = useState<Array<{ key_id: string; value: string }>>([]);
   const [isDragOver, setIsDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [hasWriteAccess, setHasWriteAccess] = useState(false);
   const [isMetadataDialogOpen, setIsMetadataDialogOpen] = useState(false);
   const [editingFile, setEditingFile] = useState<FileType | null>(null);
   const [metadataEntries, setMetadataEntries] = useState<Array<{ key: string; value: string }>>([]);
@@ -98,6 +100,8 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
   const [filterRows, setFilterRows] = useState<Array<{ key_id: string; value: string }>>([]);
   const [treeSearch, setTreeSearch] = useState("");
   const { toast } = useToast();
+
+  const canWriteFiles = canManage || hasWriteAccess;
 
   const fetchMetadataKeys = useCallback(async () => {
     const data = await api.get<MetadataKey[]>(`/api/companies/${companyId}/files-metadata-keys`);
@@ -124,8 +128,9 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
     setLoading(true);
     try {
       const filtersParam = filters.length > 0 ? `?filters=${encodeURIComponent(JSON.stringify(filters))}` : "";
-      const data = await api.get<FileType[]>(`/api/companies/${companyId}/documents/flat${filtersParam}`);
-      setFiles(data || []);
+      const data = await api.get<{ files: FileType[]; hasWriteAccess: boolean }>(`/api/companies/${companyId}/documents/flat${filtersParam}`);
+      setFiles(data?.files || []);
+      setHasWriteAccess(data?.hasWriteAccess || false);
     } catch {
       toast({ title: "Error", description: "Failed to load files", variant: "destructive" });
     } finally {
@@ -556,7 +561,7 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
             )}
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            {canManage && selectedFileIds.size > 0 && (
+            {canWriteFiles && selectedFileIds.size > 0 && (
               <Button
                 size="sm"
                 variant="outline"
@@ -579,7 +584,7 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
               <Filter className="h-3 w-3 mr-1" />
               Add Filter
             </Button>
-            {canManage && (
+            {canWriteFiles && (
               <Button size="sm" className="h-7 text-xs" onClick={() => setIsUploadOpen(true)}>
                 <Upload className="h-3 w-3 mr-1" />
                 Upload
@@ -691,7 +696,7 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
           <Table>
             <TableHeader>
               <TableRow>
-                {canManage && (
+                {canWriteFiles && (
                   <TableHead className="w-10">
                     <Checkbox
                       checked={files.length > 0 && selectedFileIds.size === files.length}
@@ -707,13 +712,16 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
               </TableRow>
             </TableHeader>
             <TableBody>
-              {files.map((file) => (
+              {files.map((file) => {
+                const fileWritable = canManage || file.accessLevel === 'write';
+                return (
                 <TableRow key={file.id}>
-                  {canManage && (
+                  {canWriteFiles && (
                     <TableCell>
                       <Checkbox
                         checked={selectedFileIds.has(file.id)}
                         onCheckedChange={() => handleToggleSelect(file.id)}
+                        disabled={!fileWritable}
                       />
                     </TableCell>
                   )}
@@ -732,7 +740,7 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
                       ) : (
                         <span className="text-xs text-muted-foreground/50">No metadata</span>
                       )}
-                      {canManage && (
+                      {fileWritable && (
                         <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openMetadataDialog(file)}>
                           <Edit className="h-3 w-3" />
                         </Button>
@@ -753,7 +761,7 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
                       <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleDownload(file)}>
                         <Download className="h-3.5 w-3.5" />
                       </Button>
-                      {canManage && (
+                      {fileWritable && (
                         <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleDelete(file.id)}>
                           <Trash2 className="h-3.5 w-3.5" />
                         </Button>
@@ -761,10 +769,11 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
                     </div>
                   </TableCell>
                 </TableRow>
-              ))}
+                );
+              })}
               {files.length === 0 && !loading && (
                 <TableRow>
-                  <TableCell colSpan={canManage ? 6 : 5} className="text-center text-muted-foreground py-12">
+                  <TableCell colSpan={canWriteFiles ? 6 : 5} className="text-center text-muted-foreground py-12">
                     {filters.length > 0 ? "No files match the current filters" : "No documents yet. Upload your first file."}
                   </TableCell>
                 </TableRow>
