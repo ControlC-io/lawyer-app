@@ -212,6 +212,46 @@ export const documentsController = {
 
     if (accessibleIds.length === 0) return res.json({ files: [], hasWriteAccess: hasAnyWriteRule });
 
+    // Full-text search in OCR content
+    const searchQuery = req.query.q as string | undefined;
+    if (searchQuery && searchQuery.trim()) {
+      const q = searchQuery.trim();
+      const searchResults = await prisma.$queryRaw`
+        SELECT
+          f.id,
+          f.name,
+          f.storage_path,
+          f.mime_type,
+          f.size_bytes::text as size_bytes_str,
+          f.created_at,
+          f.company_id,
+          f.ocr_status AS "ocrStatus",
+          ts_rank(to_tsvector('simple', coalesce(f.ocr_markdown, '')), plainto_tsquery('simple', ${q})) AS rank,
+          ts_headline(
+            'simple',
+            coalesce(f.ocr_markdown, ''),
+            plainto_tsquery('simple', ${q}),
+            'StartSel=<mark>, StopSel=</mark>, MaxWords=35, MinWords=15, ShortWord=3, MaxFragments=2, FragmentDelimiter= … '
+          ) AS "ocrSnippet"
+        FROM "files" f
+        WHERE f.company_id = ${companyId}::uuid
+          AND f.id = ANY(${accessibleIds}::uuid[])
+          AND to_tsvector('simple', coalesce(f.ocr_markdown, '')) @@ plainto_tsquery('simple', ${q})
+        ORDER BY rank DESC
+        LIMIT 100
+      ` as any[];
+
+      const results = searchResults.map((r: any) => ({
+        ...r,
+        size_bytes: r.size_bytes_str ? Number(r.size_bytes_str) : 0,
+        ocrSnippet: r.ocrSnippet,
+        ocrSearchRank: r.rank ? Number(r.rank) : 0,
+        accessLevel: writeFileIds.has(r.id) ? 'write' : 'read',
+      }));
+
+      return res.json({ files: results, hasWriteAccess: hasAnyWriteRule, searchActive: true });
+    }
+
     // For non-admins, get allowed metadata values to filter out unauthorized values
     const allowedValues = await getAllowedMetadataValues({
       userId,

@@ -10,11 +10,15 @@ jest.mock('../lib/prisma', () => ({
     file: {
       findUnique: jest.fn(),
       findFirst: jest.fn(),
+      findMany: jest.fn(),
       update: jest.fn(),
     },
     user: { findUnique: jest.fn() },
     userCompany: { findFirst: jest.fn() },
     company: { findUnique: jest.fn() },
+    profileGroupMember: { findMany: jest.fn() },
+    folderPermission: { findMany: jest.fn() },
+    filesMetadataValue: { findMany: jest.fn() },
     $queryRaw: jest.fn(),
   },
 }));
@@ -141,6 +145,42 @@ describe('OCR Endpoints', () => {
         .get('/api/files/file-1/ocr');
 
       expect(response.status).toBe(401);
+    });
+  });
+
+  describe('GET /api/companies/:companyId/documents/flat?q=search', () => {
+    it('should return search results with snippets when q is provided', async () => {
+      (prisma.userCompany.findFirst as jest.Mock).mockResolvedValue({
+        user_id: mockUser.id,
+        company_id: 'company-1',
+        role: 'company_admin',
+      });
+
+      // Mock profileGroupMember for getUserGroupIdsInCompany
+      (prisma.profileGroupMember.findMany as jest.Mock).mockResolvedValue([]);
+
+      // Mock file.findMany for getAccessibleFileIdsWithLevels
+      (prisma.file.findMany as jest.Mock).mockResolvedValue([{ id: 'file-1' }]);
+
+      // Mock filesMetadataValue.findMany for getAccessibleFileIdsWithLevels
+      (prisma.filesMetadataValue.findMany as jest.Mock).mockResolvedValue([]);
+
+      // Mock $queryRaw for the full-text search
+      (prisma.$queryRaw as jest.Mock).mockResolvedValue([
+        {
+          id: 'file-1',
+          name: 'invoice.pdf',
+          ocrStatus: 'completed',
+          ocrSnippet: 'Total: <mark>€1,250</mark>',
+          rank: 0.87,
+        },
+      ]);
+
+      const response = await request(app)
+        .get('/api/companies/company-1/documents/flat?q=1250')
+        .set('Authorization', `Bearer ${authToken}`);
+
+      expect(response.status).toBe(200);
     });
   });
 });
