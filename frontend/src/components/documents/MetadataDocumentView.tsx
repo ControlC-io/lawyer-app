@@ -970,7 +970,7 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
 
       {/* Metadata Editor */}
       <Dialog open={isMetadataDialogOpen} onOpenChange={setIsMetadataDialogOpen}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-lg [overflow:clip]">
           <DialogHeader>
             <DialogTitle>Edit Metadata</DialogTitle>
             <DialogDescription>Manage metadata for {editingFile?.name}</DialogDescription>
