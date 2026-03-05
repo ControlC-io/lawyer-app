@@ -25,7 +25,6 @@ import {
   Tag,
   Filter,
   Search,
-  Plus,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
@@ -156,11 +155,13 @@ export default function MetadataDocumentView({ companyId }: Props) {
 
   const applyFilterRows = useCallback(
     (rows: Array<{ key_id: string; value: string }>) => {
-      const validFilters = rows
+      const cleaned = rows.filter((r) => r.key_id || r.value.trim());
+      const validFilters = cleaned
         .filter((r) => r.key_id && r.value.trim())
         .map((r) => ({ key_id: r.key_id, value: r.value.trim() }));
+      setFilterRows(cleaned.length > 0 ? cleaned : []);
       setFilters(validFilters);
-      setSelectedNodePath([]);
+      if (validFilters.length === 0) setSelectedNodePath([]);
     },
     []
   );
@@ -546,6 +547,10 @@ export default function MetadataDocumentView({ companyId }: Props) {
                   );
                 })}
               </>
+            ) : filters.length > 0 ? (
+              <span className="text-muted-foreground">
+                {files.length} result{files.length !== 1 ? "s" : ""} matching filters
+              </span>
             ) : (
               <span className="text-muted-foreground">{files.length} document{files.length !== 1 ? "s" : ""}</span>
             )}
