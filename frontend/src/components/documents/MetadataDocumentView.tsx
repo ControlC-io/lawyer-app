@@ -970,7 +970,7 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
 
       {/* Metadata Editor */}
       <Dialog open={isMetadataDialogOpen} onOpenChange={setIsMetadataDialogOpen}>
-        <DialogContent className="max-w-lg overflow-hidden">
+        <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>Edit Metadata</DialogTitle>
             <DialogDescription>Manage metadata for {editingFile?.name}</DialogDescription>
@@ -983,13 +983,13 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
                   next[i].key = v;
                   setMetadataEntries(next);
                 }}>
-                  <SelectTrigger className="h-9 flex-1 min-w-0"><SelectValue placeholder="Key" /></SelectTrigger>
+                  <SelectTrigger className="h-9 flex-1 min-w-0 focus:ring-offset-0"><SelectValue placeholder="Key" /></SelectTrigger>
                   <SelectContent>
                     {metadataKeys.map((k) => <SelectItem key={k.id} value={k.name}>{k.name}</SelectItem>)}
                   </SelectContent>
                 </Select>
                 <Input
-                  className="h-9 flex-1 min-w-0"
+                  className="h-9 flex-1 min-w-0 focus:ring-offset-0 focus-visible:ring-offset-0"
                   placeholder="Value"
                   value={entry.value}
                   onChange={(e) => {
@@ -998,7 +998,7 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
                     setMetadataEntries(next);
                   }}
                 />
-                <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => setMetadataEntries(metadataEntries.filter((_, j) => j !== i))}>
+                <Button variant="ghost" size="icon" className="h-9 w-9 shrink-0" onClick={() => setMetadataEntries(metadataEntries.filter((_, j) => j !== i))}>
                   <Trash2 className="h-3.5 w-3.5" />
                 </Button>
               </div>
