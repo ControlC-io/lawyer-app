@@ -80,9 +80,9 @@ export const PERMISSION_GROUPS = [
   {
     domain: 'Documents',
     permissions: [
-      { key: PERMISSIONS.DOCUMENTS_VIEW, label: 'View Documents', description: 'View folders and files in the document manager' },
-      { key: PERMISSIONS.DOCUMENTS_MANAGE_STRUCTURE, label: 'Manage Document Structure', description: 'Create and delete folders' },
-      { key: PERMISSIONS.DOCUMENTS_MANAGE_FILES, label: 'Manage Document Files', description: 'Upload, rename, and delete files (folder-level rights also apply)' },
+      { key: PERMISSIONS.DOCUMENTS_VIEW, label: 'View Documents', description: 'View documents and their metadata in the document manager' },
+      { key: PERMISSIONS.DOCUMENTS_MANAGE_STRUCTURE, label: 'Manage Metadata Keys', description: 'Create, edit, and delete metadata keys used to tag documents' },
+      { key: PERMISSIONS.DOCUMENTS_MANAGE_FILES, label: 'Manage Documents', description: 'Upload, edit metadata, and delete documents (access rules still apply)' },
     ],
   },
   {

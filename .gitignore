@@ -63,3 +63,5 @@ dumps/
 .cursor/
 
 CLAUDE.md
+
+docs/plans/*

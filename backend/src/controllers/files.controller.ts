@@ -389,9 +389,12 @@ export const filesController = {
       }
       const isCompanyAdmin = userCompany.role === 'company_admin';
       const userGroupIds = await getUserGroupIdsInCompany(userId, fileRecord.company_id);
-      const allowed = await canUserAccessFolder(userId, fileRecord.company_id, fileRecord.folder_id, isCompanyAdmin, userGroupIds);
-      if (!allowed) {
-        return res.status(403).json({ error: 'You do not have access to this folder' });
+      // Flat files (no folder_id) skip folder access check
+      if (fileRecord.folder_id) {
+        const allowed = await canUserAccessFolder(userId, fileRecord.company_id, fileRecord.folder_id, isCompanyAdmin, userGroupIds);
+        if (!allowed) {
+          return res.status(403).json({ error: 'You do not have access to this folder' });
+        }
       }
       const url = getDocumentProxyUrl(fileRecord.storage_path, Boolean(download));
       return res.json({ url });
@@ -441,9 +444,11 @@ export const filesController = {
     } catch (error) {
       console.error('Error streaming document:', error);
       if (!res.headersSent) {
-        return res.status(500).json({
-          error: 'Failed to stream document',
-          details: error instanceof Error ? error.message : 'Unknown error',
+        const msg = error instanceof Error ? error.message : 'Unknown error';
+        const isNotFound = msg.includes('does not exist') || msg.includes('NoSuchKey') || msg.includes('Not Found');
+        return res.status(isNotFound ? 404 : 500).json({
+          error: isNotFound ? 'File not found in storage' : 'Failed to stream document',
+          details: msg,
         });
       }
     }
@@ -826,16 +831,25 @@ export const filesController = {
 
       const isCompanyAdmin = userCompany.role === 'company_admin';
       const userGroupIds = await getUserGroupIdsInCompany(userId, companyId);
-      const allowed = await canUserAccessFolder(userId, companyId, fileRecord.folder_id, isCompanyAdmin, userGroupIds);
-      if (!allowed) {
-        return res.status(403).json({ error: 'You do not have access to this folder' });
-      }
-      const level = await getUserFolderPermissionLevel(userId, companyId, fileRecord.folder_id, isCompanyAdmin, userGroupIds);
-      if (level !== 'write') {
-        return res.status(403).json({ error: 'Write permission required to delete files in this folder' });
+      // Flat files (no folder_id) skip folder access check; admin or uploader can delete
+      if (fileRecord.folder_id) {
+        const allowed = await canUserAccessFolder(userId, companyId, fileRecord.folder_id, isCompanyAdmin, userGroupIds);
+        if (!allowed) {
+          return res.status(403).json({ error: 'You do not have access to this folder' });
+        }
+        const level = await getUserFolderPermissionLevel(userId, companyId, fileRecord.folder_id, isCompanyAdmin, userGroupIds);
+        if (level !== 'write') {
+          return res.status(403).json({ error: 'Write permission required to delete files in this folder' });
+        }
       }
 
-      await storageService.deleteFile(storageService.getDocumentsBucket(), fileRecord.storage_path);
+      // Delete from storage (ignore if object doesn't exist)
+      try {
+        await storageService.deleteFile(storageService.getDocumentsBucket(), fileRecord.storage_path);
+      } catch {
+        // Object may not exist in storage; proceed with DB cleanup
+      }
+      await prisma.filesMetadataValue.deleteMany({ where: { files_id: fileId } });
       await prisma.file.delete({ where: { id: fileId } });
 
       return res.status(204).send();

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,6 +25,7 @@ import {
   Tag,
   Filter,
   Search,
+  CloudUpload,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
@@ -59,6 +60,7 @@ interface TreeNode {
 
 interface Props {
   companyId: string;
+  canManageFiles?: boolean;
 }
 
 function nodeDirectlyMatches(node: TreeNode, query: string): boolean {
@@ -67,7 +69,7 @@ function nodeDirectlyMatches(node: TreeNode, query: string): boolean {
   return node.name.toLowerCase().includes(q) || (node.keyName?.toLowerCase().includes(q) ?? false);
 }
 
-export default function MetadataDocumentView({ companyId }: Props) {
+export default function MetadataDocumentView({ companyId, canManageFiles = false }: Props) {
   const [files, setFiles] = useState<FileType[]>([]);
   const [totalFileCount, setTotalFileCount] = useState(0);
   const [tree, setTree] = useState<TreeNode[]>([]);
@@ -83,6 +85,8 @@ export default function MetadataDocumentView({ companyId }: Props) {
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploadMetadata, setUploadMetadata] = useState<Array<{ key_id: string; value: string }>>([]);
+  const [isDragOver, setIsDragOver] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [isMetadataDialogOpen, setIsMetadataDialogOpen] = useState(false);
   const [editingFile, setEditingFile] = useState<FileType | null>(null);
   const [metadataEntries, setMetadataEntries] = useState<Array<{ key: string; value: string }>>([]);
@@ -552,7 +556,7 @@ export default function MetadataDocumentView({ companyId }: Props) {
             )}
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            {selectedFileIds.size > 0 && (
+            {canManageFiles && selectedFileIds.size > 0 && (
               <Button
                 size="sm"
                 variant="outline"
@@ -575,10 +579,12 @@ export default function MetadataDocumentView({ companyId }: Props) {
               <Filter className="h-3 w-3 mr-1" />
               Add Filter
             </Button>
-            <Button size="sm" className="h-7 text-xs" onClick={() => setIsUploadOpen(true)}>
-              <Upload className="h-3 w-3 mr-1" />
-              Upload
-            </Button>
+            {canManageFiles && (
+              <Button size="sm" className="h-7 text-xs" onClick={() => setIsUploadOpen(true)}>
+                <Upload className="h-3 w-3 mr-1" />
+                Upload
+              </Button>
+            )}
           </div>
         </div>
 
@@ -685,12 +691,14 @@ export default function MetadataDocumentView({ companyId }: Props) {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="w-10">
-                  <Checkbox
-                    checked={files.length > 0 && selectedFileIds.size === files.length}
-                    onCheckedChange={handleToggleSelectAll}
-                  />
-                </TableHead>
+                {canManageFiles && (
+                  <TableHead className="w-10">
+                    <Checkbox
+                      checked={files.length > 0 && selectedFileIds.size === files.length}
+                      onCheckedChange={handleToggleSelectAll}
+                    />
+                  </TableHead>
+                )}
                 <TableHead>Name</TableHead>
                 <TableHead>Metadata</TableHead>
                 <TableHead>Size</TableHead>
@@ -701,12 +709,14 @@ export default function MetadataDocumentView({ companyId }: Props) {
             <TableBody>
               {files.map((file) => (
                 <TableRow key={file.id}>
-                  <TableCell>
-                    <Checkbox
-                      checked={selectedFileIds.has(file.id)}
-                      onCheckedChange={() => handleToggleSelect(file.id)}
-                    />
-                  </TableCell>
+                  {canManageFiles && (
+                    <TableCell>
+                      <Checkbox
+                        checked={selectedFileIds.has(file.id)}
+                        onCheckedChange={() => handleToggleSelect(file.id)}
+                      />
+                    </TableCell>
+                  )}
                   <TableCell className="font-medium">
                     <div className="flex items-center gap-2">
                       <FileIcon className="h-4 w-4 text-muted-foreground shrink-0" />
@@ -722,9 +732,11 @@ export default function MetadataDocumentView({ companyId }: Props) {
                       ) : (
                         <span className="text-xs text-muted-foreground/50">No metadata</span>
                       )}
-                      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openMetadataDialog(file)}>
-                        <Edit className="h-3 w-3" />
-                      </Button>
+                      {canManageFiles && (
+                        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openMetadataDialog(file)}>
+                          <Edit className="h-3 w-3" />
+                        </Button>
+                      )}
                     </div>
                   </TableCell>
                   <TableCell className="text-sm text-muted-foreground">{formatFileSize(file.size_bytes)}</TableCell>
@@ -741,16 +753,18 @@ export default function MetadataDocumentView({ companyId }: Props) {
                       <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleDownload(file)}>
                         <Download className="h-3.5 w-3.5" />
                       </Button>
-                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleDelete(file.id)}>
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
+                      {canManageFiles && (
+                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleDelete(file.id)}>
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
                     </div>
                   </TableCell>
                 </TableRow>
               ))}
               {files.length === 0 && !loading && (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center text-muted-foreground py-12">
+                  <TableCell colSpan={canManageFiles ? 6 : 5} className="text-center text-muted-foreground py-12">
                     {filters.length > 0 ? "No files match the current filters" : "No documents yet. Upload your first file."}
                   </TableCell>
                 </TableRow>
@@ -819,17 +833,87 @@ export default function MetadataDocumentView({ companyId }: Props) {
       </Dialog>
 
       {/* Upload */}
-      <Dialog open={isUploadOpen} onOpenChange={setIsUploadOpen}>
-        <DialogContent>
+      <Dialog open={isUploadOpen} onOpenChange={(open) => {
+        setIsUploadOpen(open);
+        if (!open) { setUploadFile(null); setUploadMetadata([]); setIsDragOver(false); }
+      }}>
+        <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Upload Document</DialogTitle>
             <DialogDescription>Upload a file and optionally tag it with metadata.</DialogDescription>
           </DialogHeader>
-          <div className="space-y-4">
-            <div>
-              <Label>File</Label>
-              <Input type="file" onChange={(e) => setUploadFile(e.target.files?.[0] || null)} />
-            </div>
+          <div className="space-y-4 min-w-0">
+            {/* Hidden file input */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              className="hidden"
+              onChange={(e) => {
+                setUploadFile(e.target.files?.[0] || null);
+                if (fileInputRef.current) fileInputRef.current.value = "";
+              }}
+            />
+
+            {/* Drop zone / file preview */}
+            {!uploadFile ? (
+              <div
+                className={`
+                  relative flex flex-col items-center justify-center gap-3 rounded-lg border-2 border-dashed
+                  px-6 py-8 cursor-pointer transition-all duration-200
+                  ${isDragOver
+                    ? "border-primary bg-primary/5 scale-[1.01]"
+                    : "border-muted-foreground/25 hover:border-muted-foreground/50 hover:bg-muted/30"
+                  }
+                `}
+                onClick={() => fileInputRef.current?.click()}
+                onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
+                onDragLeave={() => setIsDragOver(false)}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setIsDragOver(false);
+                  const droppedFile = e.dataTransfer.files?.[0];
+                  if (droppedFile) setUploadFile(droppedFile);
+                }}
+              >
+                <div className={`rounded-full p-3 transition-colors duration-200 ${isDragOver ? "bg-primary/10" : "bg-muted"}`}>
+                  <CloudUpload className={`h-6 w-6 transition-colors duration-200 ${isDragOver ? "text-primary" : "text-muted-foreground"}`} />
+                </div>
+                <div className="text-center">
+                  <p className="text-sm font-medium">
+                    {isDragOver ? "Drop file here" : "Drag & drop a file here"}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    or <span className="text-primary underline underline-offset-2">browse from your computer</span>
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center gap-3 rounded-lg border border-border bg-muted/40 p-3 overflow-hidden">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-primary/10">
+                  <FileIcon className="h-5 w-5 text-primary" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium truncate">{uploadFile.name}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {uploadFile.size < 1024
+                      ? `${uploadFile.size} B`
+                      : uploadFile.size < 1024 * 1024
+                        ? `${(uploadFile.size / 1024).toFixed(1)} KB`
+                        : `${(uploadFile.size / (1024 * 1024)).toFixed(1)} MB`}
+                  </p>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
+                  onClick={() => setUploadFile(null)}
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            )}
+
+            {/* Metadata */}
             <div>
               <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Metadata (optional)</Label>
               <div className="mt-2 space-y-2">
@@ -861,11 +945,16 @@ export default function MetadataDocumentView({ companyId }: Props) {
                   </div>
                 ))}
                 <Button variant="outline" size="sm" onClick={() => setUploadMetadata([...uploadMetadata, { key_id: "", value: "" }])}>
-                  + Add metadata
+                  <Tag className="h-3 w-3 mr-1.5" />
+                  Add metadata
                 </Button>
               </div>
             </div>
-            <Button onClick={handleUpload} disabled={!uploadFile} className="w-full">Upload</Button>
+
+            <Button onClick={handleUpload} disabled={!uploadFile} className="w-full">
+              <Upload className="h-4 w-4 mr-2" />
+              Upload
+            </Button>
           </div>
         </DialogContent>
       </Dialog>
