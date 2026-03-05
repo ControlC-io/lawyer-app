@@ -975,21 +975,21 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
             <DialogTitle>Edit Metadata</DialogTitle>
             <DialogDescription>Manage metadata for {editingFile?.name}</DialogDescription>
           </DialogHeader>
-          <div className="space-y-3 max-h-[50vh] overflow-auto">
+          <div className="space-y-3 max-h-[50vh] overflow-auto px-0.5">
             {metadataEntries.map((entry, i) => (
-              <div key={i} className="flex gap-2">
+              <div key={i} className="flex gap-2 min-w-0">
                 <Select value={entry.key} onValueChange={(v) => {
                   const next = [...metadataEntries];
                   next[i].key = v;
                   setMetadataEntries(next);
                 }}>
-                  <SelectTrigger className="h-9 flex-1"><SelectValue placeholder="Key" /></SelectTrigger>
+                  <SelectTrigger className="h-9 flex-1 min-w-0"><SelectValue placeholder="Key" /></SelectTrigger>
                   <SelectContent>
                     {metadataKeys.map((k) => <SelectItem key={k.id} value={k.name}>{k.name}</SelectItem>)}
                   </SelectContent>
                 </Select>
                 <Input
-                  className="h-9 flex-1"
+                  className="h-9 flex-1 min-w-0"
                   placeholder="Value"
                   value={entry.value}
                   onChange={(e) => {
