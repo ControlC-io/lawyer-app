@@ -517,7 +517,6 @@ export const filesController = {
 
       const config = (workflowStep.config as any) || {};
       const sourceFileId = config.source_file_id;
-      const targetFolderId = config.target_folder_id;
       const metadataConfig = config.api_data
         ? typeof config.api_data === 'string'
           ? JSON.parse(config.api_data)
@@ -526,10 +525,6 @@ export const filesController = {
 
       if (!sourceFileId || sourceFileId === 'none') {
         return res.status(400).json({ error: 'Source file not configured' });
-      }
-
-      if (!targetFolderId || targetFolderId === 'none') {
-        return res.status(400).json({ error: 'Target folder not configured' });
       }
 
       // Resolve source file from execution data
@@ -572,7 +567,7 @@ export const filesController = {
         'unknown_file';
 
       // Upload to new location
-      const newPath = `${targetFolderId}/${originalFileName}`;
+      const newPath = `companies/${execution.company_id}/${Date.now()}_${originalFileName}`;
       const fileStat = await storageService.getFileStat(
         storageService.getDocumentsBucket(),
         sourceFilePath
@@ -639,7 +634,7 @@ export const filesController = {
       const newFile = await prisma.file.create({
         data: {
           name: originalFileName,
-          folder_id: targetFolderId,
+          folder_id: null,
           storage_path: newPath,
           size_bytes: BigInt(fileBuffer.length),
           mime_type: fileStat.contentType || null,
@@ -670,7 +665,6 @@ export const filesController = {
             success: true,
             new_file_id: newFile.id,
             original_file_id: sourceFilePath,
-            target_folder_id: targetFolderId,
           },
         },
       });

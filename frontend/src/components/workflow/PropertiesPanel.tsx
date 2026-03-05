@@ -56,7 +56,6 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
   const [users, setUsers] = useState<Array<{ id: string; email: string; full_name: string | null }>>([]);
   const [groups, setGroups] = useState<Array<{ id: string; name: string; description: string | null }>>([]);
   const [dataStructureItems, setDataStructureItems] = useState<Array<{ id: string; name: string; data_structure_name: string; field_type?: string }>>([]);
-  const [folders, setFolders] = useState<Array<{ id: string; name: string; parent_folder_id: string | null }>>([]);
   const [apiConfigurations, setApiConfigurations] = useState<Array<{ id: string; name: string; config_type: string; api_url?: string }>>([]);
   const [workflowStatuses, setWorkflowStatuses] = useState<Array<{ id: string; name: string; color: string; order: number }>>([]);
   const [agents, setAgents] = useState<Array<{ id: string; name: string; category_id: string | null }>>([]);
@@ -115,11 +114,6 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
           );
           if (metadataList) setMetadataKeys(metadataList);
         }
-
-        const foldersList = await api.get<Array<{ id: string; name: string; parent_folder_id: string | null }>>(
-          `/api/companies/${companyId}/folders`
-        );
-        if (foldersList) setFolders(foldersList);
 
         const apiConfigList = await api.get<Array<{ id: string; name: string; config_type: string }>>(
           `/api/companies/${companyId}/api-configurations`
@@ -250,16 +244,6 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
     setDataStructureItems(allItems);
   };
 
-  const fetchFolders = async () => {
-    if (!companyId) {
-      setFolders([]);
-      return;
-    }
-    const data = await api.get<Array<{ id: string; name: string; parent_folder_id: string | null }>>(
-      `/api/companies/${companyId}/folders`
-    );
-    if (data) setFolders(data);
-  };
 
   const fetchApiConfigurations = async () => {
     if (!companyId) return;
@@ -2276,7 +2260,7 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
                   <div className="p-3 border border-border rounded-md bg-muted/50">
                     <p className="text-sm font-medium">Create File Copy</p>
                     <p className="text-xs text-muted-foreground mt-1">
-                      A copy of the source file will be created in the target folder. The original file will remain unchanged.
+                      A copy of the source file will be created. The original file will remain unchanged.
                     </p>
                   </div>
                 </div>
@@ -2303,29 +2287,6 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
                   </Select>
                   <p className="text-xs text-muted-foreground">
                     Select the file field from the data structure to operate on
-                  </p>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="target-folder">Target Folder</Label>
-                  <Select
-                    value={step.config.target_folder_id || "none"}
-                    onValueChange={(value) => handleConfigChange("target_folder_id", value === "none" ? "" : value)}
-                  >
-                    <SelectTrigger id="target-folder">
-                      <SelectValue placeholder="Select folder" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">Root folder</SelectItem>
-                      {folders.map((folder) => (
-                        <SelectItem key={folder.id} value={folder.id}>
-                          {folder.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-muted-foreground">
-                    Select the folder where the file copy will be created
                   </p>
                 </div>
 
