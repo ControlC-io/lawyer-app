@@ -3,7 +3,7 @@ import { Prisma } from '@prisma/client';
 import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 import { canUserAccessFolder, getUserGroupIdsInCompany } from '../lib/folderAccess';
-import { getAccessibleFileIds } from '../lib/documentAccess';
+import { getAccessibleFileIds, canUserAccessFileByMetadata } from '../lib/documentAccess';
 import { storageService } from '../services/storage.service';
 
 /**
@@ -1841,13 +1841,38 @@ export const companiesController = {
       // When listing by ids (e.g. metadata search), filter out files in folders the user cannot access
       if (idsParam && files.length > 0) {
         const folderIds = [...new Set(files.map((f) => f.folder_id).filter((id): id is string => id != null))];
+        const flatFiles = files.filter((f) => f.folder_id == null);
         const allowedFolderIds = new Set<string>();
         for (const fid of folderIds) {
           const allowed = await canUserAccessFolder(userId, companyId, fid, isCompanyAdmin, userGroupIds);
           if (allowed) allowedFolderIds.add(fid);
         }
-        // Files without folder_id (flat files) are allowed through (access controlled by metadata permissions)
-        files = files.filter((f) => f.folder_id == null || allowedFolderIds.has(f.folder_id));
+        const allowedFlatIds = new Set<string>();
+        if (flatFiles.length > 0) {
+          if (isCompanyAdmin) {
+            flatFiles.forEach((f) => allowedFlatIds.add(f.id));
+          } else {
+            const checks = await Promise.all(
+              flatFiles.map(async (f) => {
+                const level = await canUserAccessFileByMetadata({
+                  userId,
+                  companyId,
+                  fileId: f.id,
+                  isCompanyAdmin,
+                  userGroupIds,
+                });
+                return level ? f.id : null;
+              }),
+            );
+            checks.forEach((id) => {
+              if (id) allowedFlatIds.add(id);
+            });
+          }
+        }
+        files = files.filter((f) => {
+          if (f.folder_id == null) return allowedFlatIds.has(f.id);
+          return allowedFolderIds.has(f.folder_id);
+        });
       }
       // BigInt (e.g. size_bytes) is not JSON-serializable; convert to number for the response
       const serialized = files.map((f) => ({
@@ -1916,13 +1941,40 @@ export const companiesController = {
         const isCompanyAdmin = access.userCompany?.role === 'company_admin' || !!req.user?.super_admin;
         const userGroupIds = await getUserGroupIdsInCompany(userId, companyId);
         const folderIds = [...new Set(filesWithFolder.map((f) => f.folder_id).filter((id): id is string => id != null))];
+        const flatFiles = filesWithFolder.filter((f) => f.folder_id == null);
         const allowedFolderIds = new Set<string>();
         for (const fid of folderIds) {
           const allowed = await canUserAccessFolder(userId, companyId, fid, isCompanyAdmin, userGroupIds);
           if (allowed) allowedFolderIds.add(fid);
         }
-        // Files without folder_id (flat files) are allowed through
-        fileIds = filesWithFolder.filter((f) => f.folder_id == null || allowedFolderIds.has(f.folder_id)).map((f) => f.id);
+        const allowedFlatIds = new Set<string>();
+        if (flatFiles.length > 0) {
+          if (isCompanyAdmin) {
+            flatFiles.forEach((f) => allowedFlatIds.add(f.id));
+          } else {
+            const checks = await Promise.all(
+              flatFiles.map(async (f) => {
+                const level = await canUserAccessFileByMetadata({
+                  userId,
+                  companyId,
+                  fileId: f.id,
+                  isCompanyAdmin,
+                  userGroupIds,
+                });
+                return level ? f.id : null;
+              }),
+            );
+            checks.forEach((id) => {
+              if (id) allowedFlatIds.add(id);
+            });
+          }
+        }
+        fileIds = filesWithFolder
+          .filter((f) => {
+            if (f.folder_id == null) return allowedFlatIds.has(f.id);
+            return allowedFolderIds.has(f.folder_id);
+          })
+          .map((f) => f.id);
       }
       return res.json({ fileIds });
     } catch (error) {

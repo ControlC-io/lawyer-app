@@ -435,6 +435,25 @@ describe('documentAccess', () => {
       expect(y2025!.children![0].children).toHaveLength(1);
     });
 
+    it('generates unique folder node IDs for equal values under different parents', () => {
+      const files = [
+        { id: 'file-1', name: 'doc1.pdf' },
+        { id: 'file-2', name: 'doc2.pdf' },
+      ];
+      const metadata: Record<string, Record<string, string[]>> = {
+        'file-1': { 'key-year': ['2025'], 'key-type': ['invoice'] },
+        'file-2': { 'key-year': ['2026'], 'key-type': ['invoice'] },
+      };
+      const keyOrder = [
+        { id: 'key-year', name: 'year' },
+        { id: 'key-type', name: 'type' },
+      ];
+
+      const tree = buildVirtualTree(files, metadata, keyOrder);
+      const childIds = tree.flatMap((n: any) => (n.children || []).map((c: any) => c.id));
+      expect(new Set(childIds).size).toBe(childIds.length);
+    });
+
     it('places files missing metadata values under Uncategorized', () => {
       const files = [
         { id: 'file-1', name: 'tagged.pdf' },

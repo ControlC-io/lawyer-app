@@ -324,6 +324,7 @@ export function buildVirtualTree(
   function buildLevel(
     items: Array<{ id: string; name: string }>,
     keyIndex: number,
+    parentPath: string,
   ): VirtualTreeNode[] {
     if (keyIndex >= keyOrder.length) {
       return items.map((f) => ({ id: f.id, name: f.name, type: 'file' as const }));
@@ -355,9 +356,10 @@ export function buildVirtualTree(
     const nodes: VirtualTreeNode[] = Object.entries(grouped)
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([value, groupFiles]) => {
-        const children = buildLevel(groupFiles, keyIndex + 1);
+        const nodePath = `${parentPath}|${currentKey.id}:${value}`;
+        const children = buildLevel(groupFiles, keyIndex + 1, nodePath);
         return {
-          id: `node_${currentKey.id}_${value}`,
+          id: `node_${keyIndex}_${nodePath}`,
           name: value,
           type: 'folder' as const,
           children,
@@ -367,11 +369,12 @@ export function buildVirtualTree(
       });
 
     if (uncategorized.length > 0) {
+      const uncategorizedPath = `${parentPath}|${currentKey.id}:__uncategorized__`;
       nodes.push({
-        id: `uncategorized_${currentKey.id}`,
+        id: `uncategorized_${keyIndex}_${uncategorizedPath}`,
         name: 'Uncategorized',
         type: 'folder' as const,
-        children: buildLevel(uncategorized, keyIndex + 1),
+        children: buildLevel(uncategorized, keyIndex + 1, uncategorizedPath),
         fileCount: uncategorized.length,
         keyName: currentKey.name,
         isUncategorized: true,
@@ -381,7 +384,7 @@ export function buildVirtualTree(
     return nodes;
   }
 
-  return buildLevel(files, 0);
+  return buildLevel(files, 0, 'root');
 }
 
 /**
