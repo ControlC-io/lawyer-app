@@ -9,6 +9,7 @@ import notificationsRoutes from './notifications';
 import publicRoutes from './public';
 import externalRoutes from './external';
 import portalRoutes from './portal';
+import ocrRoutes from './ocr';
 
 const router = Router();
 
@@ -23,6 +24,9 @@ router.use('/workflows', workflowRoutes);
 
 // File routes (mixed auth)
 router.use('/files', filesRoutes);
+
+// OCR routes (JWT auth)
+router.use('/files', ocrRoutes);
 
 // User/company routes (JWT or API key)
 router.use('/', usersRoutes);
