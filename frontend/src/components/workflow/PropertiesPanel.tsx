@@ -390,7 +390,7 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
     onUpdateStep({ ...step, name });
   };
 
-  const handleConfigChange = (key: string, value: string) => {
+  const handleConfigChange = (key: string, value: string | boolean) => {
     onUpdateStep({
       ...step,
       config: { ...step.config, [key]: value },
@@ -2390,6 +2390,20 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
                   </div>
                   <p className="text-xs text-muted-foreground">
                     Add metadata key-value pairs to be stored with the file.
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex items-center space-x-2">
+                    <Switch
+                      id="ocr-enabled"
+                      checked={!!step.config.ocrEnabled}
+                      onCheckedChange={(checked) => handleConfigChange("ocrEnabled", checked)}
+                    />
+                    <Label htmlFor="ocr-enabled">OCR uploaded documents</Label>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Automatically extract text from documents passing through this node.
                   </p>
                 </div>
               </div>
