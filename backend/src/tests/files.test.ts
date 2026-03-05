@@ -159,7 +159,7 @@ describe('Files Endpoints', () => {
   describe('POST /api/files/workflows/executions/:executionId/steps/:stepId/process-file', () => {
     it('should process file step successfully', async () => {
       (prisma.workflowStep.findUnique as jest.Mock).mockResolvedValue({
-        config: { source_file_id: 'f1', target_folder_id: 'folder-1' }
+        config: { source_file_id: 'f1' }
       });
       (prisma.workflowExecutionData.findFirst as jest.Mock).mockResolvedValue({
         values: { f1: { value: 'old/path.png' } }

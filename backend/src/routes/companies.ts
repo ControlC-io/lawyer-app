@@ -4,6 +4,7 @@ import { workflowDefinitionController } from '../controllers/workflowDefinition.
 import { usersController } from '../controllers/users.controller';
 import { filesController } from '../controllers/files.controller';
 import { rolesController } from '../controllers/roles.controller';
+import { documentsController } from '../controllers/documents.controller';
 import { authMiddleware } from '../middleware/auth';
 import { asyncHandler } from '../middleware/validation';
 import { requirePermission } from '../lib/rbac';
@@ -97,18 +98,18 @@ router.delete('/:companyId/global-variables/:variableId', requirePermission('var
 
 router.get('/:companyId/folders', requirePermission('documents.view'), asyncHandler(companiesController.listFolders));
 router.get('/:companyId/folders/:folderId', requirePermission('documents.view'), asyncHandler(companiesController.getFolder));
-router.post('/:companyId/folders', requirePermission('documents.manage_structure'), asyncHandler(companiesController.createFolder));
-router.patch('/:companyId/folders/:folderId', requirePermission('documents.manage_structure'), asyncHandler(companiesController.updateFolder));
-router.delete('/:companyId/folders/:folderId', requirePermission('documents.manage_structure'), asyncHandler(companiesController.deleteFolder));
-router.get('/:companyId/folders/:folderId/permissions', requirePermission('documents.manage_files'), asyncHandler(companiesController.listFolderPermissions));
-router.post('/:companyId/folders/:folderId/permissions', requirePermission('documents.manage_files'), asyncHandler(companiesController.addFolderPermission));
-router.delete('/:companyId/folders/:folderId/permissions/:permissionId', requirePermission('documents.manage_files'), asyncHandler(companiesController.deleteFolderPermission));
+router.post('/:companyId/folders', requirePermission('documents.manage'), asyncHandler(companiesController.createFolder));
+router.patch('/:companyId/folders/:folderId', requirePermission('documents.manage'), asyncHandler(companiesController.updateFolder));
+router.delete('/:companyId/folders/:folderId', requirePermission('documents.manage'), asyncHandler(companiesController.deleteFolder));
+router.get('/:companyId/folders/:folderId/permissions', requirePermission('documents.manage'), asyncHandler(companiesController.listFolderPermissions));
+router.post('/:companyId/folders/:folderId/permissions', requirePermission('documents.manage'), asyncHandler(companiesController.addFolderPermission));
+router.delete('/:companyId/folders/:folderId/permissions/:permissionId', requirePermission('documents.manage'), asyncHandler(companiesController.deleteFolderPermission));
 router.get('/:companyId/files', requirePermission('documents.view'), asyncHandler(companiesController.listFiles));
-router.post('/:companyId/files', requirePermission('documents.manage_files'), asyncHandler(companiesController.createFile));
+router.post('/:companyId/files', requirePermission('documents.view'), asyncHandler(companiesController.createFile));
 router.get('/:companyId/files/by-metadata', requirePermission('documents.view'), asyncHandler(companiesController.getFileIdsByMetadata));
-router.post('/:companyId/folders/:folderId/upload', filesController.uploadMiddleware, asyncHandler(filesController.uploadCompanyDocument));
-router.put('/:companyId/files/:fileId/metadata', requirePermission('documents.manage_files'), asyncHandler(companiesController.updateFileMetadata));
-router.delete('/:companyId/files/:fileId', requirePermission('documents.manage_files'), asyncHandler(filesController.deleteCompanyFile));
+router.post('/:companyId/folders/:folderId/upload', filesController.uploadMiddleware, requirePermission('documents.view'), asyncHandler(filesController.uploadCompanyDocument));
+router.put('/:companyId/files/:fileId/metadata', requirePermission('documents.view'), asyncHandler(companiesController.updateFileMetadata));
+router.delete('/:companyId/files/:fileId', requirePermission('documents.view'), asyncHandler(filesController.deleteCompanyFile));
 
 router.get('/:companyId/agent-permissions', asyncHandler(companiesController.listAgentPermissions));
 router.post('/:companyId/agent-permissions', requirePermission('workflows.manage'), asyncHandler(companiesController.addAgentPermission));
@@ -132,6 +133,34 @@ router.delete('/:companyId/data-tables/:tableId/records/:recordId', requirePermi
 
 router.use('/:companyId/workflows', workflowDefinitionRoutes);
 
+// ─── Flat Metadata Document Management ───
+
+// Permission rules
+router.get('/:companyId/document-permission-rules', requirePermission('documents.manage'), asyncHandler(documentsController.listPermissionRules));
+router.post('/:companyId/document-permission-rules', requirePermission('documents.manage'), asyncHandler(documentsController.createPermissionRule));
+router.patch('/:companyId/document-permission-rules/:ruleId', requirePermission('documents.manage'), asyncHandler(documentsController.updatePermissionRule));
+router.delete('/:companyId/document-permission-rules/:ruleId', requirePermission('documents.manage'), asyncHandler(documentsController.deletePermissionRule));
+
+// Permission assignments
+router.post('/:companyId/document-permission-rules/:ruleId/assignments', requirePermission('documents.manage'), asyncHandler(documentsController.addPermissionAssignment));
+router.delete('/:companyId/document-permission-rules/:ruleId/assignments/:assignmentId', requirePermission('documents.manage'), asyncHandler(documentsController.removePermissionAssignment));
+
+// Flat file listing (metadata-permission-filtered)
+router.get('/:companyId/documents/flat', requirePermission('documents.view'), asyncHandler(documentsController.listFlatFiles));
+
+// Virtual tree view
+router.get('/:companyId/documents/tree', requirePermission('documents.view'), asyncHandler(documentsController.getVirtualTree));
+
+// Tree config (per-user)
+router.get('/:companyId/documents/tree-config', requirePermission('documents.view'), asyncHandler(documentsController.getTreeConfig));
+router.put('/:companyId/documents/tree-config', requirePermission('documents.view'), asyncHandler(documentsController.updateTreeConfig));
+
+// Flat upload (no folder required)
+router.post('/:companyId/documents/upload', filesController.uploadMiddleware, requirePermission('documents.view'), asyncHandler(documentsController.uploadFlatFile));
+
+// Bulk metadata assignment
+router.post('/:companyId/documents/bulk-metadata', requirePermission('documents.view'), asyncHandler(documentsController.bulkUpdateMetadata));
+
 router.get(
   '/:companyId/files-metadata-keys',
   requirePermission('documents.view'),
@@ -139,17 +168,17 @@ router.get(
 );
 router.post(
   '/:companyId/files-metadata-keys',
-  requirePermission('documents.manage_structure'),
+  requirePermission('documents.manage'),
   asyncHandler(companiesController.createFilesMetadataKey)
 );
 router.patch(
   '/:companyId/files-metadata-keys/:keyId',
-  requirePermission('documents.manage_structure'),
+  requirePermission('documents.manage'),
   asyncHandler(companiesController.updateFilesMetadataKey)
 );
 router.delete(
   '/:companyId/files-metadata-keys/:keyId',
-  requirePermission('documents.manage_structure'),
+  requirePermission('documents.manage'),
   asyncHandler(companiesController.deleteFilesMetadataKey)
 );
 

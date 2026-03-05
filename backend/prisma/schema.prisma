@@ -101,6 +101,9 @@ model Company {
   workflow_permissions  WorkflowPermission[]
   roles              Role[]
   audit_logs         AuditLog[]
+  document_permission_rules      DocumentPermissionRule[]
+  document_permission_assignments DocumentPermissionAssignment[]
+  user_document_tree_configs     UserDocumentTreeConfig[]
 
   @@map("companies")
   @@schema("public")
@@ -126,6 +129,8 @@ model Profile {
   workflow_executions   WorkflowExecution[]
   execution_steps       WorkflowExecutionStep[]
   workflow_permissions  WorkflowPermission[]
+  document_permission_assignments DocumentPermissionAssignment[]
+  document_tree_configs          UserDocumentTreeConfig[]
 
   @@map("profiles")
   @@schema("public")
@@ -290,7 +295,7 @@ model File {
   id              String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   name            String
   description     String?
-  folder_id       String               @db.Uuid
+  folder_id       String?              @db.Uuid
   storage_path    String
   mime_type       String?
   size_bytes      BigInt?
@@ -298,7 +303,7 @@ model File {
   company_id      String?              @db.Uuid
   created_at      DateTime             @default(now()) @db.Timestamptz(6)
   updated_at      DateTime             @default(now()) @db.Timestamptz(6)
-  folder          Folder               @relation(fields: [folder_id], references: [id])
+  folder          Folder?              @relation(fields: [folder_id], references: [id])
   uploader        Profile?             @relation(fields: [uploaded_by], references: [id])
   company         Company?             @relation(fields: [company_id], references: [id])
   metadata_values FilesMetadataValue[]
@@ -352,6 +357,7 @@ model ProfileGroup {
   workflow_steps     WorkflowStep[]
   execution_steps    WorkflowExecutionStep[]
   workflow_permissions WorkflowPermission[]
+  document_permission_assignments DocumentPermissionAssignment[]
 
   @@map("profile_groups")
   @@schema("public")
@@ -498,6 +504,52 @@ model AuditLog {
   company     Company  @relation(fields: [company_id], references: [id])
 
   @@map("audit_logs")
+  @@schema("public")
+}
+
+model DocumentPermissionRule {
+  id              String                        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name            String
+  company_id      String                        @db.Uuid
+  permission_type String                        @default("read")
+  conditions      Json                          @default("[]")
+  created_at      DateTime                      @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime                      @default(now()) @updatedAt @db.Timestamptz(6)
+  company         Company                       @relation(fields: [company_id], references: [id])
+  assignments     DocumentPermissionAssignment[]
+
+  @@map("document_permission_rules")
+  @@schema("public")
+}
+
+model DocumentPermissionAssignment {
+  id         String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  rule_id    String                 @db.Uuid
+  user_id    String?                @db.Uuid
+  group_id   String?                @db.Uuid
+  company_id String                 @db.Uuid
+  created_at DateTime               @default(now()) @db.Timestamptz(6)
+  rule       DocumentPermissionRule @relation(fields: [rule_id], references: [id], onDelete: Cascade)
+  user       Profile?               @relation(fields: [user_id], references: [id])
+  group      ProfileGroup?          @relation(fields: [group_id], references: [id])
+  company    Company                @relation(fields: [company_id], references: [id])
+
+  @@map("document_permission_assignments")
+  @@schema("public")
+}
+
+model UserDocumentTreeConfig {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id   String   @db.Uuid
+  company_id String  @db.Uuid
+  key_order Json     @default("[]")
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  updated_at DateTime @default(now()) @updatedAt @db.Timestamptz(6)
+  user      Profile  @relation(fields: [user_id], references: [id])
+  company   Company  @relation(fields: [company_id], references: [id])
+
+  @@unique([user_id, company_id])
+  @@map("user_document_tree_configs")
   @@schema("public")
 }
 

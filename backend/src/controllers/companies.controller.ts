@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 import { canUserAccessFolder, getUserGroupIdsInCompany } from '../lib/folderAccess';
+import { getAccessibleFileIds, canUserAccessFileByMetadata } from '../lib/documentAccess';
 import { storageService } from '../services/storage.service';
 
 /**
@@ -395,8 +396,44 @@ export const companiesController = {
         return res.status(access.error.status).json(access.error.body);
       }
 
+      const userId = req.user?.id;
+      const isCompanyAdmin = access.userCompany?.role === 'company_admin' || !!req.user?.super_admin;
+
+      // Admins see all keys; non-admins see only keys present on their accessible files
+      if (isCompanyAdmin) {
+        const keys = await prisma.filesMetadataKey.findMany({
+          where: { company_id: companyId },
+          orderBy: { name: 'asc' },
+        });
+        return res.json(keys);
+      }
+
+      const userGroupIds = userId ? await getUserGroupIdsInCompany(userId, companyId) : [];
+      const accessibleFileIds = await getAccessibleFileIds({
+        userId: userId!,
+        companyId,
+        isCompanyAdmin: false,
+        userGroupIds,
+      });
+
+      if (accessibleFileIds.length === 0) {
+        return res.json([]);
+      }
+
+      // Get distinct metadata key IDs from accessible files
+      const metadataValues = await prisma.filesMetadataValue.findMany({
+        where: { files_id: { in: accessibleFileIds }, company_id: companyId },
+        select: { metadata_id: true },
+        distinct: ['metadata_id'],
+      });
+
+      const accessibleKeyIds = metadataValues.map((m) => m.metadata_id);
+      if (accessibleKeyIds.length === 0) {
+        return res.json([]);
+      }
+
       const keys = await prisma.filesMetadataKey.findMany({
-        where: { company_id: companyId },
+        where: { id: { in: accessibleKeyIds }, company_id: companyId },
         orderBy: { name: 'asc' },
       });
 
@@ -1803,13 +1840,39 @@ export const companiesController = {
       });
       // When listing by ids (e.g. metadata search), filter out files in folders the user cannot access
       if (idsParam && files.length > 0) {
-        const folderIds = [...new Set(files.map((f) => f.folder_id))];
+        const folderIds = [...new Set(files.map((f) => f.folder_id).filter((id): id is string => id != null))];
+        const flatFiles = files.filter((f) => f.folder_id == null);
         const allowedFolderIds = new Set<string>();
         for (const fid of folderIds) {
           const allowed = await canUserAccessFolder(userId, companyId, fid, isCompanyAdmin, userGroupIds);
           if (allowed) allowedFolderIds.add(fid);
         }
-        files = files.filter((f) => allowedFolderIds.has(f.folder_id));
+        const allowedFlatIds = new Set<string>();
+        if (flatFiles.length > 0) {
+          if (isCompanyAdmin) {
+            flatFiles.forEach((f) => allowedFlatIds.add(f.id));
+          } else {
+            const checks = await Promise.all(
+              flatFiles.map(async (f) => {
+                const level = await canUserAccessFileByMetadata({
+                  userId,
+                  companyId,
+                  fileId: f.id,
+                  isCompanyAdmin,
+                  userGroupIds,
+                });
+                return level ? f.id : null;
+              }),
+            );
+            checks.forEach((id) => {
+              if (id) allowedFlatIds.add(id);
+            });
+          }
+        }
+        files = files.filter((f) => {
+          if (f.folder_id == null) return allowedFlatIds.has(f.id);
+          return allowedFolderIds.has(f.folder_id);
+        });
       }
       // BigInt (e.g. size_bytes) is not JSON-serializable; convert to number for the response
       const serialized = files.map((f) => ({
@@ -1877,13 +1940,41 @@ export const companiesController = {
         });
         const isCompanyAdmin = access.userCompany?.role === 'company_admin' || !!req.user?.super_admin;
         const userGroupIds = await getUserGroupIdsInCompany(userId, companyId);
-        const folderIds = [...new Set(filesWithFolder.map((f) => f.folder_id))];
+        const folderIds = [...new Set(filesWithFolder.map((f) => f.folder_id).filter((id): id is string => id != null))];
+        const flatFiles = filesWithFolder.filter((f) => f.folder_id == null);
         const allowedFolderIds = new Set<string>();
         for (const fid of folderIds) {
           const allowed = await canUserAccessFolder(userId, companyId, fid, isCompanyAdmin, userGroupIds);
           if (allowed) allowedFolderIds.add(fid);
         }
-        fileIds = filesWithFolder.filter((f) => allowedFolderIds.has(f.folder_id)).map((f) => f.id);
+        const allowedFlatIds = new Set<string>();
+        if (flatFiles.length > 0) {
+          if (isCompanyAdmin) {
+            flatFiles.forEach((f) => allowedFlatIds.add(f.id));
+          } else {
+            const checks = await Promise.all(
+              flatFiles.map(async (f) => {
+                const level = await canUserAccessFileByMetadata({
+                  userId,
+                  companyId,
+                  fileId: f.id,
+                  isCompanyAdmin,
+                  userGroupIds,
+                });
+                return level ? f.id : null;
+              }),
+            );
+            checks.forEach((id) => {
+              if (id) allowedFlatIds.add(id);
+            });
+          }
+        }
+        fileIds = filesWithFolder
+          .filter((f) => {
+            if (f.folder_id == null) return allowedFlatIds.has(f.id);
+            return allowedFolderIds.has(f.folder_id);
+          })
+          .map((f) => f.id);
       }
       return res.json({ fileIds });
     } catch (error) {

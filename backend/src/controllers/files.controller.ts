@@ -2,6 +2,7 @@ import { Response } from 'express';
 import { AuthRequest, resolveCompanyForRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 import { canUserAccessFolder, getUserFolderPermissionLevel, getUserGroupIdsInCompany } from '../lib/folderAccess';
+import { canUserAccessFileByMetadata } from '../lib/documentAccess';
 import { getDocumentProxyUrl } from '../lib/documentUrl';
 import { storageService } from '../services/storage.service';
 import { workflowService } from '../services/workflow.service';
@@ -389,9 +390,17 @@ export const filesController = {
       }
       const isCompanyAdmin = userCompany.role === 'company_admin';
       const userGroupIds = await getUserGroupIdsInCompany(userId, fileRecord.company_id);
-      const allowed = await canUserAccessFolder(userId, fileRecord.company_id, fileRecord.folder_id, isCompanyAdmin, userGroupIds);
-      if (!allowed) {
-        return res.status(403).json({ error: 'You do not have access to this folder' });
+      if (fileRecord.folder_id) {
+        const allowed = await canUserAccessFolder(userId, fileRecord.company_id, fileRecord.folder_id, isCompanyAdmin, userGroupIds);
+        if (!allowed) {
+          return res.status(403).json({ error: 'You do not have access to this folder' });
+        }
+      } else {
+        // Flat files: check document permission rules
+        const level = await canUserAccessFileByMetadata({ userId, companyId: fileRecord.company_id, fileId, isCompanyAdmin, userGroupIds });
+        if (!level) {
+          return res.status(403).json({ error: 'You do not have access to this file' });
+        }
       }
       const url = getDocumentProxyUrl(fileRecord.storage_path, Boolean(download));
       return res.json({ url });
@@ -441,9 +450,11 @@ export const filesController = {
     } catch (error) {
       console.error('Error streaming document:', error);
       if (!res.headersSent) {
-        return res.status(500).json({
-          error: 'Failed to stream document',
-          details: error instanceof Error ? error.message : 'Unknown error',
+        const msg = error instanceof Error ? error.message : 'Unknown error';
+        const isNotFound = msg.includes('does not exist') || msg.includes('NoSuchKey') || msg.includes('Not Found');
+        return res.status(isNotFound ? 404 : 500).json({
+          error: isNotFound ? 'File not found in storage' : 'Failed to stream document',
+          details: msg,
         });
       }
     }
@@ -506,7 +517,6 @@ export const filesController = {
 
       const config = (workflowStep.config as any) || {};
       const sourceFileId = config.source_file_id;
-      const targetFolderId = config.target_folder_id;
       const metadataConfig = config.api_data
         ? typeof config.api_data === 'string'
           ? JSON.parse(config.api_data)
@@ -515,10 +525,6 @@ export const filesController = {
 
       if (!sourceFileId || sourceFileId === 'none') {
         return res.status(400).json({ error: 'Source file not configured' });
-      }
-
-      if (!targetFolderId || targetFolderId === 'none') {
-        return res.status(400).json({ error: 'Target folder not configured' });
       }
 
       // Resolve source file from execution data
@@ -561,7 +567,7 @@ export const filesController = {
         'unknown_file';
 
       // Upload to new location
-      const newPath = `${targetFolderId}/${originalFileName}`;
+      const newPath = `companies/${execution.company_id}/${Date.now()}_${originalFileName}`;
       const fileStat = await storageService.getFileStat(
         storageService.getDocumentsBucket(),
         sourceFilePath
@@ -628,7 +634,7 @@ export const filesController = {
       const newFile = await prisma.file.create({
         data: {
           name: originalFileName,
-          folder_id: targetFolderId,
+          folder_id: null,
           storage_path: newPath,
           size_bytes: BigInt(fileBuffer.length),
           mime_type: fileStat.contentType || null,
@@ -659,7 +665,6 @@ export const filesController = {
             success: true,
             new_file_id: newFile.id,
             original_file_id: sourceFilePath,
-            target_folder_id: targetFolderId,
           },
         },
       });
@@ -826,16 +831,31 @@ export const filesController = {
 
       const isCompanyAdmin = userCompany.role === 'company_admin';
       const userGroupIds = await getUserGroupIdsInCompany(userId, companyId);
-      const allowed = await canUserAccessFolder(userId, companyId, fileRecord.folder_id, isCompanyAdmin, userGroupIds);
-      if (!allowed) {
-        return res.status(403).json({ error: 'You do not have access to this folder' });
-      }
-      const level = await getUserFolderPermissionLevel(userId, companyId, fileRecord.folder_id, isCompanyAdmin, userGroupIds);
-      if (level !== 'write') {
-        return res.status(403).json({ error: 'Write permission required to delete files in this folder' });
+      if (fileRecord.folder_id) {
+        // Folder-based files: check folder permissions
+        const allowed = await canUserAccessFolder(userId, companyId, fileRecord.folder_id, isCompanyAdmin, userGroupIds);
+        if (!allowed) {
+          return res.status(403).json({ error: 'You do not have access to this folder' });
+        }
+        const level = await getUserFolderPermissionLevel(userId, companyId, fileRecord.folder_id, isCompanyAdmin, userGroupIds);
+        if (level !== 'write') {
+          return res.status(403).json({ error: 'Write permission required to delete files in this folder' });
+        }
+      } else {
+        // Flat files: check document permission rules for write access
+        const level = await canUserAccessFileByMetadata({ userId, companyId, fileId, isCompanyAdmin, userGroupIds });
+        if (level !== 'write') {
+          return res.status(403).json({ error: 'Write permission required to delete this file' });
+        }
       }
 
-      await storageService.deleteFile(storageService.getDocumentsBucket(), fileRecord.storage_path);
+      // Delete from storage (ignore if object doesn't exist)
+      try {
+        await storageService.deleteFile(storageService.getDocumentsBucket(), fileRecord.storage_path);
+      } catch {
+        // Object may not exist in storage; proceed with DB cleanup
+      }
+      await prisma.filesMetadataValue.deleteMany({ where: { files_id: fileId } });
       await prisma.file.delete({ where: { id: fileId } });
 
       return res.status(204).send();

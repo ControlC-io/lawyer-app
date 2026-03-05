@@ -23,8 +23,7 @@ export const PERMISSIONS = {
   VARIABLES_MANAGE: 'variables.manage',
   // 4.6 Documents
   DOCUMENTS_VIEW: 'documents.view',
-  DOCUMENTS_MANAGE_STRUCTURE: 'documents.manage_structure',
-  DOCUMENTS_MANAGE_FILES: 'documents.manage_files',
+  DOCUMENTS_MANAGE: 'documents.manage',
   // 4.7 API Configuration
   API_CONFIG_MANAGE: 'api_config.manage',
   // 4.8 Users & Groups
@@ -80,9 +79,8 @@ export const PERMISSION_GROUPS = [
   {
     domain: 'Documents',
     permissions: [
-      { key: PERMISSIONS.DOCUMENTS_VIEW, label: 'View Documents', description: 'View folders and files in the document manager' },
-      { key: PERMISSIONS.DOCUMENTS_MANAGE_STRUCTURE, label: 'Manage Document Structure', description: 'Create and delete folders' },
-      { key: PERMISSIONS.DOCUMENTS_MANAGE_FILES, label: 'Manage Document Files', description: 'Upload, rename, and delete files (folder-level rights also apply)' },
+      { key: PERMISSIONS.DOCUMENTS_VIEW, label: 'View Documents', description: 'Access the documents page — file-level read/write is controlled by document permission rules' },
+      { key: PERMISSIONS.DOCUMENTS_MANAGE, label: 'Manage Documents', description: 'Manage metadata keys and document access rules' },
     ],
   },
   {
