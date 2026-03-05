@@ -87,6 +87,7 @@ export default function MetadataDocumentView({ companyId }: Props) {
   const [previewFile, setPreviewFile] = useState<FileType | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [filterRows, setFilterRows] = useState<Array<{ key_id: string; value: string }>>([]);
+  const [treeSearch, setTreeSearch] = useState("");
   const { toast } = useToast();
 
   const fetchMetadataKeys = useCallback(async () => {
@@ -164,6 +165,40 @@ export default function MetadataDocumentView({ companyId }: Props) {
     []
   );
 
+  const nodeMatchesSearch = useCallback(
+    (node: TreeNode, query: string): boolean => {
+      if (!query) return false;
+      const q = query.toLowerCase();
+      if (node.name.toLowerCase().includes(q)) return true;
+      if (node.keyName?.toLowerCase().includes(q)) return true;
+      return node.children?.some((c) => nodeMatchesSearch(c, q)) || false;
+    },
+    []
+  );
+
+  const nodeDirectlyMatches = (node: TreeNode, query: string): boolean => {
+    if (!query) return false;
+    const q = query.toLowerCase();
+    return node.name.toLowerCase().includes(q) || (node.keyName?.toLowerCase().includes(q) ?? false);
+  };
+
+  useEffect(() => {
+    if (!treeSearch.trim()) return;
+    const toExpand = new Set<string>();
+    const walk = (nodes: TreeNode[]) => {
+      for (const node of nodes) {
+        if (node.children?.some((c) => nodeMatchesSearch(c, treeSearch))) {
+          toExpand.add(node.id);
+        }
+        if (node.children) walk(node.children);
+      }
+    };
+    walk(tree);
+    if (toExpand.size > 0) {
+      setExpandedNodes((prev) => new Set([...prev, ...toExpand]));
+    }
+  }, [treeSearch, tree, nodeMatchesSearch]);
+
   const toggleNode = (nodeId: string) => {
     setExpandedNodes((prev) => {
       const next = new Set(prev);
@@ -186,6 +221,7 @@ export default function MetadataDocumentView({ companyId }: Props) {
   const clearNavigation = () => {
     setSelectedNodePath([]);
     setFilters([]);
+    setFilterRows([]);
     setSelectedFileIds(new Set());
   };
 
@@ -439,6 +475,26 @@ export default function MetadataDocumentView({ companyId }: Props) {
           <Button variant="ghost" size="icon" className="h-7 w-7" onClick={openTreeConfig} title="Configure tree view">
             <Settings className="h-3.5 w-3.5" />
           </Button>
+        </div>
+        {/* Tree Search */}
+        <div className="px-2 py-1.5 border-b">
+          <div className="relative">
+            <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+            <Input
+              className="h-7 text-xs pl-7 pr-7"
+              placeholder="Search tree..."
+              value={treeSearch}
+              onChange={(e) => setTreeSearch(e.target.value)}
+            />
+            {treeSearch && (
+              <button
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                onClick={() => setTreeSearch("")}
+              >
+                <X className="h-3 w-3" />
+              </button>
+            )}
+          </div>
         </div>
         <ScrollArea className="flex-1">
           <div className="p-1">
