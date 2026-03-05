@@ -654,6 +654,11 @@ export default function MetadataDocumentView({ companyId }: Props) {
                     onClick={() => {
                       const next = filters.filter((_, j) => j !== i);
                       setFilters(next);
+                      setFilterRows(
+                        next
+                          .filter((f) => !f.missing)
+                          .map((f) => ({ key_id: f.key_id, value: f.value || "" }))
+                      );
                       if (next.length === 0) setSelectedNodePath([]);
                     }}
                   >
