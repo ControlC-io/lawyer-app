@@ -232,7 +232,7 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
 
   // Check OCR availability on mount
   useEffect(() => {
-    api.get<{ ocr: { enabled: boolean } }>('/health').then(data => {
+    api.get<{ ocr: { enabled: boolean } }>('/api/health').then(data => {
       setOcrEnabled(data?.ocr?.enabled ?? false);
     }).catch(() => {});
   }, []);
