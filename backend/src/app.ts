@@ -15,13 +15,25 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.get('/health', async (req: Request, res: Response) => {
   try {
     await prisma.$queryRaw`SELECT 1`;
-    res.json({ status: 'ok', database: 'connected', storage: 'connected' });
+    res.json({
+      status: 'ok',
+      database: 'connected',
+      storage: 'connected',
+      ocr: {
+        enabled: !!process.env.OCR_API_KEY,
+        provider: process.env.OCR_PROVIDER || 'mistral',
+      },
+    });
   } catch (error) {
-    res.status(500).json({ 
-      status: 'error', 
-      database: 'disconnected', 
-      storage: 'disconnected', 
-      message: (error as Error).message 
+    res.status(500).json({
+      status: 'error',
+      database: 'disconnected',
+      storage: 'disconnected',
+      ocr: {
+        enabled: !!process.env.OCR_API_KEY,
+        provider: process.env.OCR_PROVIDER || 'mistral',
+      },
+      message: (error as Error).message
     });
   }
 });

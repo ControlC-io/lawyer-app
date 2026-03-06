@@ -655,6 +655,14 @@ export const filesController = {
         });
       }
 
+      // Trigger OCR if enabled in node config
+      if (config.ocrEnabled) {
+        const { processDocumentOcr } = require('../services/ocr.service');
+        processDocumentOcr(newFile.id).catch((err: Error) => {
+          console.error(`OCR processing failed for workflow file ${newFile.id}:`, err);
+        });
+      }
+
       // Mark step as completed
       await prisma.workflowExecutionStep.update({
         where: { id: stepId },
@@ -786,6 +794,15 @@ export const filesController = {
           uploaded_by: userId,
         },
       });
+
+      // Trigger OCR if requested
+      const ocrRequested = req.body?.ocr === 'true' || req.body?.ocr === true;
+      if (ocrRequested) {
+        const { processDocumentOcr } = require('../services/ocr.service');
+        processDocumentOcr(fileRecord.id).catch((err: Error) => {
+          console.error(`OCR processing failed for file ${fileRecord.id}:`, err);
+        });
+      }
 
       return res.status(201).json({
         ...fileRecord,

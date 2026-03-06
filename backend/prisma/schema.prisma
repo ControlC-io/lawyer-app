@@ -303,6 +303,15 @@ model File {
   company_id      String?              @db.Uuid
   created_at      DateTime             @default(now()) @db.Timestamptz(6)
   updated_at      DateTime             @default(now()) @db.Timestamptz(6)
+
+  // OCR fields
+  ocr_markdown     String?   @db.Text
+  ocr_status       String?
+  ocr_error        String?   @db.Text
+  ocr_processed_at DateTime? @db.Timestamptz(6)
+  ocr_provider     String?
+  ocr_model        String?
+
   folder          Folder?              @relation(fields: [folder_id], references: [id])
   uploader        Profile?             @relation(fields: [uploaded_by], references: [id])
   company         Company?             @relation(fields: [company_id], references: [id])

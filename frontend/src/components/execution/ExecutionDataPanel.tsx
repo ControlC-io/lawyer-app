@@ -1042,7 +1042,7 @@ export const ExecutionDataPanel = ({
         allowed_file_types: fieldConfig?.allowed_file_types,
       };
 
-      return (
+      const fieldElement = (
         <FieldRenderer
           key={fieldUuid}
           field={fieldWithConfig}
@@ -1070,7 +1070,7 @@ export const ExecutionDataPanel = ({
           // FileField props
           onUpload={file => {
             markAiValidationDirty();
-            return form.handleFileUpload(fieldUuid, file);
+            return form.handleFileUpload(fieldUuid, file, cfg.ocrEnabled);
           }}
           onViewFile={onFileView}
           onDelete={async (filePath: string) => {
@@ -1101,7 +1101,7 @@ export const ExecutionDataPanel = ({
                 onRetryDynamic={() => form.retryDynamicOptions(childField.id)}
                 onUpload={file => {
                   markAiValidationDirty();
-                  return form.handleFileUpload(childField.id, file);
+                  return form.handleFileUpload(childField.id, file, cfg.ocrEnabled);
                 }}
                 onViewFile={onFileView}
                 onDelete={async (filePath: string) => {
@@ -1116,6 +1116,20 @@ export const ExecutionDataPanel = ({
           }}
         />
       );
+
+      // Wrap with OCR info if ocrEnabled and this is a file field
+      if (cfg.ocrEnabled && isFileField) {
+        return (
+          <div key={fieldUuid}>
+            {fieldElement}
+            <p className="text-xs text-muted-foreground mt-1">OCR will run automatically on uploaded documents.</p>
+            {form.ocrTriggeredFiles[fieldUuid] && (
+              <Badge variant="secondary" className="mt-1 text-xs">OCR processing...</Badge>
+            )}
+          </div>
+        );
+      }
+      return fieldElement;
     };
 
     // If form has page/block structure, use page → block → fields rendering
@@ -1355,7 +1369,8 @@ export const ExecutionDataPanel = ({
             const currentValue = form.editingValues[editingKey] !== undefined ? form.editingValues[editingKey] : dbValue;
 
             // For Array fields, use arrayItems state
-            const isArray = (def.type || def.field_type) === "array";
+            const fieldType = def.field_type || def.type;
+            const isArray = fieldType === "array";
             const arrayValue = isArray ? form.arrayItems[fieldUuid] || [] : undefined;
             const disabled = fieldConfig?.readonly === true || !canCompleteStep;
 
@@ -1380,7 +1395,7 @@ export const ExecutionDataPanel = ({
                 // FileField props
                 onUpload={file => {
                   markAiValidationDirty();
-                  return form.handleFileUpload(fieldUuid, file);
+                  return form.handleFileUpload(fieldUuid, file, cfg.ocrEnabled);
                 }} onViewFile={onFileView} isUploading={form.uploadingFiles[fieldUuid]} signedUrl={form.signedUrls[`${execRow.id}-${fieldUuid}`]} signedUrls={form.multipleFilesSignedUrls[`${execRow.id}-${fieldUuid}`]}
                 // ArrayField props
                 fieldConfig={fieldConfig}
@@ -1400,9 +1415,17 @@ export const ExecutionDataPanel = ({
                     // FileField props
                     onUpload={file => {
                       markAiValidationDirty();
-                      return form.handleFileUpload(childField.id, file);
+                      return form.handleFileUpload(childField.id, file, cfg.ocrEnabled);
                     }} onViewFile={onFileView} isUploading={form.uploadingFiles[childField.id]} signedUrl={form.signedUrls[`${execRow.id}-${childField.id}`]} signedUrls={form.multipleFilesSignedUrls[`${execRow.id}-${childField.id}`]} />;
                 }} />
+              {cfg.ocrEnabled && (fieldType === "file" || fieldType === "multiple_files") && (
+                <>
+                  <p className="text-xs text-muted-foreground mt-1">OCR will run automatically on uploaded documents.</p>
+                  {form.ocrTriggeredFiles[fieldUuid] && (
+                    <Badge variant="secondary" className="mt-1 text-xs">OCR processing...</Badge>
+                  )}
+                </>
+              )}
             </div>;
           })}
         </form>

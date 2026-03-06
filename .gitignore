@@ -65,3 +65,6 @@ dumps/
 CLAUDE.md
 
 docs/plans/*
+
+# Git worktrees
+.worktrees/
