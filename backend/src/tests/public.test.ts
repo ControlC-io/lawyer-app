@@ -24,9 +24,9 @@ describe('Public Endpoints', () => {
     (emailService.sendDemoRequest as jest.Mock).mockResolvedValue(undefined);
   });
 
-  describe('GET /health', () => {
+  describe('GET /api/health', () => {
     it('should return 200 and status ok when database is connected', async () => {
-      const response = await request(app).get('/health');
+      const response = await request(app).get('/api/health');
       expect(response.status).toBe(200);
       expect(response.body.status).toBe('ok');
       expect(response.body.database).toBe('connected');
@@ -34,7 +34,7 @@ describe('Public Endpoints', () => {
 
     it('should return 500 when database query fails', async () => {
       (prisma.$queryRaw as jest.Mock).mockRejectedValue(new Error('Connection refused'));
-      const response = await request(app).get('/health');
+      const response = await request(app).get('/api/health');
       expect(response.status).toBe(500);
       expect(response.body.status).toBe('error');
       expect(response.body.database).toBe('disconnected');
