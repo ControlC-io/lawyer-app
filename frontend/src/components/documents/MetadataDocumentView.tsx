@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef, useMemo, Children } from "react";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -33,10 +33,17 @@ import {
   FileSearch,
   ScanText,
   Copy,
+  ChevronsDownUp,
+  ChevronsUpDown,
+  PanelLeftClose,
+  PanelLeftOpen,
+  ChevronUp,
 } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
 import ReactMarkdown from "react-markdown";
+import remarkBreaks from "remark-breaks";
+import remarkGfm from "remark-gfm";
 import { useToast } from "@/hooks/use-toast";
 
 interface FileType {
@@ -104,6 +111,52 @@ function OcrStatusBadge({ file }: { file: FileType }) {
   }
 }
 
+function escapeRegExp(s: string) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function createHighlightComponents(regex: RegExp, activeIndex: number) {
+  const counter = { current: 0 };
+
+  function highlightString(text: string): React.ReactNode {
+    const parts = text.split(regex);
+    if (parts.length <= 1) return text;
+    return parts.map((part, i) => {
+      if (i % 2 === 0) return part;
+      const matchIndex = counter.current++;
+      return (
+        <mark
+          key={`hl-${matchIndex}`}
+          data-match-index={matchIndex}
+          className={`rounded-sm px-0.5 ${matchIndex === activeIndex ? "bg-yellow-400 ring-2 ring-yellow-500" : "bg-yellow-200/70 dark:bg-yellow-500/30"}`}
+        >
+          {part}
+        </mark>
+      );
+    });
+  }
+
+  function processChildren(children: React.ReactNode): React.ReactNode {
+    return Children.map(children, (child) => {
+      if (typeof child === "string") return highlightString(child);
+      if (typeof child === "number") return highlightString(String(child));
+      return child;
+    });
+  }
+
+  const wrap = (Tag: string) =>
+    function HighlightWrap({ node, inline, ...props }: any) {
+      return React.createElement(Tag, { ...props, children: processChildren(props.children) });
+    };
+
+  return {
+    p: wrap("p"), li: wrap("li"), td: wrap("td"), th: wrap("th"),
+    h1: wrap("h1"), h2: wrap("h2"), h3: wrap("h3"), h4: wrap("h4"), h5: wrap("h5"), h6: wrap("h6"),
+    strong: wrap("strong"), em: wrap("em"), a: wrap("a"), blockquote: wrap("blockquote"),
+    code: wrap("code"),
+  };
+}
+
 export default function MetadataDocumentView({ companyId, canManage = false }: Props) {
   const [files, setFiles] = useState<FileType[]>([]);
   const [totalFileCount, setTotalFileCount] = useState(0);
@@ -115,6 +168,7 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
   const [filters, setFilters] = useState<Array<{ key_id: string; value?: string; missing?: boolean }>>([]);
   const [loading, setLoading] = useState(false);
   const [selectedFileIds, setSelectedFileIds] = useState<Set<string>>(new Set());
+  const [isTreeOpen, setIsTreeOpen] = useState(true);
   const [isTreeConfigOpen, setIsTreeConfigOpen] = useState(false);
   const [configKeyOrder, setConfigKeyOrder] = useState<string[]>([]);
   const [isUploadOpen, setIsUploadOpen] = useState(false);
@@ -139,6 +193,9 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
   const [ocrViewerData, setOcrViewerData] = useState<{ fileName: string; markdown: string; provider?: string; model?: string; processedAt?: string } | null>(null);
   const [ocrAfterUpload, setOcrAfterUpload] = useState(false);
   const [ocrEnabled, setOcrEnabled] = useState(false);
+  const [ocrSearch, setOcrSearch] = useState("");
+  const [ocrActiveMatch, setOcrActiveMatch] = useState(0);
+  const ocrContentRef = useRef<HTMLDivElement>(null);
   // Search state
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -146,6 +203,32 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
   const { toast } = useToast();
 
   const canWriteFiles = canManage || hasWriteAccess;
+
+  // OCR viewer search: count matches and build regex
+  const ocrSearchRegex = useMemo(() => {
+    if (!ocrSearch.trim()) return null;
+    try { return new RegExp(`(${escapeRegExp(ocrSearch.trim())})`, "gi"); } catch { return null; }
+  }, [ocrSearch]);
+
+  const ocrMatchCount = useMemo(() => {
+    if (!ocrSearchRegex || !ocrViewerData?.markdown) return 0;
+    const matches = ocrViewerData.markdown.match(ocrSearchRegex);
+    return matches ? matches.length : 0;
+  }, [ocrSearchRegex, ocrViewerData?.markdown]);
+
+  // Reset active match when search changes
+  useEffect(() => {
+    setOcrActiveMatch(0);
+  }, [ocrSearch]);
+
+  // Scroll to active match
+  useEffect(() => {
+    if (ocrMatchCount === 0 || !ocrContentRef.current) return;
+    const marks = ocrContentRef.current.querySelectorAll(`mark[data-match-index="${ocrActiveMatch}"]`);
+    if (marks.length > 0) {
+      marks[0].scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, [ocrActiveMatch, ocrMatchCount]);
 
   // Check OCR availability on mount
   useEffect(() => {
@@ -215,6 +298,16 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
     fetchFiles();
   }, [fetchFiles]);
 
+  // Auto-start polling for files with in-progress OCR
+  useEffect(() => {
+    for (const file of files) {
+      if ((file.ocr_status === 'pending' || file.ocr_status === 'processing') && !ocrPolling[file.id]) {
+        startOcrPolling(file.id);
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [files]);
+
   // Preview URL generation
   useEffect(() => {
     if (!previewFile) { setPreviewUrl(null); return; }
@@ -276,6 +369,30 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
       else next.add(nodeId);
       return next;
     });
+  };
+
+  const collectAllFolderIds = useCallback((nodes: TreeNode[]): string[] => {
+    const ids: string[] = [];
+    const walk = (list: TreeNode[]) => {
+      for (const n of list) {
+        if (n.type === "folder") {
+          ids.push(n.id);
+          if (n.children) walk(n.children);
+        }
+      }
+    };
+    walk(nodes);
+    return ids;
+  }, []);
+
+  const isAllExpanded = tree.length > 0 && collectAllFolderIds(tree).every((id) => expandedNodes.has(id));
+
+  const toggleExpandAll = () => {
+    if (isAllExpanded) {
+      setExpandedNodes(new Set());
+    } else {
+      setExpandedNodes(new Set(collectAllFolderIds(tree)));
+    }
   };
 
   const navigateToNode = (path: Array<{ key: string; value: string; missing?: boolean }>) => {
@@ -371,13 +488,17 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
       formData.append("ocr", "true");
     }
     try {
-      await api.postFormData(`/api/companies/${companyId}/documents/upload`, formData);
+      const result = await api.postFormData<{ id: string }>(`/api/companies/${companyId}/documents/upload`, formData);
       toast({ title: "Success", description: "File uploaded" });
+      const shouldPollOcr = ocrAfterUpload;
       setUploadFile(null);
       setUploadMetadata([]);
       setIsUploadOpen(false);
-      fetchFiles();
+      await fetchFiles();
       fetchTree();
+      if (shouldPollOcr && result.id) {
+        startOcrPolling(result.id);
+      }
     } catch (e: unknown) {
       toast({ title: "Error", description: e instanceof Error ? e.message : "Upload failed", variant: "destructive" });
     }
@@ -459,27 +580,37 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
     }
   };
 
-  // OCR trigger + polling
-  const triggerOcr = async (fileId: string) => {
-    try {
-      await api.post(`/api/files/${fileId}/ocr`);
-      setFiles(prev => prev.map(f => f.id === fileId ? { ...f, ocr_status: 'pending' } : f));
+  // Start polling OCR status for a file (no API trigger, just polling)
+  const startOcrPolling = (fileId: string) => {
+    setOcrPolling(prev => {
+      // Already polling this file
+      if (prev[fileId]) return prev;
+
       const interval = setInterval(async () => {
         try {
           const result = await api.get<{ ocrStatus: string }>(`/api/files/${fileId}/ocr`);
           if (result.ocrStatus === 'completed' || result.ocrStatus === 'failed') {
             clearInterval(interval);
-            setOcrPolling(prev => { const next = { ...prev }; delete next[fileId]; return next; });
+            setOcrPolling(p => { const next = { ...p }; delete next[fileId]; return next; });
             fetchFiles();
           } else {
-            setFiles(prev => prev.map(f => f.id === fileId ? { ...f, ocr_status: result.ocrStatus } : f));
+            setFiles(p => p.map(f => f.id === fileId ? { ...f, ocr_status: result.ocrStatus } : f));
           }
         } catch {
           clearInterval(interval);
-          setOcrPolling(prev => { const next = { ...prev }; delete next[fileId]; return next; });
+          setOcrPolling(p => { const next = { ...p }; delete next[fileId]; return next; });
         }
       }, 2000);
-      setOcrPolling(prev => ({ ...prev, [fileId]: interval }));
+
+      return { ...prev, [fileId]: interval };
+    });
+  };
+
+  // OCR trigger + polling
+  const triggerOcr = async (fileId: string) => {
+    try {
+      await api.post(`/api/files/${fileId}/ocr`);
+      startOcrPolling(fileId);
     } catch {
       toast({ title: "Error", description: "Failed to trigger OCR", variant: "destructive" });
     }
@@ -601,51 +732,82 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
   return (
     <div className="flex gap-3 h-full min-w-0 overflow-hidden">
       {/* Sidebar: Virtual Tree */}
-      <div className="w-72 shrink-0 border rounded-lg bg-card flex flex-col">
-        <div className="flex items-center justify-between px-3 py-2 border-b">
-          <span className="text-sm font-medium">Document Tree</span>
-          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={openTreeConfig} title="Configure tree view">
-            <Settings className="h-3.5 w-3.5" />
-          </Button>
-        </div>
-        {/* Tree Search */}
-        <div className="px-2 py-1.5 border-b">
-          <div className="relative">
-            <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-            <Input
-              className="h-7 text-xs pl-7 pr-7"
-              placeholder="Search tree..."
-              value={treeSearch}
-              onChange={(e) => setTreeSearch(e.target.value)}
-            />
-            {treeSearch && (
-              <button
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                onClick={() => setTreeSearch("")}
+      {isTreeOpen ? (
+        <div className="w-72 shrink-0 border rounded-lg bg-card flex flex-col">
+          <div className="flex items-center justify-between px-3 py-2 border-b">
+            <span className="text-sm font-medium">Document Tree</span>
+            <div className="flex items-center gap-0.5">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7"
+                onClick={toggleExpandAll}
+                title={isAllExpanded ? "Collapse all" : "Expand all"}
+                disabled={tree.length === 0}
               >
-                <X className="h-3 w-3" />
+                {isAllExpanded ? (
+                  <ChevronsDownUp className="h-3.5 w-3.5" />
+                ) : (
+                  <ChevronsUpDown className="h-3.5 w-3.5" />
+                )}
+              </Button>
+              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={openTreeConfig} title="Configure tree view">
+                <Settings className="h-3.5 w-3.5" />
+              </Button>
+              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setIsTreeOpen(false)} title="Hide tree panel">
+                <PanelLeftClose className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          </div>
+          {/* Tree Search */}
+          <div className="px-2 py-1.5 border-b">
+            <div className="relative">
+              <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+              <Input
+                className="h-7 text-xs pl-7 pr-7"
+                placeholder="Search tree..."
+                value={treeSearch}
+                onChange={(e) => setTreeSearch(e.target.value)}
+              />
+              {treeSearch && (
+                <button
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  onClick={() => setTreeSearch("")}
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              )}
+            </div>
+          </div>
+          <ScrollArea className="flex-1">
+            <div className="p-1">
+              <button
+                className={`w-full flex items-center gap-1.5 px-2 py-1.5 text-sm hover:bg-muted/60 rounded-md transition-colors ${
+                  selectedNodePath.length === 0 ? "bg-primary/10 text-primary font-medium" : ""
+                }`}
+                onClick={clearNavigation}
+              >
+                <FolderTree className="h-3.5 w-3.5 shrink-0" />
+                <span>All Documents</span>
+                <Badge variant="secondary" className="ml-auto text-[10px] px-1.5 py-0 h-4">
+                  {totalFileCount}
+                </Badge>
               </button>
-            )}
-          </div>
+              {tree.map((node) => renderTreeNode(node, 0, []))}
+            </div>
+          </ScrollArea>
         </div>
-        <ScrollArea className="flex-1">
-          <div className="p-1">
-            <button
-              className={`w-full flex items-center gap-1.5 px-2 py-1.5 text-sm hover:bg-muted/60 rounded-md transition-colors ${
-                selectedNodePath.length === 0 ? "bg-primary/10 text-primary font-medium" : ""
-              }`}
-              onClick={clearNavigation}
-            >
-              <FolderTree className="h-3.5 w-3.5 shrink-0" />
-              <span>All Documents</span>
-              <Badge variant="secondary" className="ml-auto text-[10px] px-1.5 py-0 h-4">
-                {totalFileCount}
-              </Badge>
-            </button>
-            {tree.map((node) => renderTreeNode(node, 0, []))}
-          </div>
-        </ScrollArea>
-      </div>
+      ) : (
+        <Button
+          variant="outline"
+          size="icon"
+          className="h-9 w-9 shrink-0 self-start"
+          onClick={() => setIsTreeOpen(true)}
+          title="Show tree panel"
+        >
+          <PanelLeftOpen className="h-4 w-4" />
+        </Button>
+      )}
 
       {/* Main Content */}
       <div className="flex-1 border rounded-lg bg-card flex flex-col min-w-0 overflow-hidden">
@@ -1293,8 +1455,8 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
       </Dialog>
 
       {/* OCR Viewer Sheet */}
-      <Sheet open={ocrViewerOpen} onOpenChange={setOcrViewerOpen}>
-        <SheetContent className="sm:max-w-xl w-full flex flex-col">
+      <Sheet open={ocrViewerOpen} onOpenChange={(open) => { setOcrViewerOpen(open); if (!open) setOcrSearch(""); }}>
+        <SheetContent className="sm:max-w-2xl w-full flex flex-col">
           <SheetHeader>
             <SheetTitle className="flex items-center gap-2">
               <FileSearch className="h-4 w-4" />
@@ -1343,10 +1505,65 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
                   </Button>
                 )}
               </div>
+              {/* Search in content */}
+              <div className="flex items-center gap-1.5">
+                <div className="relative flex-1">
+                  <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                  <Input
+                    className="h-8 text-xs pl-7 pr-7"
+                    placeholder="Search in document..."
+                    value={ocrSearch}
+                    onChange={(e) => setOcrSearch(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && ocrMatchCount > 0) {
+                        setOcrActiveMatch((prev) => (e.shiftKey ? (prev - 1 + ocrMatchCount) % ocrMatchCount : (prev + 1) % ocrMatchCount));
+                      }
+                    }}
+                  />
+                  {ocrSearch && (
+                    <button
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                      onClick={() => setOcrSearch("")}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  )}
+                </div>
+                {ocrSearch.trim() && (
+                  <div className="flex items-center gap-0.5 shrink-0">
+                    <span className="text-xs text-muted-foreground tabular-nums w-16 text-center">
+                      {ocrMatchCount === 0 ? "No results" : `${ocrActiveMatch + 1}/${ocrMatchCount}`}
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7"
+                      disabled={ocrMatchCount === 0}
+                      onClick={() => setOcrActiveMatch((prev) => (prev - 1 + ocrMatchCount) % ocrMatchCount)}
+                    >
+                      <ChevronUp className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7"
+                      disabled={ocrMatchCount === 0}
+                      onClick={() => setOcrActiveMatch((prev) => (prev + 1) % ocrMatchCount)}
+                    >
+                      <ChevronDown className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                )}
+              </div>
               {/* Markdown content */}
               <ScrollArea className="flex-1">
-                <div className="prose prose-sm max-w-none dark:prose-invert">
-                  <ReactMarkdown>{ocrViewerData.markdown}</ReactMarkdown>
+                <div ref={ocrContentRef} className="ocr-document text-sm text-foreground px-1">
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm, remarkBreaks]}
+                    components={ocrSearchRegex ? createHighlightComponents(ocrSearchRegex, ocrActiveMatch) : undefined}
+                  >
+                    {ocrViewerData.markdown}
+                  </ReactMarkdown>
                 </div>
               </ScrollArea>
             </div>

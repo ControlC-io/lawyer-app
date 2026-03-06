@@ -505,9 +505,22 @@ export const documentsController = {
       }
     }
 
+    // Trigger OCR if requested
+    if (req.body?.ocr === 'true') {
+      const { processDocumentOcr } = await import('../services/ocr.service');
+      await prisma.file.update({
+        where: { id: dbFile.id },
+        data: { ocr_status: 'pending' },
+      });
+      processDocumentOcr(dbFile.id).catch((err) => {
+        console.error(`OCR processing failed for file ${dbFile.id}:`, err);
+      });
+    }
+
     return res.status(201).json({
       ...dbFile,
       size_bytes: dbFile.size_bytes != null ? Number(dbFile.size_bytes) : 0,
+      ocr_status: req.body?.ocr === 'true' ? 'pending' : null,
     });
   },
 

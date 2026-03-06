@@ -257,6 +257,170 @@ button.rdp-day.weekend:not([aria-selected="true"]):not(.rdp-day_today) {
   @apply border-l-2 border-gray-400 pl-2 italic;
 }
 
+/* ─── OCR Document Viewer ─── */
+.ocr-document {
+  --ocr-indent: 1.5rem;
+  --ocr-rule: hsl(var(--border));
+  font-feature-settings: 'kern' 1, 'liga' 1;
+  -webkit-font-smoothing: antialiased;
+}
+
+.ocr-document h1,
+.ocr-document h2,
+.ocr-document h3,
+.ocr-document h4 {
+  @apply font-semibold tracking-tight text-foreground;
+  letter-spacing: -0.01em;
+}
+
+.ocr-document h1 {
+  @apply text-xl pb-2 mb-4 border-b;
+  border-color: var(--ocr-rule);
+}
+
+.ocr-document h2 {
+  @apply text-lg pb-1.5 mb-3 mt-6 border-b;
+  border-color: var(--ocr-rule);
+}
+
+.ocr-document h3 {
+  @apply text-base mb-2 mt-5;
+}
+
+.ocr-document h4 {
+  @apply text-sm uppercase tracking-wide mb-2 mt-4 text-muted-foreground;
+  letter-spacing: 0.04em;
+}
+
+.ocr-document p {
+  @apply leading-relaxed mb-3;
+}
+
+.ocr-document > :first-child {
+  @apply mt-0;
+}
+
+/* Lists */
+.ocr-document ul {
+  @apply my-2 space-y-1;
+  list-style: none;
+  padding-left: var(--ocr-indent);
+}
+
+.ocr-document ul > li {
+  @apply relative pl-4;
+}
+
+.ocr-document ul > li::before {
+  content: '';
+  @apply absolute left-0 top-[0.6em] w-1.5 h-1.5 rounded-full;
+  background: hsl(var(--primary) / 0.5);
+}
+
+.ocr-document ol {
+  @apply my-2 space-y-1;
+  list-style: none;
+  padding-left: var(--ocr-indent);
+  counter-reset: ocr-ol;
+}
+
+.ocr-document ol > li {
+  @apply relative pl-6;
+  counter-increment: ocr-ol;
+}
+
+.ocr-document ol > li::before {
+  content: counter(ocr-ol);
+  @apply absolute left-0 top-0 text-xs font-semibold w-4 h-4 flex items-center justify-center rounded;
+  background: hsl(var(--primary) / 0.1);
+  color: hsl(var(--primary));
+}
+
+/* Blockquotes */
+.ocr-document blockquote {
+  @apply my-4 py-2 px-4 rounded-r-md italic text-muted-foreground;
+  border-left: 3px solid hsl(var(--primary) / 0.4);
+  background: hsl(var(--muted) / 0.4);
+}
+
+.ocr-document blockquote p:last-child {
+  @apply mb-0;
+}
+
+/* Code */
+.ocr-document code {
+  @apply text-xs font-mono rounded px-1.5 py-0.5;
+  background: hsl(var(--muted));
+  color: hsl(var(--primary));
+}
+
+.ocr-document pre {
+  @apply my-4 p-4 rounded-lg overflow-x-auto text-xs leading-relaxed;
+  background: hsl(var(--muted));
+  border: 1px solid var(--ocr-rule);
+}
+
+.ocr-document pre code {
+  @apply p-0 bg-transparent text-foreground;
+}
+
+/* Tables */
+.ocr-document table {
+  @apply w-full my-4 text-sm border-collapse;
+}
+
+.ocr-document thead th {
+  @apply text-left text-xs font-semibold uppercase tracking-wider pb-2 text-muted-foreground;
+  border-bottom: 2px solid var(--ocr-rule);
+  letter-spacing: 0.05em;
+}
+
+.ocr-document tbody td {
+  @apply py-2 align-top;
+  border-bottom: 1px solid hsl(var(--border) / 0.5);
+}
+
+.ocr-document tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.ocr-document tbody tr:hover td {
+  background: hsl(var(--muted) / 0.3);
+}
+
+/* Horizontal rules */
+.ocr-document hr {
+  @apply my-6 border-0 h-px;
+  background: linear-gradient(
+    to right,
+    transparent,
+    hsl(var(--border)),
+    transparent
+  );
+}
+
+/* Links */
+.ocr-document a {
+  @apply underline underline-offset-2 decoration-1 transition-colors;
+  color: hsl(var(--primary));
+  text-decoration-color: hsl(var(--primary) / 0.3);
+}
+
+.ocr-document a:hover {
+  text-decoration-color: hsl(var(--primary));
+}
+
+/* Strong / emphasis */
+.ocr-document strong {
+  @apply font-semibold text-foreground;
+}
+
+/* Images in OCR content */
+.ocr-document img {
+  @apply my-4 rounded-lg border shadow-sm max-w-full;
+  border-color: var(--ocr-rule);
+}
+
 /* Handwriting style for textarea */
 .font-handwriting {
   font-family: 'Segoe Print', 'Bradley Hand', 'Brush Script MT', cursive;
