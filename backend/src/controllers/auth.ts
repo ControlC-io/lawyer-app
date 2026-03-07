@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { AuthRequest } from '../middleware/auth';
+import { AuthRequest, SUPER_ADMIN_API_USER_ID } from '../middleware/auth';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
 
@@ -100,7 +100,7 @@ export const login = async (req: Request, res: Response) => {
 
 /**
  * GET /api/me
- * Get current user profile, companies, and super_admin flag (JWT required)
+ * Get current user profile, companies, and super_admin flag (JWT or super admin API key)
  */
 export const getMe = async (req: AuthRequest, res: Response) => {
   try {
@@ -109,6 +109,22 @@ export const getMe = async (req: AuthRequest, res: Response) => {
       return res.status(401).json({
         error: 'Unauthorized',
         details: 'Authentication required',
+      });
+    }
+
+    // Synthetic super admin user (no DB profile): return stub so super admin key works everywhere
+    if (userId === SUPER_ADMIN_API_USER_ID) {
+      return res.json({
+        profile: {
+          id: userId,
+          email: 'superadmin@api',
+          full_name: 'Super Admin (API)',
+          notifications_enabled: false,
+          created_at: null,
+          updated_at: null,
+        },
+        user_companies: [],
+        super_admin: true,
       });
     }
 
@@ -165,7 +181,7 @@ export const getMe = async (req: AuthRequest, res: Response) => {
 
 /**
  * PATCH /api/me
- * Update current user profile (full_name, notifications_enabled) - JWT required
+ * Update current user profile (full_name, notifications_enabled) - JWT required (synthetic super admin cannot be updated)
  */
 export const updateMe = async (req: AuthRequest, res: Response) => {
   try {
@@ -174,6 +190,12 @@ export const updateMe = async (req: AuthRequest, res: Response) => {
       return res.status(401).json({
         error: 'Unauthorized',
         details: 'Authentication required',
+      });
+    }
+    if (userId === SUPER_ADMIN_API_USER_ID) {
+      return res.status(400).json({
+        error: 'Cannot update synthetic profile',
+        details: 'Super admin API key user has no persistent profile to update',
       });
     }
 

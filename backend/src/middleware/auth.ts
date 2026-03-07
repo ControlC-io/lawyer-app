@@ -127,27 +127,36 @@ export const internalAuth = (req: AuthRequest, res: Response, next: NextFunction
 };
 
 /**
- * API Key only authentication - for company API endpoints (also accepts super_admin key via x-api-key)
+ * API Key only authentication - for company API endpoints (also accepts super_admin key via x-api-key or x-super-admin-api-key)
  */
 export const apiKeyAuth = async (req: AuthRequest, res: Response, next: NextFunction) => {
   const apiKey = req.headers['x-api-key'];
+  const superAdminKey = req.headers['x-super-admin-api-key'];
   const superAdminApiKey = process.env.SUPER_ADMIN_API_KEY || '';
 
-  if (!apiKey || typeof apiKey !== 'string') {
-    return res.status(401).json({
-      error: 'Missing API key',
-      details: 'x-api-key header is required',
-    });
-  }
-
-  // Super admin key: set user only, no company
-  if (superAdminApiKey && apiKey === superAdminApiKey) {
+  // Super admin key via x-super-admin-api-key or x-api-key: set user only, no company
+  if (superAdminApiKey && superAdminKey && typeof superAdminKey === 'string' && superAdminKey === superAdminApiKey) {
     req.user = {
       id: SUPER_ADMIN_API_USER_ID,
       email: 'superadmin@api',
       super_admin: true,
     };
     return next();
+  }
+  if (superAdminApiKey && apiKey && typeof apiKey === 'string' && apiKey === superAdminApiKey) {
+    req.user = {
+      id: SUPER_ADMIN_API_USER_ID,
+      email: 'superadmin@api',
+      super_admin: true,
+    };
+    return next();
+  }
+
+  if (!apiKey || typeof apiKey !== 'string') {
+    return res.status(401).json({
+      error: 'Missing API key',
+      details: 'x-api-key or x-super-admin-api-key header is required',
+    });
   }
 
   try {
@@ -237,9 +246,18 @@ export const externalStepAuth = async (req: AuthRequest, res: Response, next: Ne
 export const optionalAuth = async (req: AuthRequest, res: Response, next: NextFunction) => {
   const authHeader = req.headers.authorization;
   const apiKey = req.headers['x-api-key'];
+  const superAdminKey = req.headers['x-super-admin-api-key'];
   const superAdminApiKey = process.env.SUPER_ADMIN_API_KEY || '';
 
-  // Try x-api-key: super_admin first, then company
+  // Try x-super-admin-api-key or x-api-key: super_admin first, then company
+  if (superAdminApiKey && superAdminKey && typeof superAdminKey === 'string' && superAdminKey === superAdminApiKey) {
+    req.user = {
+      id: SUPER_ADMIN_API_USER_ID,
+      email: 'superadmin@api',
+      super_admin: true,
+    };
+    return next();
+  }
   if (apiKey && typeof apiKey === 'string') {
     if (superAdminApiKey && apiKey === superAdminApiKey) {
       req.user = {

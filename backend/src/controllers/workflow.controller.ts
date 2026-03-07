@@ -512,9 +512,12 @@ export const workflowController = {
         if (!execution?.company_id) {
           return res.status(404).json({ error: 'not found or access denied' });
         }
-        const visibility = await resolveExecutionVisibilityForUser(userId, execution.company_id);
-        if (!visibility.canAccessCompany) {
-          return res.status(403).json({ error: 'Access denied to this execution' });
+        // Super admin can access any execution by id without company membership
+        if (!isSuperAdmin) {
+          const visibility = await resolveExecutionVisibilityForUser(userId, execution.company_id);
+          if (!visibility.canAccessCompany) {
+            return res.status(403).json({ error: 'Access denied to this execution' });
+          }
         }
         companyId = execution.company_id;
       }
