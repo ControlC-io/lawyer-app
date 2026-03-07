@@ -19,6 +19,7 @@ router.patch('/configurations/:configId', authMiddleware, asyncHandler(agentsCon
 router.delete('/configurations/:configId', authMiddleware, asyncHandler(agentsController.deleteConfiguration));
 
 router.get('/usage', authMiddleware, asyncHandler(agentsController.listAgentUsage));
+router.post('/usage', authMiddleware, asyncHandler(agentsController.createAgentUsage));
 
 /**
  * GET /api/agents/:agentId

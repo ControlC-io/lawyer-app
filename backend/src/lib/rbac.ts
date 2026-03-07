@@ -1,5 +1,5 @@
 import { Response, NextFunction } from 'express';
-import { AuthRequest } from '../middleware/auth';
+import { AuthRequest, ALL_COMPANIES } from '../middleware/auth';
 import { prisma } from './prisma';
 
 /**
@@ -178,6 +178,15 @@ export function requirePermission(permissionKey: string) {
       return res.status(400).json({ error: 'Bad Request', details: 'Missing companyId parameter' });
     }
 
+    // Super admin with 'all' or specific company bypasses all checks
+    if (req.user?.super_admin) {
+      return next();
+    }
+
+    if (companyId === ALL_COMPANIES) {
+      return res.status(403).json({ error: 'Forbidden', details: 'companyId=all is reserved for super admin' });
+    }
+
     // API key auth = company-admin equivalent, scoped to the authenticated company.
     if (req.company && !req.user) {
       if (req.company.id !== companyId) {
@@ -189,11 +198,6 @@ export function requirePermission(permissionKey: string) {
     const userId = req.user?.id;
     if (!userId) {
       return res.status(401).json({ error: 'Unauthorized', details: 'Authentication required' });
-    }
-
-    // Super admin bypasses all checks
-    if (req.user?.super_admin) {
-      return next();
     }
 
     const allowed = await hasPermission(userId, companyId, permissionKey);

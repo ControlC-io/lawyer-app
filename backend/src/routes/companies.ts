@@ -1,11 +1,11 @@
-import { Router } from 'express';
+import { Router, Response, NextFunction } from 'express';
 import { companiesController } from '../controllers/companies.controller';
 import { workflowDefinitionController } from '../controllers/workflowDefinition.controller';
 import { usersController } from '../controllers/users.controller';
 import { filesController } from '../controllers/files.controller';
 import { rolesController } from '../controllers/roles.controller';
 import { documentsController } from '../controllers/documents.controller';
-import { authMiddleware } from '../middleware/auth';
+import { authMiddleware, ALL_COMPANIES, AuthRequest } from '../middleware/auth';
 import { asyncHandler } from '../middleware/validation';
 import { requirePermission } from '../lib/rbac';
 import workflowDefinitionRoutes from './workflowDefinition';
@@ -13,6 +13,14 @@ import workflowDefinitionRoutes from './workflowDefinition';
 const router = Router();
 
 router.use(authMiddleware);
+
+/** Reject mutating requests when companyId='all' (reads only). */
+router.use('/:companyId', (req: AuthRequest, res: Response, next: NextFunction) => {
+  if (req.params.companyId === ALL_COMPANIES && req.method !== 'GET') {
+    return res.status(400).json({ error: 'Bad Request', details: 'Cannot mutate with companyId=all; specify a company UUID' });
+  }
+  next();
+});
 
 /** GET /api/companies - list companies (user's or all if super_admin / x-super-admin-api-key) */
 router.get('/', asyncHandler(companiesController.listCompanies));

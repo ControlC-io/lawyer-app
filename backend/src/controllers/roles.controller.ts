@@ -1,6 +1,6 @@
 import { Response } from 'express';
 import { Prisma } from '@prisma/client';
-import { AuthRequest } from '../middleware/auth';
+import { AuthRequest, ALL_COMPANIES, companyFilter } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 import { ALL_PERMISSION_KEYS, PERMISSION_GROUPS } from '../lib/rbac';
 
@@ -49,6 +49,9 @@ async function ensureCompanyAccess(req: AuthRequest, companyId: string) {
     return { error: { status: 401 as const, body: { error: 'Unauthorized', details: 'Authentication required' } } };
   }
   if (req.user?.super_admin) return {};
+  if (companyId === ALL_COMPANIES) {
+    return { error: { status: 403 as const, body: { error: 'Forbidden', details: 'companyId=all is reserved for super admin' } } };
+  }
   const userCompany = await prisma.userCompany.findFirst({
     where: { user_id: userId, company_id: companyId },
   });
@@ -67,7 +70,7 @@ export const rolesController = {
     if (access.error) return res.status(access.error.status).json(access.error.body);
 
     const roles = await prisma.role.findMany({
-      where: { company_id: companyId },
+      where: { ...companyFilter(companyId) },
       include: {
         permissions: { select: { permission_key: true } },
         _count: { select: { users: true } },
@@ -86,7 +89,7 @@ export const rolesController = {
     if (access.error) return res.status(access.error.status).json(access.error.body);
 
     const role = await prisma.role.findFirst({
-      where: { id: roleId, company_id: companyId },
+      where: { id: roleId, ...companyFilter(companyId) },
       include: {
         permissions: { select: { permission_key: true } },
         _count: { select: { users: true } },

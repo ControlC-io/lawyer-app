@@ -13,13 +13,12 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
 export const agentsController = {
   /**
    * GET /api/agents/:agentId
-   * Get agent configuration (was: get-agent)
+   * Get agent configuration (was: get-agent).
+   * With company API key: requires company permission. With super admin key: can get any agent by ID (no company required).
    */
   async getAgent(req: AuthRequest, res: Response) {
     try {
-      if (!(await resolveCompanyForRequest(req, res))) return;
       const { agentId } = req.params;
-      const companyId = req.company!.id;
 
       if (!agentId) {
         return res.status(400).json({
@@ -27,6 +26,14 @@ export const agentsController = {
           details: 'agent_id is required',
         });
       }
+
+      const isSuperAdmin = req.user?.super_admin === true;
+
+      if (!isSuperAdmin) {
+        if (!(await resolveCompanyForRequest(req, res))) return;
+      }
+
+      const companyId = req.company?.id;
 
       // Fetch agent configuration
       const agent = await prisma.agentConfiguration.findUnique({
@@ -50,20 +57,22 @@ export const agentsController = {
         });
       }
 
-      // Verify company has permission
-      const permission = await prisma.agentPermission.findFirst({
-        where: {
-          agent_configuration_id: agentId,
-          company_id: companyId,
-          enabled: true,
-        },
-      });
-
-      if (!permission) {
-        return res.status(403).json({
-          error: 'Access denied',
-          details: 'The agent is not accessible by the company',
+      // Super admin can access any agent; others need company permission
+      if (!isSuperAdmin && companyId) {
+        const permission = await prisma.agentPermission.findFirst({
+          where: {
+            agent_configuration_id: agentId,
+            company_id: companyId,
+            enabled: true,
+          },
         });
+
+        if (!permission) {
+          return res.status(403).json({
+            error: 'Access denied',
+            details: 'The agent is not accessible by the company',
+          });
+        }
       }
 
       return res.json({
@@ -533,6 +542,60 @@ Les détails de structure sont identiques aux spécifications Supabase originale
       return res.json(serialized);
     } catch (error) {
       console.error('listAgentUsage error:', error);
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
+  /**
+   * POST /api/agents/usage
+   * Create an agent_usage record. Super admin only.
+   */
+  async createAgentUsage(req: AuthRequest, res: Response) {
+    try {
+      if (!req.user?.id) return res.status(401).json({ error: 'Unauthorized' });
+      if (!req.user?.super_admin) return res.status(403).json({ error: 'Forbidden: super admin only' });
+
+      const {
+        workflow_execution_id,
+        agent_id,
+        model_name,
+        input_tokens,
+        thinking_tokens,
+        output_tokens,
+        total_cost,
+        company_id,
+        comment,
+      } = req.body || {};
+
+      const record = await prisma.agentUsage.create({
+        data: {
+          workflow_execution_id: workflow_execution_id || null,
+          agent_id: agent_id || null,
+          model_name: model_name || null,
+          input_tokens: input_tokens != null ? BigInt(input_tokens) : null,
+          thinking_tokens: thinking_tokens != null ? BigInt(thinking_tokens) : null,
+          output_tokens: output_tokens != null ? BigInt(output_tokens) : null,
+          total_cost: total_cost != null ? total_cost : null,
+          company_id: company_id || null,
+          comment: comment || null,
+        },
+      });
+
+      return res.status(201).json({
+        id: record.id,
+        workflow_execution_id: record.workflow_execution_id,
+        agent_id: record.agent_id,
+        model_name: record.model_name,
+        input_tokens: record.input_tokens != null ? String(record.input_tokens) : null,
+        thinking_tokens: record.thinking_tokens != null ? String(record.thinking_tokens) : null,
+        output_tokens: record.output_tokens != null ? String(record.output_tokens) : null,
+        total_cost: record.total_cost != null ? String(record.total_cost) : null,
+        company_id: record.company_id,
+        comment: record.comment,
+        created_at: record.created_at,
+      });
+    } catch (error) {
+      console.error('createAgentUsage error:', error);
       return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
     }
   },

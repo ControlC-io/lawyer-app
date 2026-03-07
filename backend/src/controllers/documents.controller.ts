@@ -1,5 +1,5 @@
 import { Response } from 'express';
-import { AuthRequest } from '../middleware/auth';
+import { AuthRequest, ALL_COMPANIES, companyFilter } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 import { getAccessibleFileIds, getAccessibleFileIdsWithLevels, buildVirtualTree, getAllowedMetadataValues, canUserAccessFileByMetadata } from '../lib/documentAccess';
 import { getUserGroupIdsInCompany } from '../lib/folderAccess';
@@ -10,6 +10,9 @@ async function ensureCompanyAccess(req: AuthRequest, companyId: string) {
     return { error: { status: 401, body: { error: 'Unauthorized', details: 'Authentication required' } } };
   }
   if (req.user?.super_admin) return {};
+  if (companyId === ALL_COMPANIES) {
+    return { error: { status: 403, body: { error: 'Forbidden', details: 'companyId=all is reserved for super admin' } } };
+  }
   const userCompany = await prisma.userCompany.findFirst({
     where: { user_id: userId, company_id: companyId },
   });
@@ -28,7 +31,7 @@ export const documentsController = {
     if (access.error) return res.status(access.error.status).json(access.error.body);
 
     const rules = await prisma.documentPermissionRule.findMany({
-      where: { company_id: companyId },
+      where: { ...companyFilter(companyId) },
       include: {
         assignments: {
           include: {
@@ -171,6 +174,22 @@ export const documentsController = {
     const userId = req.user?.id;
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
 
+    // Super admin 'all': return all files across companies without permission filtering
+    if (companyId === ALL_COMPANIES && req.user?.super_admin) {
+      const files = await prisma.file.findMany({
+        orderBy: { name: 'asc' },
+        include: {
+          metadata_values: { include: { metadata: { select: { id: true, name: true } } } },
+        },
+      });
+      const serialized = files.map((f) => ({
+        ...f,
+        size_bytes: f.size_bytes != null ? Number(f.size_bytes) : 0,
+        accessLevel: 'write',
+      }));
+      return res.json({ files: serialized, hasWriteAccess: true });
+    }
+
     const isCompanyAdmin = access.userCompany?.role === 'company_admin' || !!req.user?.super_admin;
     const userGroupIds = await getUserGroupIdsInCompany(userId, companyId);
 
@@ -261,7 +280,7 @@ export const documentsController = {
     });
 
     const files = await prisma.file.findMany({
-      where: { id: { in: accessibleIds }, company_id: companyId },
+      where: { id: { in: accessibleIds }, ...companyFilter(companyId) },
       orderBy: { name: 'asc' },
       include: {
         metadata_values: {
@@ -296,36 +315,41 @@ export const documentsController = {
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
 
     const isCompanyAdmin = access.userCompany?.role === 'company_admin' || !!req.user?.super_admin;
-    const userGroupIds = await getUserGroupIdsInCompany(userId, companyId);
 
-    // Get accessible file IDs
-    const accessibleIds = await getAccessibleFileIds({
-      userId,
-      companyId,
-      isCompanyAdmin,
-      userGroupIds,
-    });
+    let accessibleIds: string[];
+    if (companyId === ALL_COMPANIES && req.user?.super_admin) {
+      const allFiles = await prisma.file.findMany({ select: { id: true } });
+      accessibleIds = allFiles.map((f) => f.id);
+    } else {
+      const userGroupIds = await getUserGroupIdsInCompany(userId, companyId);
+      accessibleIds = await getAccessibleFileIds({
+        userId,
+        companyId,
+        isCompanyAdmin,
+        userGroupIds,
+      });
+    }
 
     if (accessibleIds.length === 0) return res.json({ tree: [], keyOrder: [], totalFiles: 0 });
 
     // Get files
     const files = await prisma.file.findMany({
-      where: { id: { in: accessibleIds }, company_id: companyId },
+      where: { id: { in: accessibleIds }, ...companyFilter(companyId) },
       select: { id: true, name: true },
     });
 
     // Get all metadata for these files
     const metadataRows = await prisma.filesMetadataValue.findMany({
-      where: { files_id: { in: accessibleIds }, company_id: companyId },
+      where: { files_id: { in: accessibleIds }, ...companyFilter(companyId) },
       select: { files_id: true, metadata_id: true, value: true },
     });
 
     // For non-admins, get allowed metadata values per rule condition key
-    const allowedValues = await getAllowedMetadataValues({
+    const allowedValues = (companyId === ALL_COMPANIES && req.user?.super_admin) ? null : await getAllowedMetadataValues({
       userId,
       companyId,
       isCompanyAdmin,
-      userGroupIds,
+      userGroupIds: companyId !== ALL_COMPANIES ? await getUserGroupIdsInCompany(userId, companyId) : [],
     });
 
     const metadata: Record<string, Record<string, string[]>> = {};
@@ -340,10 +364,12 @@ export const documentsController = {
       metadata[m.files_id][m.metadata_id].push(m.value);
     }
 
-    // Get user's tree config
-    const treeConfig = await prisma.userDocumentTreeConfig.findUnique({
-      where: { user_id_company_id: { user_id: userId, company_id: companyId } },
-    });
+    // Get user's tree config (skip for 'all' since compound key requires real UUID)
+    const treeConfig = companyId !== ALL_COMPANIES
+      ? await prisma.userDocumentTreeConfig.findUnique({
+          where: { user_id_company_id: { user_id: userId, company_id: companyId } },
+        })
+      : null;
 
     const keyIds: string[] = Array.isArray(treeConfig?.key_order) ? (treeConfig.key_order as string[]) : [];
 
@@ -355,7 +381,7 @@ export const documentsController = {
     const filteredKeyIds = keyIds.filter((id) => accessibleKeyIdSet.has(id));
     if (filteredKeyIds.length > 0) {
       const keys = await prisma.filesMetadataKey.findMany({
-        where: { id: { in: filteredKeyIds }, company_id: companyId },
+        where: { id: { in: filteredKeyIds }, ...companyFilter(companyId) },
         select: { id: true, name: true },
       });
       const keyMap = new Map(keys.map((k) => [k.id, k.name || k.id]));

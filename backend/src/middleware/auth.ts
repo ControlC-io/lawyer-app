@@ -384,3 +384,14 @@ export const superAdminAuth = (req: AuthRequest, res: Response, next: NextFuncti
 
   return res.status(403).json({ error: 'Forbidden', details: 'Super admin API key required' });
 };
+
+/** Sentinel value for `:companyId` meaning "all companies" (super admin only). */
+export const ALL_COMPANIES = 'all';
+
+/**
+ * Returns a Prisma-compatible filter fragment.
+ * When companyId is ALL_COMPANIES the fragment is empty so no company scoping is applied.
+ */
+export function companyFilter(companyId: string): { company_id?: string } {
+  return companyId === ALL_COMPANIES ? {} : { company_id: companyId };
+}

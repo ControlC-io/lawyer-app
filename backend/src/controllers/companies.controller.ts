@@ -1,6 +1,6 @@
 import { Response } from 'express';
 import { Prisma } from '@prisma/client';
-import { AuthRequest } from '../middleware/auth';
+import { AuthRequest, ALL_COMPANIES, companyFilter } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 import { canUserAccessFolder, getUserGroupIdsInCompany } from '../lib/folderAccess';
 import { getAccessibleFileIds, canUserAccessFileByMetadata } from '../lib/documentAccess';
@@ -16,9 +16,13 @@ async function ensureCompanyAccess(req: AuthRequest, companyId: string, requireA
     return { error: { status: 401, body: { error: 'Unauthorized', details: 'Authentication required' } } };
   }
 
-  // Super admin API key or JWT super_admin can access any company
+  // Super admin API key or JWT super_admin can access any company (including 'all')
   if (req.user?.super_admin) {
     return {};
+  }
+
+  if (companyId === ALL_COMPANIES) {
+    return { error: { status: 403, body: { error: 'Forbidden', details: 'companyId=all is reserved for super admin' } } };
   }
 
   const userCompany = await prisma.userCompany.findFirst({
@@ -402,7 +406,7 @@ export const companiesController = {
       // Admins see all keys; non-admins see only keys present on their accessible files
       if (isCompanyAdmin) {
         const keys = await prisma.filesMetadataKey.findMany({
-          where: { company_id: companyId },
+          where: { ...companyFilter(companyId) },
           orderBy: { name: 'asc' },
         });
         return res.json(keys);
@@ -422,7 +426,7 @@ export const companiesController = {
 
       // Get distinct metadata key IDs from accessible files
       const metadataValues = await prisma.filesMetadataValue.findMany({
-        where: { files_id: { in: accessibleFileIds }, company_id: companyId },
+        where: { files_id: { in: accessibleFileIds }, ...companyFilter(companyId) },
         select: { metadata_id: true },
         distinct: ['metadata_id'],
       });
@@ -433,7 +437,7 @@ export const companiesController = {
       }
 
       const keys = await prisma.filesMetadataKey.findMany({
-        where: { id: { in: accessibleKeyIds }, company_id: companyId },
+        where: { id: { in: accessibleKeyIds }, ...companyFilter(companyId) },
         orderBy: { name: 'asc' },
       });
 
@@ -628,7 +632,7 @@ export const companiesController = {
       }
 
       const where: Prisma.WorkflowExecutionWhereInput = {
-        company_id: companyId,
+        ...companyFilter(companyId),
       };
       if (workflowId) where.workflow_id = workflowId;
       if (status) where.status = status as 'pending' | 'running' | 'completed' | 'failed' | 'paused';
@@ -800,7 +804,7 @@ export const companiesController = {
 
       const isPrivileged = req.user?.super_admin === true;
       const stepWhere: Prisma.WorkflowExecutionStepWhereInput = {
-        company_id: companyId,
+        ...companyFilter(companyId),
         status: status as any,
       };
 
@@ -907,7 +911,7 @@ export const companiesController = {
       const memberships = await prisma.profileGroupMember.findMany({
         where: {
           profile_id: userId,
-          group: { company_id: companyId },
+          group: { ...companyFilter(companyId) },
         },
         select: { group_id: true },
       });
@@ -925,7 +929,7 @@ export const companiesController = {
       const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
       const groups = await prisma.profileGroup.findMany({
-        where: { company_id: companyId },
+        where: { ...companyFilter(companyId) },
         orderBy: { name: 'asc' },
       });
       return res.json(groups);
@@ -1005,7 +1009,7 @@ export const companiesController = {
       const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
       const members = await prisma.profileGroupMember.findMany({
-        where: { group: { company_id: companyId } },
+        where: { group: { ...companyFilter(companyId) } },
         select: { profile_id: true, group_id: true },
       });
       return res.json(members);
@@ -1022,7 +1026,7 @@ export const companiesController = {
       const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
       const group = await prisma.profileGroup.findFirst({
-        where: { id: groupId, company_id: companyId },
+        where: { id: groupId, ...companyFilter(companyId) },
         include: { members: { include: { profile: { select: { id: true, email: true, full_name: true } } } } },
       });
       if (!group) return res.status(404).json({ error: 'Group not found' });
@@ -1105,7 +1109,7 @@ export const companiesController = {
       if (!companyId) return res.status(400).json({ error: 'Missing company ID' });
       const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
-      const where: { company_id: string; config_type?: string } = { company_id: companyId };
+      const where: { company_id?: string; config_type?: string } = { ...companyFilter(companyId) };
       if (configType) where.config_type = configType;
       const list = await prisma.apiConfiguration.findMany({ where, orderBy: { name: 'asc' } });
       return res.json(list);
@@ -1196,7 +1200,7 @@ export const companiesController = {
       const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
       const list = await prisma.dataGlobalVariable.findMany({
-        where: { company_id: companyId },
+        where: { ...companyFilter(companyId) },
         orderBy: [{ position: 'asc' }, { name: 'asc' }],
       });
       return res.json(list);
@@ -1285,7 +1289,7 @@ export const companiesController = {
       const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
       const list = await prisma.dataTable.findMany({
-        where: { company_id: companyId },
+        where: { ...companyFilter(companyId) },
         orderBy: [{ position: 'asc' }, { name: 'asc' }],
         include: { fields: { orderBy: { position: 'asc' } } },
       });
@@ -1409,7 +1413,7 @@ export const companiesController = {
       const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
       const table = await prisma.dataTable.findFirst({
-        where: { id: tableId, company_id: companyId },
+        where: { id: tableId, ...companyFilter(companyId) },
         include: { fields: { orderBy: { position: 'asc' } } },
       });
       if (!table) return res.status(404).json({ error: 'Data table not found' });
@@ -1496,10 +1500,10 @@ export const companiesController = {
       if (!companyId || !tableId) return res.status(400).json({ error: 'Missing company ID or table ID' });
       const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
-      const table = await prisma.dataTable.findFirst({ where: { id: tableId, company_id: companyId } });
+      const table = await prisma.dataTable.findFirst({ where: { id: tableId, ...companyFilter(companyId) } });
       if (!table) return res.status(404).json({ error: 'Data table not found' });
       const records = await prisma.dataTableRecord.findMany({
-        where: { table_id: tableId, company_id: companyId },
+        where: { table_id: tableId, ...companyFilter(companyId) },
         orderBy: [{ position: 'asc' }, { created_at: 'asc' }],
       });
       return res.json(records);
@@ -1584,10 +1588,13 @@ export const companiesController = {
       const userId = req.user?.id;
       if (!userId) return res.status(401).json({ error: 'Unauthorized' });
       const folder = await prisma.folder.findFirst({
-        where: { id: folderId, company_id: companyId },
+        where: { id: folderId, ...companyFilter(companyId) },
       });
       if (!folder) return res.status(404).json({ error: 'Folder not found' });
       const isCompanyAdmin = access.userCompany?.role === 'company_admin' || !!req.user?.super_admin;
+      if (companyId === ALL_COMPANIES) {
+        return res.json(folder);
+      }
       const userGroupIds = await getUserGroupIdsInCompany(userId, companyId);
       const allowed = await canUserAccessFolder(userId, companyId, folderId, isCompanyAdmin, userGroupIds);
       if (!allowed) return res.status(404).json({ error: 'Folder not found' });
@@ -1613,23 +1620,23 @@ export const companiesController = {
       const isRootList = parentFolderId === undefined || parentFolderId === '';
       const parentId = isRootList ? null : parentFolderId || null;
 
-      if (!isRootList && parentId) {
+      if (companyId !== ALL_COMPANIES && !isRootList && parentId) {
         const parentFolder = await prisma.folder.findFirst({
-          where: { id: parentId, company_id: companyId },
+          where: { id: parentId, ...companyFilter(companyId) },
         });
         if (!parentFolder) return res.status(404).json({ error: 'Folder not found' });
         const allowed = await canUserAccessFolder(userId, companyId, parentId, isCompanyAdmin, userGroupIds);
         if (!allowed) return res.status(403).json({ error: 'You do not have access to this folder' });
       }
 
-      const where: { company_id: string | null; parent_folder_id?: string | null } = { company_id: companyId };
+      const where: { company_id?: string | null; parent_folder_id?: string | null } = { ...companyFilter(companyId) };
       where.parent_folder_id = parentId;
       let folders = await prisma.folder.findMany({
         where,
         orderBy: { name: 'asc' },
       });
 
-      if (isRootList && folders.length > 0) {
+      if (companyId !== ALL_COMPANIES && isRootList && folders.length > 0) {
         const allowedIds = new Set<string>();
         for (const folder of folders) {
           const allowed = await canUserAccessFolder(userId, companyId, folder.id, isCompanyAdmin, userGroupIds);
@@ -1715,7 +1722,7 @@ export const companiesController = {
       const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
       const folder = await prisma.folder.findFirst({
-        where: { id: folderId, company_id: companyId },
+        where: { id: folderId, ...companyFilter(companyId) },
         select: { parent_folder_id: true },
       });
       if (!folder) return res.status(404).json({ error: 'Folder not found' });
@@ -1815,12 +1822,12 @@ export const companiesController = {
       const isCompanyAdmin = access.userCompany?.role === 'company_admin' || !!req.user?.super_admin;
       const userGroupIds = await getUserGroupIdsInCompany(userId, companyId);
 
-      if (folderId !== undefined && folderId !== '') {
+      if (companyId !== ALL_COMPANIES && folderId !== undefined && folderId !== '') {
         const allowed = await canUserAccessFolder(userId, companyId, folderId, isCompanyAdmin, userGroupIds);
         if (!allowed) return res.status(403).json({ error: 'You do not have access to this folder' });
       }
 
-      const where: { company_id: string; folder_id?: string | { in: string[] }; id?: { in: string[] } } = { company_id: companyId };
+      const where: { company_id?: string; folder_id?: string | { in: string[] }; id?: { in: string[] } } = { ...companyFilter(companyId) };
       if (folderId !== undefined) {
         if (folderId === '') {
           // At root: show no files (only folders). Files are shown when viewing a specific folder.
@@ -1926,7 +1933,7 @@ export const companiesController = {
       if (access.error) return res.status(access.error.status).json(access.error.body);
       const userId = req.user?.id;
       if (!userId) return res.status(401).json({ error: 'Unauthorized' });
-      const where: { company_id: string; metadata_id: string; value?: string } = { company_id: companyId, metadata_id: metadataId };
+      const where: { company_id?: string; metadata_id: string; value?: string } = { ...companyFilter(companyId), metadata_id: metadataId };
       if (value !== undefined && value !== '') where.value = value;
       const rows = await prisma.filesMetadataValue.findMany({
         where,
@@ -1935,7 +1942,7 @@ export const companiesController = {
       let fileIds = [...new Set(rows.map((r) => r.files_id))];
       if (fileIds.length > 0) {
         const filesWithFolder = await prisma.file.findMany({
-          where: { id: { in: fileIds }, company_id: companyId },
+          where: { id: { in: fileIds }, ...companyFilter(companyId) },
           select: { id: true, folder_id: true },
         });
         const isCompanyAdmin = access.userCompany?.role === 'company_admin' || !!req.user?.super_admin;
@@ -1991,7 +1998,7 @@ export const companiesController = {
       const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
       const list = await prisma.agentPermission.findMany({
-        where: { company_id: companyId },
+        where: { ...companyFilter(companyId) },
         include: {
           agent_configuration: { select: { id: true, name: true, agent_type: true } },
           company: { select: { id: true, name: true } },
@@ -2076,7 +2083,7 @@ export const companiesController = {
       if (access.error) return res.status(access.error.status).json(access.error.body);
 
       const list = await prisma.agentUsage.findMany({
-        where: { company_id: companyId },
+        where: { ...companyFilter(companyId) },
         include: {
           agent: { select: { id: true, name: true } },
           company: { select: { id: true, name: true } },

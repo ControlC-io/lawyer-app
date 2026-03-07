@@ -1,5 +1,5 @@
 import { Response } from 'express';
-import { AuthRequest, resolveCompanyForRequest } from '../middleware/auth';
+import { AuthRequest, resolveCompanyForRequest, ALL_COMPANIES, companyFilter } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 import { emailService } from '../services/email.service';
 import bcrypt from 'bcryptjs';
@@ -361,15 +361,19 @@ export const usersController = {
         return res.status(401).json({ error: 'Unauthorized', details: 'Authentication required' });
       }
 
-      const userCompany = await prisma.userCompany.findFirst({
-        where: { user_id: userId, company_id: companyId },
-      });
-      if (!userCompany) {
-        return res.status(403).json({ error: 'Forbidden', details: 'You do not have access to this company' });
+      if (companyId !== ALL_COMPANIES && !req.user?.super_admin) {
+        const userCompany = await prisma.userCompany.findFirst({
+          where: { user_id: userId, company_id: companyId },
+        });
+        if (!userCompany) {
+          return res.status(403).json({ error: 'Forbidden', details: 'You do not have access to this company' });
+        }
+      } else if (companyId === ALL_COMPANIES && !req.user?.super_admin) {
+        return res.status(403).json({ error: 'Forbidden', details: 'companyId=all is reserved for super admin' });
       }
 
       const userCompanies = await prisma.userCompany.findMany({
-        where: { company_id: companyId },
+        where: { ...companyFilter(companyId) },
         include: {
           profile: {
             select: { id: true, email: true, full_name: true },
@@ -410,15 +414,19 @@ export const usersController = {
         return res.status(401).json({ error: 'Unauthorized', details: 'Authentication required' });
       }
 
-      const userCompany = await prisma.userCompany.findFirst({
-        where: { user_id: userId, company_id: companyId, role: 'company_admin' },
-      });
-      if (!userCompany) {
-        return res.status(403).json({ error: 'Forbidden', details: 'Company admin required' });
+      if (companyId !== ALL_COMPANIES && !req.user?.super_admin) {
+        const userCompany = await prisma.userCompany.findFirst({
+          where: { user_id: userId, company_id: companyId, role: 'company_admin' },
+        });
+        if (!userCompany) {
+          return res.status(403).json({ error: 'Forbidden', details: 'Company admin required' });
+        }
+      } else if (companyId === ALL_COMPANIES && !req.user?.super_admin) {
+        return res.status(403).json({ error: 'Forbidden', details: 'companyId=all is reserved for super admin' });
       }
 
       const invitations = await prisma.invitation.findMany({
-        where: { company_id: companyId, status: 'pending' },
+        where: { ...companyFilter(companyId), status: 'pending' },
         orderBy: { created_at: 'desc' },
       });
 

@@ -1,5 +1,5 @@
 import { Response } from 'express';
-import { AuthRequest } from '../middleware/auth';
+import { AuthRequest, ALL_COMPANIES, companyFilter } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 import { workflowService } from '../services/workflow.service';
 
@@ -8,9 +8,12 @@ async function ensureCompanyAccess(req: AuthRequest, companyId: string, requireA
   if (!userId) {
     return { error: { status: 401, body: { error: 'Unauthorized', details: 'Authentication required' } } };
   }
-  // Super admin API key or JWT super_admin can access any company
+  // Super admin API key or JWT super_admin can access any company (including 'all')
   if (req.user?.super_admin) {
     return {};
+  }
+  if (companyId === ALL_COMPANIES) {
+    return { error: { status: 403, body: { error: 'Forbidden', details: 'companyId=all is reserved for super admin' } } };
   }
   const userCompany = await prisma.userCompany.findFirst({
     where: { user_id: userId, company_id: companyId },
@@ -80,24 +83,26 @@ export const workflowDefinitionController = {
       const userGroupIds = await getUserGroupIds(userId);
 
       // Build the base where clause
-      const baseWhere: { company_id: string; category_id?: string | null } = { company_id: companyId };
+      const baseWhere: { company_id?: string; category_id?: string | null } = { ...companyFilter(companyId) };
       if (rawCategoryId !== undefined) {
         baseWhere.category_id = (rawCategoryId === '' || rawCategoryId === 'null') ? null : rawCategoryId;
       }
 
+      const isPrivileged = req.user?.super_admin === true;
       const visibilityTypes = getPermissionTypeFallbacks('visibility');
       const workflows = await prisma.workflow.findMany({
         where: {
           ...baseWhere,
-          OR: [
-            { visibility_scope: 'all_company' },
-            // Backward compatibility for records created before visibility scopes.
-            { is_public: true },
-            { permissions: { some: { user_id: userId, permission_type: { in: visibilityTypes } } } },
-            ...(userGroupIds.length > 0
-              ? [{ permissions: { some: { group_id: { in: userGroupIds }, permission_type: { in: visibilityTypes } } } }]
-              : []),
-          ],
+          ...(isPrivileged ? {} : {
+            OR: [
+              { visibility_scope: 'all_company' },
+              { is_public: true },
+              { permissions: { some: { user_id: userId, permission_type: { in: visibilityTypes } } } },
+              ...(userGroupIds.length > 0
+                ? [{ permissions: { some: { group_id: { in: userGroupIds }, permission_type: { in: visibilityTypes } } } }]
+                : []),
+            ],
+          }),
         },
         orderBy: { name: 'asc' },
         include: {
@@ -129,7 +134,7 @@ export const workflowDefinitionController = {
       if (access.error) return res.status(access.error.status).json(access.error.body);
 
       const workflow = await prisma.workflow.findFirst({
-        where: { id: workflowId, company_id: companyId },
+        where: { id: workflowId, ...companyFilter(companyId) },
         include: {
           steps: { orderBy: [{ position_x: 'asc' }, { position_y: 'asc' }] },
           connections: true,
@@ -683,7 +688,7 @@ export const workflowDefinitionController = {
       if (access.error) return res.status(access.error.status).json(access.error.body);
 
       const categories = await prisma.workflowCategory.findMany({
-        where: { company_id: companyId },
+        where: { ...companyFilter(companyId) },
         orderBy: { name: 'asc' },
       });
       return res.json(categories);

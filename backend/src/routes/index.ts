@@ -10,12 +10,8 @@ import publicRoutes from './public';
 import externalRoutes from './external';
 import portalRoutes from './portal';
 import ocrRoutes from './ocr';
-import adminRoutes from './admin';
 
 const router = Router();
-
-// Super admin cross-company routes
-router.use('/admin', adminRoutes);
 
 // Public routes (no auth)
 router.use('/auth', authRoutes);
