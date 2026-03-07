@@ -357,3 +357,30 @@ export async function resolveCompanyForRequest(
   });
   return false;
 }
+
+/**
+ * Super-admin-only authentication middleware.
+ * Accepts SUPER_ADMIN_API_KEY via x-super-admin-api-key or x-api-key.
+ * Rejects all other callers with 403.
+ */
+export const superAdminAuth = (req: AuthRequest, res: Response, next: NextFunction) => {
+  const superAdminApiKey = process.env.SUPER_ADMIN_API_KEY || '';
+  if (!superAdminApiKey) {
+    return res.status(500).json({ error: 'SUPER_ADMIN_API_KEY not configured' });
+  }
+
+  const key =
+    (req.headers['x-super-admin-api-key'] as string) ||
+    (req.headers['x-api-key'] as string);
+
+  if (key === superAdminApiKey) {
+    req.user = {
+      id: SUPER_ADMIN_API_USER_ID,
+      email: 'superadmin@api',
+      super_admin: true,
+    };
+    return next();
+  }
+
+  return res.status(403).json({ error: 'Forbidden', details: 'Super admin API key required' });
+};
