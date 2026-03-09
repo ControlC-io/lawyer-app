@@ -131,6 +131,7 @@ export const DevModeBanner = ({
             try {
                 const execution = await api.get<{
                     execution_data_records?: Array<{ values?: Record<string, { value?: unknown }> }>;
+                    workflow?: { data_structure?: unknown };
                 }>(`/api/workflows/executions/${executionId}`);
 
                 const executionDataMap: Record<string, unknown> = {};
@@ -143,9 +144,6 @@ export const DevModeBanner = ({
                 });
 
                 // Resolve data bindings - handle both array and JSON string formats
-                // For agent steps: agent config provides api_url/method/headers, step config provides api_data
-                // For non-agent steps: step config provides everything
-                // Always use step config for api_data (matches edge function behavior)
                 const configToUseForData = stepConfig;
                 let apiData = configToUseForData?.api_data || [];
                 if (typeof apiData === 'string') {
@@ -159,45 +157,89 @@ export const DevModeBanner = ({
                     apiData = [];
                 }
 
-                const resolvedData: Record<string, any> = {};
-                apiData.forEach((item: any) => {
-                    if (item.key) {
-                        let resolvedValue = item.value || '';
-                        if (typeof resolvedValue === 'string' && resolvedValue.startsWith('{{') && resolvedValue.endsWith('}}')) {
-                            const fieldId = resolvedValue.slice(2, -2).trim();
-                            resolvedValue = executionDataMap[fieldId] ?? '';
-                        }
-                        resolvedData[item.key] = resolvedValue;
-                    }
-                });
-
-                // Build request body
-                let requestBody: any = {
-                    execution_id: executionId,
-                    execution_step_id: executionStepId,
-                    ...resolvedData
-                };
-
-                // For decision steps, include condition and outputs
                 const isAgentDecision = stepType === 'decision' && (decisionNodeType === 'Agent' || decisionNodeType === 'Agent + Human');
-                if (isAgentDecision) {
-                    // Ensure condition and outputs are properly formatted
-                    const condition = stepConfig?.condition || '';
-                    const outputs = Array.isArray(stepConfig?.outputs) 
-                        ? stepConfig.outputs 
-                        : (stepConfig?.outputs ? [stepConfig.outputs] : []);
-                    
-                    requestBody.condition = condition;
-                    requestBody.outputs = outputs;
-                    
-                    console.log('DevModeBanner - Decision step payload computed:', {
-                        condition,
-                        outputs,
-                        stepConfig_condition: stepConfig?.condition,
-                        stepConfig_outputs: stepConfig?.outputs,
-                        outputsType: typeof stepConfig?.outputs,
-                        isArray: Array.isArray(stepConfig?.outputs)
+
+                let requestBody: any;
+
+                if (isAgentAction && stepConfig?.agent_id) {
+                    // Agent action step: same structured payload as backend (execution_id, execution_step_id, agent_id, data_to_send, data_to_update, additional_comment)
+                    const rawDataStructure = execution?.workflow?.data_structure;
+                    const fields = Array.isArray(rawDataStructure) ? rawDataStructure : [];
+                    const fieldInfoMap: Record<string, { name: string; type: string }> = {};
+                    (fields as any[]).forEach((field: any) => {
+                        if (field?.id) {
+                            fieldInfoMap[field.id] = {
+                                name: field.name || field.id,
+                                type: field.field_type || field.field_type_new || field.type || 'text',
+                            };
+                        }
                     });
+
+                    const dataToSendWithTypes = (apiData as any[]).map((item: any) => {
+                        if (!item?.value || typeof item.value !== 'string' || !item.value.startsWith('{{') || !item.value.endsWith('}}')) {
+                            return null;
+                        }
+                        const fieldId = item.value.slice(2, -2).trim();
+                        const info = fieldInfoMap[fieldId] || { name: fieldId, type: 'text' };
+                        const value = executionDataMap[fieldId] ?? null;
+                        return { key: fieldId, name: info.name, value, type: info.type };
+                    }).filter(Boolean);
+
+                    let dataToUpdateConfig = stepConfig.data_to_update;
+                    if (typeof dataToUpdateConfig === 'string') {
+                        try {
+                            dataToUpdateConfig = JSON.parse(dataToUpdateConfig);
+                        } catch {
+                            dataToUpdateConfig = [];
+                        }
+                    }
+                    const dataToUpdateList = Array.isArray(dataToUpdateConfig) ? dataToUpdateConfig : [];
+                    const dataToUpdateWithTypes = dataToUpdateList.map((item: any) => {
+                        const fieldId = item?.value;
+                        if (!fieldId) {
+                            return { key: null, name: item?.key ?? null, value: null, type: 'text' };
+                        }
+                        const info = fieldInfoMap[fieldId] || { name: fieldId, type: 'text' };
+                        const value = executionDataMap[fieldId] ?? null;
+                        return { key: fieldId, name: info.name, value, type: info.type };
+                    });
+
+                    requestBody = {
+                        execution_id: executionId,
+                        execution_step_id: executionStepId,
+                        agent_id: stepConfig.agent_id,
+                        data_to_send: dataToSendWithTypes,
+                        data_to_update: dataToUpdateWithTypes,
+                        additional_comment: stepConfig.additional_comment || '',
+                    };
+                } else {
+                    // Non-agent: flat payload with resolved bindings
+                    const resolvedData: Record<string, any> = {};
+                    apiData.forEach((item: any) => {
+                        if (item.key) {
+                            let resolvedValue = item.value || '';
+                            if (typeof resolvedValue === 'string' && resolvedValue.startsWith('{{') && resolvedValue.endsWith('}}')) {
+                                const fieldId = resolvedValue.slice(2, -2).trim();
+                                resolvedValue = executionDataMap[fieldId] ?? '';
+                            }
+                            resolvedData[item.key] = resolvedValue;
+                        }
+                    });
+
+                    requestBody = {
+                        execution_id: executionId,
+                        execution_step_id: executionStepId,
+                        ...resolvedData,
+                    };
+
+                    if (isAgentDecision) {
+                        const condition = stepConfig?.condition || '';
+                        const outputs = Array.isArray(stepConfig?.outputs)
+                            ? stepConfig.outputs
+                            : (stepConfig?.outputs ? [stepConfig.outputs] : []);
+                        requestBody.condition = condition;
+                        requestBody.outputs = outputs;
+                    }
                 }
 
                 setWebhookPayload(requestBody);
@@ -284,6 +326,7 @@ export const DevModeBanner = ({
             if (isEditing && editedUrl !== webhookUrl) {
                 const execution = await api.get<{
                     execution_data_records?: Array<{ values?: Record<string, { value?: unknown }> }>;
+                    workflow?: { data_structure?: unknown };
                 }>(`/api/workflows/executions/${executionId}`);
 
                 const executionDataMap: Record<string, unknown> = {};
@@ -294,11 +337,7 @@ export const DevModeBanner = ({
                     });
                 });
 
-                // Resolve data bindings - handle both array and JSON string formats
-                // For agent steps: agent config provides api_url/method/headers, step config provides api_data
-                // For non-agent steps: step config provides everything
-                const configToUseForData = stepConfig; // Always use step config for api_data
-                let apiData = configToUseForData?.api_data || [];
+                let apiData = stepConfig?.api_data || [];
                 if (typeof apiData === 'string') {
                     try {
                         apiData = JSON.parse(apiData);
@@ -310,20 +349,6 @@ export const DevModeBanner = ({
                     apiData = [];
                 }
 
-                const resolvedData: Record<string, any> = {};
-                apiData.forEach((item: any) => {
-                    if (item.key) {
-                        let resolvedValue = item.value || '';
-                        if (typeof resolvedValue === 'string' && resolvedValue.startsWith('{{') && resolvedValue.endsWith('}}')) {
-                            const fieldId = resolvedValue.slice(2, -2).trim();
-                            resolvedValue = executionDataMap[fieldId] ?? '';
-                        }
-                        resolvedData[item.key] = resolvedValue;
-                    }
-                });
-
-                // Build headers - handle both array and JSON string formats
-                // For agent steps: use agent config for headers, otherwise use step config
                 const configToUseForHeaders = agentConfig || stepConfig;
                 let apiHeaders = configToUseForHeaders?.api_headers || [];
                 if (typeof apiHeaders === 'string') {
@@ -346,31 +371,79 @@ export const DevModeBanner = ({
                     }
                 });
 
-                // Build request body
-                let requestBody: any = {
-                    execution_id: executionId,
-                    execution_step_id: executionStepId,
-                    ...resolvedData
-                };
-
-                // For decision steps, include condition and outputs
-                const isAgentDecision = stepType === 'decision' && (decisionNodeType === 'Agent' || decisionNodeType === 'Agent + Human');
-                if (isAgentDecision) {
-                    // Ensure condition and outputs are properly formatted
-                    const condition = stepConfig?.condition || '';
-                    const outputs = Array.isArray(stepConfig?.outputs) 
-                        ? stepConfig.outputs 
-                        : (stepConfig?.outputs ? [stepConfig.outputs] : []);
-                    
-                    requestBody.condition = condition;
-                    requestBody.outputs = outputs;
-                    
-                    console.log('Decision step - adding condition and outputs:', {
-                        condition,
-                        outputs,
-                        hasCondition: !!condition,
-                        outputsCount: outputs.length
+                let requestBody: any;
+                if (isAgentAction && stepConfig?.agent_id) {
+                    const rawDataStructure = execution?.workflow?.data_structure;
+                    const fields = Array.isArray(rawDataStructure) ? rawDataStructure : [];
+                    const fieldInfoMap: Record<string, { name: string; type: string }> = {};
+                    (fields as any[]).forEach((field: any) => {
+                        if (field?.id) {
+                            fieldInfoMap[field.id] = {
+                                name: field.name || field.id,
+                                type: field.field_type || field.field_type_new || field.type || 'text',
+                            };
+                        }
                     });
+
+                    const dataToSendWithTypes = (apiData as any[]).map((item: any) => {
+                        if (!item?.value || typeof item.value !== 'string' || !item.value.startsWith('{{') || !item.value.endsWith('}}')) {
+                            return null;
+                        }
+                        const fieldId = item.value.slice(2, -2).trim();
+                        const info = fieldInfoMap[fieldId] || { name: fieldId, type: 'text' };
+                        const value = executionDataMap[fieldId] ?? null;
+                        return { key: fieldId, name: info.name, value, type: info.type };
+                    }).filter(Boolean);
+
+                    let dataToUpdateConfig = stepConfig.data_to_update;
+                    if (typeof dataToUpdateConfig === 'string') {
+                        try {
+                            dataToUpdateConfig = JSON.parse(dataToUpdateConfig);
+                        } catch {
+                            dataToUpdateConfig = [];
+                        }
+                    }
+                    const dataToUpdateList = Array.isArray(dataToUpdateConfig) ? dataToUpdateConfig : [];
+                    const dataToUpdateWithTypes = dataToUpdateList.map((item: any) => {
+                        const fieldId = item?.value;
+                        if (!fieldId) {
+                            return { key: null, name: item?.key ?? null, value: null, type: 'text' };
+                        }
+                        const info = fieldInfoMap[fieldId] || { name: fieldId, type: 'text' };
+                        const value = executionDataMap[fieldId] ?? null;
+                        return { key: fieldId, name: info.name, value, type: info.type };
+                    });
+
+                    requestBody = {
+                        execution_id: executionId,
+                        execution_step_id: executionStepId,
+                        agent_id: stepConfig.agent_id,
+                        data_to_send: dataToSendWithTypes,
+                        data_to_update: dataToUpdateWithTypes,
+                        additional_comment: stepConfig.additional_comment || '',
+                    };
+                } else {
+                    const resolvedData: Record<string, any> = {};
+                    apiData.forEach((item: any) => {
+                        if (item.key) {
+                            let resolvedValue = item.value || '';
+                            if (typeof resolvedValue === 'string' && resolvedValue.startsWith('{{') && resolvedValue.endsWith('}}')) {
+                                const fieldId = resolvedValue.slice(2, -2).trim();
+                                resolvedValue = executionDataMap[fieldId] ?? '';
+                            }
+                            resolvedData[item.key] = resolvedValue;
+                        }
+                    });
+                    requestBody = {
+                        execution_id: executionId,
+                        execution_step_id: executionStepId,
+                        ...resolvedData,
+                    };
+                    const isAgentDecision = stepType === 'decision' && (decisionNodeType === 'Agent' || decisionNodeType === 'Agent + Human');
+                    if (isAgentDecision) {
+                        requestBody.condition = stepConfig?.condition || '';
+                        requestBody.outputs = Array.isArray(stepConfig?.outputs) ? stepConfig.outputs : (stepConfig?.outputs ? [stepConfig.outputs] : []);
+                    }
                 }
 
                 const response = await fetch(editedUrl, {

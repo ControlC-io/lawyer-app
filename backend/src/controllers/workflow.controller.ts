@@ -233,30 +233,84 @@ export const workflowController = {
       // Get execution data for bindings
       const executionDataSnapshot = await workflowService.getExecutionDataSnapshot(executionId);
 
-      // Resolve data bindings
-      const resolvedData: Record<string, any> = {};
-      apiData.forEach((item: any) => {
-        if (item.key) {
-          let value = item.value || '';
-          if (typeof value === 'string' && value.startsWith('{{') && value.endsWith('}}')) {
-            const fieldId = value.slice(2, -2).trim();
-            value = executionDataSnapshot[fieldId] ?? '';
-          }
-          resolvedData[item.key] = value;
-        }
-      });
-
       // Build request body
-      let requestBody: any = {
-        execution_id: executionId,
-        execution_step_id: stepId,
-        ...resolvedData,
-      };
+      let requestBody: any;
 
-      // For agent decisions, include condition and outputs
-      if (isAgentDecision) {
-        requestBody.condition = config.condition || '';
-        requestBody.outputs = Array.isArray(config.outputs) ? config.outputs : [];
+      if (isAgentAction && config.agent_id) {
+        // Agent action step: send structured payload expected by agent webhook
+        const rawDataStructure = (executionStep.step as any)?.workflow?.data_structure;
+        const fields = Array.isArray(rawDataStructure) ? rawDataStructure : [];
+        const fieldInfoMap: Record<string, { name: string; type: string }> = {};
+        fields.forEach((field: any) => {
+          if (field?.id) {
+            fieldInfoMap[field.id] = {
+              name: field.name || field.id,
+              type: field.field_type || field.field_type_new || field.type || 'text',
+            };
+          }
+        });
+
+        const dataToSend = (apiData as any[]).map((item: any) => {
+          if (!item?.value || typeof item.value !== 'string' || !item.value.startsWith('{{') || !item.value.endsWith('}}')) {
+            return null;
+          }
+          const fieldId = item.value.slice(2, -2).trim();
+          const info = fieldInfoMap[fieldId] || { name: fieldId, type: 'text' };
+          const value = executionDataSnapshot[fieldId] ?? null;
+          return { key: fieldId, name: info.name, value, type: info.type };
+        }).filter(Boolean);
+
+        let dataToUpdateConfig = config.data_to_update;
+        if (typeof dataToUpdateConfig === 'string') {
+          try {
+            dataToUpdateConfig = JSON.parse(dataToUpdateConfig);
+          } catch {
+            dataToUpdateConfig = [];
+          }
+        }
+        const dataToUpdateList = Array.isArray(dataToUpdateConfig) ? dataToUpdateConfig : [];
+        const dataToUpdate = dataToUpdateList.map((item: any) => {
+          const fieldId = item?.value;
+          if (!fieldId) {
+            return { key: null, name: item?.key ?? null, value: null, type: 'text' };
+          }
+          const info = fieldInfoMap[fieldId] || { name: fieldId, type: 'text' };
+          const value = executionDataSnapshot[fieldId] ?? null;
+          return { key: fieldId, name: info.name, value, type: info.type };
+        });
+
+        requestBody = {
+          execution_id: executionId,
+          execution_step_id: stepId,
+          agent_id: config.agent_id,
+          data_to_send: dataToSend,
+          data_to_update: dataToUpdate,
+          additional_comment: (config.additional_comment as string) || '',
+        };
+      } else {
+        // Non-agent action: resolve bindings and send flat payload
+        const resolvedData: Record<string, any> = {};
+        apiData.forEach((item: any) => {
+          if (item.key) {
+            let value = item.value || '';
+            if (typeof value === 'string' && value.startsWith('{{') && value.endsWith('}}')) {
+              const fieldId = value.slice(2, -2).trim();
+              value = executionDataSnapshot[fieldId] ?? '';
+            }
+            resolvedData[item.key] = value;
+          }
+        });
+
+        requestBody = {
+          execution_id: executionId,
+          execution_step_id: stepId,
+          ...resolvedData,
+        };
+
+        if (isAgentDecision) {
+          requestBody.condition = config.condition || '';
+          requestBody.outputs = Array.isArray(config.outputs) ? config.outputs : [];
+        }
       }
 
       // Build headers
