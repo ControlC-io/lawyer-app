@@ -214,12 +214,6 @@ export const filesController = {
 
       if (sub_field_name) {
         // --- Array sub-field upload ---
-        if (field.field_type !== 'array') {
-          return res.status(400).json({
-            error: 'Invalid field type',
-            details: `Field "${field_name}" is not an array field. sub_field_name can only be used with array fields.`,
-          });
-        }
 
         // Find the sub-field definition by name among children of this array field
         const subField = (workflow.data_structure as any[]).find(
@@ -227,9 +221,9 @@ export const filesController = {
         );
 
         if (!subField) {
-          return res.status(400).json({
+          return res.status(404).json({
             error: 'Sub-field not found',
-            details: `Sub-field "${sub_field_name}" not found as a child of array field "${field_name}".`,
+            details: `Sub-field "${sub_field_name}" not found in array field "${field_name}"`,
           });
         }
 
