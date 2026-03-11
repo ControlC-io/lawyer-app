@@ -42,7 +42,7 @@ jest.mock('../services/ai.service', () => ({
   }
 }));
 
-// Mock Storage Service (for getExecutionData file/multiple_files branches)
+// Mock Storage Service (for getExecutionData file field branches)
 jest.mock('../services/storage.service', () => ({
   storageService: {
     getSignedUrl: jest.fn().mockResolvedValue('https://signed.example/'),
@@ -673,7 +673,8 @@ describe('Workflow Endpoints', () => {
         workflow: {
           data_structure: [
             { id: 'f1', name: 'File1', field_type: 'file' },
-            { id: 'f2', name: 'Files2', field_type: 'multiple_files' },
+            { id: 'f2', name: 'Files2', field_type: 'array' },
+            { id: 'f2-child', name: 'FileItem', field_type: 'file', parent_item_id: 'f2' },
           ],
         },
         execution_steps: [],
@@ -681,7 +682,7 @@ describe('Workflow Endpoints', () => {
           {
             values: {
               f1: { value: 'path/to/file1.pdf' },
-              f2: { value: ['path/a', 'path/b'] },
+              f2: { value: [{ 'f2-child': { value: 'path/a' } }, { 'f2-child': { value: 'path/b' } }] },
             },
           },
         ],

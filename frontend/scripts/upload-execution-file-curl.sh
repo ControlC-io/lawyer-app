@@ -11,7 +11,8 @@
 #
 # The upload-execution-file function:
 # - For a single "file" field: sets the field value to the new file path (replaces any previous file).
-# - For a "multiple_files" field: appends the new file to the list (adds to existing files).
+# - For an array sub-field of type "file": pass sub_field_name and optional index in the JSON body
+#   to target a specific item in an array field (appends a new item if index is omitted).
 
 set -e
 
