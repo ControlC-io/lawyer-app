@@ -545,14 +545,20 @@ export const useExecutionForm = (
    * Unlike handleFileUpload, this does NOT update execution data directly —
    * the caller is responsible for passing the result to onChildChange.
    */
-  const uploadFileForArrayChild = async (fieldId: string, file: File): Promise<{ value: string; original_name: string; signedUrl?: string }> => {
+  const uploadFileForArrayChild = async (
+    childFieldId: string,
+    file: File,
+    parentFieldName: string,
+    childFieldName: string,
+  ): Promise<{ value: string; original_name: string; signedUrl?: string }> => {
     if (!file || !apiKey) throw new Error("File or API key missing");
-    setUploadingFiles((prev) => ({ ...prev, [fieldId]: true }));
+    setUploadingFiles((prev) => ({ ...prev, [childFieldId]: true }));
     try {
       const buf = await file.arrayBuffer();
       const base64 = arrayBufferToBase64(buf);
       const body: Record<string, any> = {
-        field_name: fieldId,
+        field_name: parentFieldName,
+        sub_field_name: childFieldName,
         file_base64: base64,
         file_name: file.name,
         mime_type: file.type,
@@ -565,14 +571,13 @@ export const useExecutionForm = (
       const storagePath = res?.file_path;
       if (!storagePath) throw new Error("No file_path returned from upload");
       const signedUrl = await getSignedUrl(storagePath, file.name);
-      // Cache the signed URL using the storage path as key so FileField can find it
       if (signedUrl) {
         setSignedUrls((prev) => ({ ...prev, [storagePath]: signedUrl }));
       }
       toast({ title: "File uploaded successfully", description: file.name });
       return { value: storagePath, original_name: file.name, signedUrl: signedUrl ?? undefined };
     } finally {
-      setUploadingFiles((prev) => ({ ...prev, [fieldId]: false }));
+      setUploadingFiles((prev) => ({ ...prev, [childFieldId]: false }));
     }
   };
 

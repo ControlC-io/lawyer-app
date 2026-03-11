@@ -1099,7 +1099,7 @@ export const ExecutionDataPanel = ({
                 onRetryDynamic={() => form.retryDynamicOptions(childField.id)}
                 onUpload={isFileChild ? async (file: File) => {
                   markAiValidationDirty();
-                  const result = await form.uploadFileForArrayChild(childField.id, file);
+                  const result = await form.uploadFileForArrayChild(childField.id, file, def.name, childField.name);
                   onChildChange({ value: result.value, original_name: result.original_name });
                   return result.signedUrl;
                 } : (file: File) => {
@@ -1417,7 +1417,7 @@ export const ExecutionDataPanel = ({
                     dynamicOptions={form.dynamicOptions[childField.id]} isLoadingDynamic={form.loadingDynamicOptions[childField.id]} dynamicError={form.dynamicOptionsErrors[childField.id]} onRetryDynamic={() => form.retryDynamicOptions(childField.id)}
                     onUpload={isFileChild ? async (file: File) => {
                       markAiValidationDirty();
-                      const result = await form.uploadFileForArrayChild(childField.id, file);
+                      const result = await form.uploadFileForArrayChild(childField.id, file, def.name, childField.name);
                       onChildChange({ value: result.value, original_name: result.original_name });
                       return result.signedUrl;
                     } : (file: File) => {
