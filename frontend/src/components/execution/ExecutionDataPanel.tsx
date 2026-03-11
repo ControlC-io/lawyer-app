@@ -377,9 +377,6 @@ export const ExecutionDataPanel = ({
         case "signature":
           isValid = currentValue != null && currentValue !== "" && currentValue !== undefined;
           break;
-        case "multiple_files":
-          isValid = Array.isArray(currentValue) && currentValue.length > 0;
-          break;
         case "array":
           isValid = Array.isArray(currentValue) && currentValue.length > 0;
           // Also validate array items if they have required child fields
@@ -413,8 +410,6 @@ export const ExecutionDataPanel = ({
                   childValid = Array.isArray(childValue) && childValue.length > 0;
                 } else if (childType === "file") {
                   childValid = childValue != null && childValue !== "" && childValue !== undefined;
-                } else if (childType === "multiple_files") {
-                  childValid = Array.isArray(childValue) && childValue.length > 0;
                 } else {
                   childValid = childValue != null && childValue !== "";
                 }
@@ -638,7 +633,7 @@ export const ExecutionDataPanel = ({
 
       // Prefer sending file objects with original_name if present (helps validator)
       const dbValueObj = (execRow.values as any)?.[fieldUuid];
-      const isFileField = fieldType === "file" || fieldType === "multiple_files";
+      const isFileField = fieldType === "file";
       if (isFileField && dbValueObj && typeof dbValueObj === "object" && "original_name" in dbValueObj) {
         payload[nameKey] = dbValueObj;
         continue;
@@ -1012,9 +1007,9 @@ export const ExecutionDataPanel = ({
       const editingKey = `${execRow.id}-${fieldUuid}`;
       const editingValue = form.editingValues[editingKey];
       
-      // For file/multiple_files fields, preserve the original_name if available
+      // For file fields, preserve the original_name if available
       const fieldType = def.field_type || def.type;
-      const isFileField = fieldType === "file" || fieldType === "multiple_files";
+      const isFileField = fieldType === "file";
       let currentValue;
       
       if (editingValue !== undefined) {
@@ -1079,14 +1074,18 @@ export const ExecutionDataPanel = ({
           }}
           isUploading={form.uploadingFiles[fieldUuid]}
           signedUrl={form.signedUrls[`${execRow.id}-${fieldUuid}`]}
-          signedUrls={form.multipleFilesSignedUrls[`${execRow.id}-${fieldUuid}`]}
           // ArrayField props
           fieldConfig={fieldConfig}
+          getSignedUrl={form.getSignedUrl}
           childFields={getAllFields()}
           renderChild={(childField, childValue, onChildChange, hideLabel, required, readonly) => {
             // Use required from configuration if provided, otherwise fallback to field's own required property
             const isRequired = required !== undefined ? required : (childField.required || false);
             const isDisabled = disabled || !!readonly;
+            const childFieldType = childField.field_type || childField.type;
+            const isFileChild = childFieldType === 'file';
+            // For file sub-fields in arrays, resolve signed URL from the storage path
+            const childFilePath = isFileChild && childValue ? (typeof childValue === 'string' ? childValue : childValue?.value) : null;
             return (
               <FieldRenderer
                 field={childField}
@@ -1099,18 +1098,26 @@ export const ExecutionDataPanel = ({
                 isLoadingDynamic={form.loadingDynamicOptions[childField.id]}
                 dynamicError={form.dynamicOptionsErrors[childField.id]}
                 onRetryDynamic={() => form.retryDynamicOptions(childField.id)}
-                onUpload={file => {
+                onUpload={isFileChild ? async (file: File) => {
+                  markAiValidationDirty();
+                  const result = await form.uploadFileForArrayChild(childField.id, file, def.name, childField.name);
+                  onChildChange({ value: result.value, original_name: result.original_name });
+                  return result.signedUrl;
+                } : (file: File) => {
                   markAiValidationDirty();
                   return form.handleFileUpload(childField.id, file, cfg.ocrEnabled);
                 }}
                 onViewFile={onFileView}
-                onDelete={async (filePath: string) => {
+                onDelete={isFileChild ? async (filePath: string) => {
+                  markAiValidationDirty();
+                  await form.deleteFileFromStorage(filePath);
+                  onChildChange(null);
+                } : async (filePath: string) => {
                   markAiValidationDirty();
                   await form.handleFileDelete(childField.id, filePath);
                 }}
                 isUploading={form.uploadingFiles[childField.id]}
-                signedUrl={form.signedUrls[`${execRow.id}-${childField.id}`]}
-                signedUrls={form.multipleFilesSignedUrls[`${execRow.id}-${childField.id}`]}
+                signedUrl={isFileChild && childFilePath ? form.signedUrls[childFilePath] : form.signedUrls[`${execRow.id}-${childField.id}`]}
               />
             );
           }}
@@ -1396,29 +1403,38 @@ export const ExecutionDataPanel = ({
                 onUpload={file => {
                   markAiValidationDirty();
                   return form.handleFileUpload(fieldUuid, file, cfg.ocrEnabled);
-                }} onViewFile={onFileView} isUploading={form.uploadingFiles[fieldUuid]} signedUrl={form.signedUrls[`${execRow.id}-${fieldUuid}`]} signedUrls={form.multipleFilesSignedUrls[`${execRow.id}-${fieldUuid}`]}
+                }} onViewFile={onFileView} isUploading={form.uploadingFiles[fieldUuid]} signedUrl={form.signedUrls[`${execRow.id}-${fieldUuid}`]}
                 // ArrayField props
                 fieldConfig={fieldConfig}
                 childFields={getAllFields()} renderChild={(childField, childValue, onChildChange, hideLabel, required, readonly) => {
-                  // Logic for child fields in array
-                  // We don't have separate editingValues for array children in the hook structure shown
-                  // The ArrayField component manages the array structure and calls onChange with the new array
-                  // So we just need to render the field input
-                  // Use required from configuration if provided, otherwise fallback to field's own required property
                   const isRequired = required !== undefined ? required : (childField.required || false);
                   const isDisabled = disabled || !!readonly;
+                  const childFieldType = childField.field_type || childField.type;
+                  const isFileChild = childFieldType === 'file';
+                  const childFilePath = isFileChild && childValue ? (typeof childValue === 'string' ? childValue : childValue?.value) : null;
                   return <FieldRenderer field={childField} value={childValue} onChange={onChildChange} disabled={isDisabled}
                     required={isRequired}
                     labelPosition={hideLabel ? "hidden" : "top"}
-                    // Recursively pass props
                     dynamicOptions={form.dynamicOptions[childField.id]} isLoadingDynamic={form.loadingDynamicOptions[childField.id]} dynamicError={form.dynamicOptionsErrors[childField.id]} onRetryDynamic={() => form.retryDynamicOptions(childField.id)}
-                    // FileField props
-                    onUpload={file => {
+                    onUpload={isFileChild ? async (file: File) => {
+                      markAiValidationDirty();
+                      const result = await form.uploadFileForArrayChild(childField.id, file, def.name, childField.name);
+                      onChildChange({ value: result.value, original_name: result.original_name });
+                      return result.signedUrl;
+                    } : (file: File) => {
                       markAiValidationDirty();
                       return form.handleFileUpload(childField.id, file, cfg.ocrEnabled);
-                    }} onViewFile={onFileView} isUploading={form.uploadingFiles[childField.id]} signedUrl={form.signedUrls[`${execRow.id}-${childField.id}`]} signedUrls={form.multipleFilesSignedUrls[`${execRow.id}-${childField.id}`]} />;
+                    }}
+                    onViewFile={onFileView}
+                    onDelete={isFileChild ? async (filePath: string) => {
+                      markAiValidationDirty();
+                      await form.deleteFileFromStorage(filePath);
+                      onChildChange(null);
+                    } : undefined}
+                    isUploading={form.uploadingFiles[childField.id]}
+                    signedUrl={isFileChild && childFilePath ? form.signedUrls[childFilePath] : form.signedUrls[`${execRow.id}-${childField.id}`]} />;
                 }} />
-              {cfg.ocrEnabled && (fieldType === "file" || fieldType === "multiple_files") && (
+              {cfg.ocrEnabled && (fieldType === "file") && (
                 <>
                   <p className="text-xs text-muted-foreground mt-1">OCR will run automatically on uploaded documents.</p>
                   {form.ocrTriggeredFiles[fieldUuid] && (
@@ -2178,16 +2194,21 @@ export const ExecutionDataPanel = ({
                   // Dynamic options props for OptionField
                   dynamicOptions={form.dynamicOptions[field.id]} isLoadingDynamic={form.loadingDynamicOptions[field.id]} dynamicError={form.dynamicOptionsErrors[field.id]} onRetryDynamic={() => form.retryDynamicOptions(field.id)}
                   // FileField props
-                  onUpload={file => form.handleFileUpload(field.id, file)} onViewFile={onFileView} isUploading={form.uploadingFiles[field.id]} signedUrl={form.signedUrls[`${eds.id}-${field.id}`]} signedUrls={form.multipleFilesSignedUrls[`${eds.id}-${field.id}`]}
+                  onUpload={file => form.handleFileUpload(field.id, file)} onViewFile={onFileView} isUploading={form.uploadingFiles[field.id]} signedUrl={form.signedUrls[`${eds.id}-${field.id}`]}
                   // ArrayField props
                   fieldConfig={fieldConfig}
-                  childFields={getAllFields()} renderChild={(cf, cv, onChildChange, hideLabel, required, _readonly) => <FieldRenderer field={cf} value={cv} onChange={onChildChange || (() => { })} disabled={true}
+                  getSignedUrl={form.getSignedUrl}
+                  childFields={getAllFields()} renderChild={(cf, cv, onChildChange, hideLabel, required, _readonly) => {
+                    const cfType = cf.field_type || cf.type;
+                    const isFileChild = cfType === 'file';
+                    const cfFilePath = isFileChild && cv ? (typeof cv === 'string' ? cv : cv?.value) : null;
+                    return <FieldRenderer field={cf} value={cv} onChange={onChildChange || (() => { })} disabled={true}
                     required={required}
                     labelPosition={hideLabel ? "hidden" : "top"}
-                    // Recursively pass dynamic options props
                     dynamicOptions={form.dynamicOptions[cf.id]} isLoadingDynamic={form.loadingDynamicOptions[cf.id]} dynamicError={form.dynamicOptionsErrors[cf.id]} onRetryDynamic={() => form.retryDynamicOptions(cf.id)}
-                    // FileField props
-                    onUpload={file => form.handleFileUpload(cf.id, file)} onViewFile={onFileView} isUploading={form.uploadingFiles[cf.id]} signedUrl={form.signedUrls[`${eds.id}-${cf.id}`]} signedUrls={form.multipleFilesSignedUrls[`${eds.id}-${cf.id}`]} />} />;
+                    onUpload={file => form.handleFileUpload(cf.id, file)} onViewFile={onFileView} isUploading={form.uploadingFiles[cf.id]}
+                    signedUrl={isFileChild && cfFilePath ? form.signedUrls[cfFilePath] : form.signedUrls[`${eds.id}-${cf.id}`]} />;
+                  }} />;
               })}
             </div>;
           })}

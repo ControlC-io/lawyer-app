@@ -29,7 +29,6 @@ export const HistoricalStepView = ({
   const dateLocale = language === "fr" ? fr : enUS;
   const stepData = step?.step_data || {};
   const [signedUrls, setSignedUrls] = useState<Record<string, string>>({});
-  const [multipleFilesSignedUrls, setMultipleFilesSignedUrls] = useState<Record<string, Record<number, string>>>({});
   
   // Get form configuration from step to apply same settings (like compact_mode for arrays)
   const stepConfig = step?.workflow_steps?.config || {};
@@ -64,7 +63,6 @@ export const HistoricalStepView = ({
   useEffect(() => {
     const generateSignedUrls = async () => {
       const urls: Record<string, string> = {};
-      const multipleUrls: Record<string, Record<number, string>> = {};
       
       // Flatten all fields to find file and signature fields
       const allFieldsFlat = executionData.flatMap((eds: any) => eds.data_structures?.fields || []);
@@ -72,103 +70,86 @@ export const HistoricalStepView = ({
       // Find all file and signature fields with values
       const fileFields = allFieldsFlat.filter((field: any) => {
         const fieldType = field.field_type || field.type;
-        return (fieldType === 'file' || fieldType === 'multiple_files' || fieldType === 'signature') && stepData[field.id];
+        return (fieldType === 'file' || fieldType === 'signature') && stepData[field.id];
       });
 
+      // Helper to generate a signed URL for a single file path
+      const generateUrlForPath = async (filePath: string, originalName?: string): Promise<{ key: string; url: string } | null> => {
+        if (filePath.startsWith('http')) {
+          return { key: filePath, url: filePath };
+        }
+        const displayName = originalName || filePath.split('/').pop()?.replace(/^\d+_/, '') || undefined;
+        try {
+          const res = await api.post<{ signedUrl?: string }>('/api/files/signed-url', {
+            bucket: 'documents',
+            path: filePath,
+            ...(displayName ? { filename: displayName } : {}),
+          });
+          if (res?.signedUrl) return { key: filePath, url: res.signedUrl };
+        } catch (err) {
+          console.error(`Failed to generate signed URL for path ${filePath}:`, err);
+        }
+        return null;
+      };
+
       // Generate signed URLs for each file/signature field
-      await Promise.all(
-        fileFields.map(async (field: any) => {
-          const value = stepData[field.id];
-          const fieldType = field.field_type || field.type;
-          
-          if (!value) return;
+      const urlPromises: Promise<{ key: string; url: string } | null>[] = [];
 
-          // Handle multiple_files fields (arrays)
-          if (fieldType === 'multiple_files') {
-            // Extract file paths and original names from value
-            let filePaths: string[] = [];
-            let originalNames: (string | undefined)[] = [];
+      fileFields.forEach((field: any) => {
+        const value = stepData[field.id];
+        if (!value) return;
 
-            if (Array.isArray(value)) {
-              if (value.length > 0 && typeof value[0] === 'object' && value[0] !== null) {
-                filePaths = value.map((item: any) => item.value || item);
-                originalNames = value.map((item: any) => item.original_name);
-              } else {
-                filePaths = value;
-                originalNames = new Array(value.length).fill(undefined);
-              }
-            } else if (value && typeof value === 'object' && 'value' in value) {
-              filePaths = Array.isArray(value.value) ? value.value : [value.value];
-              originalNames = Array.isArray(value.original_name) ? value.original_name : new Array(filePaths.length).fill(undefined);
-            } else if (typeof value === 'string') {
-              filePaths = [value];
-              originalNames = [undefined];
+        let filePath: string | null = null;
+        let originalName: string | undefined;
+        if (typeof value === 'string') {
+          filePath = value;
+        } else if (value && typeof value === 'object' && 'value' in value) {
+          filePath = value.value;
+          originalName = value.original_name;
+        }
+
+        if (filePath) {
+          urlPromises.push(generateUrlForPath(filePath, originalName).then(result => {
+            if (result) return { key: field.id, url: result.url };
+            return null;
+          }));
+        }
+      });
+
+      // Also handle file sub-fields inside array items
+      const arrayFields = allFieldsFlat.filter((field: any) => {
+        const fieldType = field.field_type || field.type;
+        return fieldType === 'array' && !field.parent_item_id && stepData[field.id];
+      });
+
+      for (const arrayField of arrayFields) {
+        const arrayValue = stepData[arrayField.id];
+        if (!Array.isArray(arrayValue)) continue;
+
+        const childFileFields = allFieldsFlat.filter((f: any) => {
+          const ft = f.field_type || f.type;
+          return f.parent_item_id === arrayField.id && (ft === 'file' || ft === 'signature');
+        });
+
+        for (const childField of childFileFields) {
+          for (const item of arrayValue) {
+            const childVal = item[childField.id];
+            if (!childVal) continue;
+            const childFilePath = typeof childVal === 'string' ? childVal : childVal?.value;
+            const childOriginalName = typeof childVal === 'object' ? childVal?.original_name : undefined;
+            if (childFilePath && typeof childFilePath === 'string') {
+              urlPromises.push(generateUrlForPath(childFilePath, childOriginalName));
             }
-
-            const fieldUrls: Record<number, string> = {};
-            await Promise.all(
-              filePaths.map(async (filePath: string, index: number) => {
-                if (!filePath) return;
-
-                if (filePath.startsWith('http')) {
-                  fieldUrls[index] = filePath;
-                  return;
-                }
-
-                const displayName = originalNames[index] || filePath.split('/').pop()?.replace(/^\d+_/, '') || undefined;
-                try {
-                  const res = await api.post<{ signedUrl?: string }>('/api/files/signed-url', {
-                    bucket: 'documents',
-                    path: filePath,
-                    ...(displayName ? { filename: displayName } : {}),
-                  });
-                  if (res?.signedUrl) fieldUrls[index] = res.signedUrl;
-                } catch (err) {
-                  console.error(`Failed to generate signed URL for field ${field.id}, file ${index}:`, err);
-                }
-              })
-            );
-
-            if (Object.keys(fieldUrls).length > 0) {
-              multipleUrls[field.id] = fieldUrls;
-            }
-            return;
           }
+        }
+      }
 
-          // Handle single file and signature fields
-          // Value can be a string (path) or an object with value and original_name
-          let filePath: string | null = null;
-          let originalName: string | undefined;
-          if (typeof value === 'string') {
-            filePath = value;
-          } else if (value && typeof value === 'object' && 'value' in value) {
-            filePath = value.value;
-            originalName = value.original_name;
-          }
-
-          if (!filePath) return;
-
-          if (filePath.startsWith('http')) {
-            urls[field.id] = filePath;
-            return;
-          }
-
-          const displayName = originalName || filePath.split('/').pop()?.replace(/^\d+_/, '') || undefined;
-          try {
-            const res = await api.post<{ signedUrl?: string }>('/api/files/signed-url', {
-              bucket: 'documents',
-              path: filePath,
-              ...(displayName ? { filename: displayName } : {}),
-            });
-            if (res?.signedUrl) urls[field.id] = res.signedUrl;
-          } catch (err) {
-            console.error(`Failed to generate signed URL for field ${field.id}:`, err);
-          }
-        })
-      );
+      const results = await Promise.all(urlPromises);
+      for (const result of results) {
+        if (result) urls[result.key] = result.url;
+      }
 
       setSignedUrls(urls);
-      setMultipleFilesSignedUrls(multipleUrls);
     };
 
     if (executionData.length > 0) {
@@ -294,12 +275,9 @@ export const HistoricalStepView = ({
                       // I'll show it if it has a value using my hasValue check.
                       if (!hasValue(value)) return null;
 
-                      const fieldType = field.field_type || field.type;
-                      const isMultipleFiles = fieldType === 'multiple_files';
-
                       // Get field config for this field to apply settings like compact_mode
                       const fieldConfig = formFields[field.id];
-                      
+
                       return (
                         <div key={field.id}>
                           <FieldRenderer
@@ -310,8 +288,9 @@ export const HistoricalStepView = ({
                             childFields={allFields}
                             fieldConfig={fieldConfig}
                             renderChild={(childField, childValue, onChildChange, hideLabel, required) => {
-                              const childFieldType = childField.field_type || childField.type;
-                              const isChildMultipleFiles = childFieldType === 'multiple_files';
+                              const cfType = childField.field_type || childField.type;
+                              const isFileChild = cfType === 'file' || cfType === 'signature';
+                              const cfFilePath = isFileChild && childValue ? (typeof childValue === 'string' ? childValue : childValue?.value) : null;
                               return (
                                 <FieldRenderer
                                   field={childField}
@@ -320,16 +299,13 @@ export const HistoricalStepView = ({
                                   disabled={true}
                                   required={required}
                                   labelPosition={hideLabel ? "hidden" : "top"}
-                                  signedUrl={!isChildMultipleFiles ? signedUrls[childField.id] : undefined}
-                                  signedUrls={isChildMultipleFiles ? multipleFilesSignedUrls[childField.id] : undefined}
+                                  signedUrl={isFileChild && cfFilePath ? signedUrls[cfFilePath] : signedUrls[childField.id]}
                                   onViewFile={handleFileView}
-                                  // Recursion for deeper nesting if supported
                                 />
                               );
                             }}
                             onViewFile={handleFileView}
-                            signedUrl={!isMultipleFiles ? signedUrls[field.id] : undefined}
-                            signedUrls={isMultipleFiles ? multipleFilesSignedUrls[field.id] : undefined}
+                            signedUrl={signedUrls[field.id]}
                           />
                         </div>
                       );

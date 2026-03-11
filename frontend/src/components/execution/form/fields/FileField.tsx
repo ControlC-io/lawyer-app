@@ -18,6 +18,7 @@ interface FileFieldProps {
   isUploading?: boolean;
   signedUrl?: string;
   primaryColor?: string;
+  labelPosition?: "top" | "side" | "hidden";
 }
 
 // MIME types and corresponding extensions for native file picker (accept attribute).
@@ -145,7 +146,8 @@ export const FileField = ({
   required,
   isUploading,
   signedUrl,
-  primaryColor
+  primaryColor,
+  labelPosition = "top"
 }: FileFieldProps) => {
   const fileTriggerProps = portalFileTriggerProps(primaryColor);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -230,10 +232,12 @@ export const FileField = ({
 
   return (
     <div className="space-y-1.5 w-full">
-      <Label className="text-sm font-medium flex items-center gap-1">
-        {field.label || field.name || field.id}
-        {required && <span className="text-destructive">*</span>}
-      </Label>
+      {labelPosition !== "hidden" && (
+        <Label className="text-sm font-medium flex items-center gap-1">
+          {field.label || field.name || field.id}
+          {required && <span className="text-destructive">*</span>}
+        </Label>
+      )}
 
       <div className="flex items-center gap-2">
         <Input

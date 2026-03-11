@@ -1,9 +1,10 @@
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Plus, X, ChevronDown, ChevronUp, Copy } from "lucide-react";
+import { Plus, X, ChevronDown, ChevronUp, Copy, FileArchive, Loader2 } from "lucide-react";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
+import JSZip from "jszip";
 
 interface ArrayFieldProps {
   field: any;
@@ -19,6 +20,7 @@ interface ArrayFieldProps {
   enableAddItem?: boolean; // Show add item button (default true)
   enableDelete?: boolean; // Show delete row button (default true)
   primaryColor?: string;
+  getSignedUrl?: (path: string, filename?: string) => Promise<string | null>;
 }
 
 export const ArrayField = ({
@@ -35,10 +37,12 @@ export const ArrayField = ({
   enableAddItem = true,
   enableDelete = true,
   primaryColor,
+  getSignedUrl,
 }: ArrayFieldProps) => {
   const wrapperStyle = primaryColor ? ({ "--portal-primary": primaryColor } as React.CSSProperties) : undefined;
   const showRowActions = !disabled && (enableDuplicate || enableDelete);
   const [expandedItems, setExpandedItems] = useState<Record<number, boolean>>({});
+  const [isDownloadingZip, setIsDownloadingZip] = useState(false);
 
   const getMyChildFields = () => {
     let fields = childFields
@@ -48,7 +52,7 @@ export const ArrayField = ({
         const posB = b.position ?? 999999;
         return posA - posB;
       });
-    
+
     // Filter by configuration if provided
     if (arrayChildFieldsConfig) {
       fields = fields.filter((f) => {
@@ -57,14 +61,100 @@ export const ArrayField = ({
         return config ? config.shown : true;
       });
     }
-    
+
     return fields;
   };
 
   const myChildFields = getMyChildFields();
   // Always use compact/table mode for arrays (tabular view)
   const isCompactMode = true;
-  
+
+  // Detect file child fields and count uploaded files for ZIP download
+  const fileChildFields = childFields
+    .filter((f) => f.parent_item_id === field.id && (f.field_type === 'file' || f.type === 'file'));
+
+  const getFileEntries = (): { path: string; name: string }[] => {
+    if (fileChildFields.length === 0 || !value || value.length === 0) return [];
+    const entries: { path: string; name: string }[] = [];
+    for (const item of value) {
+      for (const fileField of fileChildFields) {
+        const fileValue = item[fileField.id];
+        if (!fileValue) continue;
+        const path = typeof fileValue === 'string' ? fileValue : fileValue?.value;
+        const name = typeof fileValue === 'object' ? fileValue?.original_name : undefined;
+        if (path) {
+          entries.push({
+            path,
+            name: name || path.split('/').pop()?.replace(/^\d+_/, '') || 'file',
+          });
+        }
+      }
+    }
+    return entries;
+  };
+
+  const fileEntries = getFileEntries();
+  const showZipDownload = fileEntries.length > 1;
+
+  const handleDownloadZip = async () => {
+    if (!getSignedUrl || fileEntries.length === 0) return;
+    setIsDownloadingZip(true);
+    try {
+      const zip = new JSZip();
+
+      // Pre-compute unique filenames to avoid race condition in Promise.all
+      const usedNames = new Set<string>();
+      const uniqueNames: string[] = fileEntries.map((entry) => {
+        let fileName = entry.name;
+        if (usedNames.has(fileName)) {
+          const ext = fileName.lastIndexOf('.');
+          const base = ext > 0 ? fileName.slice(0, ext) : fileName;
+          const extension = ext > 0 ? fileName.slice(ext) : '';
+          let counter = 1;
+          while (usedNames.has(fileName)) {
+            fileName = `${base} (${counter})${extension}`;
+            counter++;
+          }
+        }
+        usedNames.add(fileName);
+        return fileName;
+      });
+
+      await Promise.all(
+        fileEntries.map(async (entry, i) => {
+          try {
+            let url: string | null = null;
+            if (entry.path.startsWith('http')) {
+              url = entry.path;
+            } else {
+              url = await getSignedUrl(entry.path, entry.name);
+            }
+            if (!url) return;
+
+            const response = await fetch(url);
+            if (!response.ok) return;
+            const blob = await response.blob();
+
+            zip.file(uniqueNames[i], blob);
+          } catch (err) {
+            console.error(`Failed to fetch file for ZIP: ${entry.path}`, err);
+          }
+        })
+      );
+
+      const content = await zip.generateAsync({ type: 'blob' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(content);
+      link.download = `${field.label || field.name || 'files'}.zip`;
+      link.click();
+      URL.revokeObjectURL(link.href);
+    } catch (err) {
+      console.error('Failed to create ZIP:', err);
+    } finally {
+      setIsDownloadingZip(false);
+    }
+  };
+
   // Helper to get required status for a child field
   const getChildFieldRequired = (childFieldId: string): boolean => {
     if (arrayChildFieldsConfig) {
@@ -141,19 +231,38 @@ export const ArrayField = ({
     <div className="space-y-2">
       <div className="flex items-center justify-between">
         <Label className="text-sm font-medium">{field.label || field.name || field.id}</Label>
-        {!disabled && enableAddItem && (
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={handleAddItem}
-            className="h-8 px-2 lg:px-3 portal-primary-btn"
-            data-portal-color={primaryColor ? "true" : undefined}
-          >
-            <Plus className="h-4 w-4 mr-1" />
-            Add Item
-          </Button>
-        )}
+        <div className="flex items-center gap-2">
+          {showZipDownload && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={handleDownloadZip}
+              disabled={isDownloadingZip}
+              className="h-8 px-2 lg:px-3"
+            >
+              {isDownloadingZip ? (
+                <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+              ) : (
+                <FileArchive className="h-4 w-4 mr-1" />
+              )}
+              Download ZIP
+            </Button>
+          )}
+          {!disabled && enableAddItem && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={handleAddItem}
+              className="h-8 px-2 lg:px-3 portal-primary-btn"
+              data-portal-color={primaryColor ? "true" : undefined}
+            >
+              <Plus className="h-4 w-4 mr-1" />
+              Add Item
+            </Button>
+          )}
+        </div>
       </div>
 
       {(!value || value.length === 0) && (
@@ -191,8 +300,8 @@ export const ArrayField = ({
                           return (
                             <TableCell key={cf.id} className="align-top px-2 py-1.5">
                               {renderChild && renderChild(
-                                cf, 
-                                item[cf.id], 
+                                cf,
+                                item[cf.id],
                                 (val) => handleUpdateItem(index, cf.id, val),
                                 isCompactMode, // Hide labels in compact mode (they're in the table header)
                                 isRequired,
@@ -279,8 +388,8 @@ export const ArrayField = ({
                       return (
                         <div key={cf.id}>
                           {renderChild && renderChild(
-                            cf, 
-                            item[cf.id], 
+                            cf,
+                            item[cf.id],
                             (val) => handleUpdateItem(index, cf.id, val),
                             false, // Don't hide labels in non-compact mode
                             isRequired,
@@ -296,11 +405,10 @@ export const ArrayField = ({
           )}
         </div>
       )}
-      
+
       {field.description && (
         <p className="text-xs text-muted-foreground">{field.description}</p>
       )}
     </div>
   );
 };
-

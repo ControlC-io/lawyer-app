@@ -116,6 +116,139 @@ describe('Files Endpoints', () => {
       expect(response.body.details).toMatch(/both|Cannot/i);
     });
 
+    it('should upload a file to an array sub-field (append new item)', async () => {
+      (prisma.workflowExecution.findFirst as jest.Mock).mockResolvedValue({
+        id: 'exec-123',
+        workflow: {
+          data_structure: [
+            { id: 'arr1', name: 'documents', field_type: 'array' },
+            { id: 'file1', name: 'attachment', field_type: 'file', parent_item_id: 'arr1' },
+          ]
+        }
+      });
+      (prisma.workflowExecutionData.findFirst as jest.Mock).mockResolvedValue({
+        id: 'data-123',
+        values: { arr1: { value: [] } }
+      });
+
+      const response = await request(app)
+        .post('/api/files/workflows/executions/exec-123/files')
+        .set(mockAuthHeaders)
+        .send({
+          field_name: 'documents',
+          sub_field_name: 'attachment',
+          file_base64: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+          file_name: 'test.png'
+        });
+
+      expect(response.status).toBe(200);
+      expect(response.body.success).toBe(true);
+      expect(response.body.sub_field_name).toBe('attachment');
+      expect(response.body.index).toBe(0);
+      expect(mockUploadFile).toHaveBeenCalled();
+
+      const updateCall = (prisma.workflowExecutionData.update as jest.Mock).mock.calls[0][0];
+      const updatedArr = updateCall.data.values.arr1.value;
+      expect(updatedArr).toHaveLength(1);
+      expect(updatedArr[0]._id).toBeDefined();
+      expect(updatedArr[0].file1.value).toContain('executions/');
+      expect(updatedArr[0].file1.original_name).toBe('test.png');
+    });
+
+    it('should upload a file to an array sub-field at a specific index', async () => {
+      (prisma.workflowExecution.findFirst as jest.Mock).mockResolvedValue({
+        id: 'exec-123',
+        workflow: {
+          data_structure: [
+            { id: 'arr1', name: 'documents', field_type: 'array' },
+            { id: 'file1', name: 'attachment', field_type: 'file', parent_item_id: 'arr1' },
+          ]
+        }
+      });
+      (prisma.workflowExecutionData.findFirst as jest.Mock).mockResolvedValue({
+        id: 'data-123',
+        values: {
+          arr1: {
+            value: [
+              { _id: 'item-1', file1: null },
+              { _id: 'item-2', file1: null },
+            ]
+          }
+        }
+      });
+
+      const response = await request(app)
+        .post('/api/files/workflows/executions/exec-123/files')
+        .set(mockAuthHeaders)
+        .send({
+          field_name: 'documents',
+          sub_field_name: 'attachment',
+          index: 1,
+          file_base64: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+          file_name: 'doc.png'
+        });
+
+      expect(response.status).toBe(200);
+      expect(response.body.index).toBe(1);
+
+      const updateCall = (prisma.workflowExecutionData.update as jest.Mock).mock.calls[0][0];
+      const updatedArr = updateCall.data.values.arr1.value;
+      expect(updatedArr).toHaveLength(2);
+      expect(updatedArr[1].file1.value).toContain('executions/');
+      expect(updatedArr[1].file1.original_name).toBe('doc.png');
+      expect(updatedArr[0].file1).toBeNull();
+    });
+
+    it('should return 400 when sub_field_name targets a non-array field', async () => {
+      (prisma.workflowExecution.findFirst as jest.Mock).mockResolvedValue({
+        id: 'exec-123',
+        workflow: {
+          data_structure: [
+            { id: 'f1', name: 'avatar', field_type: 'file' },
+          ]
+        }
+      });
+
+      const response = await request(app)
+        .post('/api/files/workflows/executions/exec-123/files')
+        .set(mockAuthHeaders)
+        .send({
+          field_name: 'avatar',
+          sub_field_name: 'attachment',
+          file_base64: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+        });
+
+      expect(response.status).toBe(400);
+    });
+
+    it('should return 400 when index is out of range for array sub-field', async () => {
+      (prisma.workflowExecution.findFirst as jest.Mock).mockResolvedValue({
+        id: 'exec-123',
+        workflow: {
+          data_structure: [
+            { id: 'arr1', name: 'documents', field_type: 'array' },
+            { id: 'file1', name: 'attachment', field_type: 'file', parent_item_id: 'arr1' },
+          ]
+        }
+      });
+      (prisma.workflowExecutionData.findFirst as jest.Mock).mockResolvedValue({
+        id: 'data-123',
+        values: { arr1: { value: [{ _id: 'item-1' }] } }
+      });
+
+      const response = await request(app)
+        .post('/api/files/workflows/executions/exec-123/files')
+        .set(mockAuthHeaders)
+        .send({
+          field_name: 'documents',
+          sub_field_name: 'attachment',
+          index: 5,
+          file_base64: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+        });
+
+      expect(response.status).toBe(400);
+    });
+
     it('should return 404 when execution is not found', async () => {
       (prisma.workflowExecution.findFirst as jest.Mock).mockResolvedValue(null);
 

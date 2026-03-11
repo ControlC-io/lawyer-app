@@ -4,7 +4,7 @@ import { BooleanField } from "./fields/BooleanField";
 import { DateField } from "./fields/DateField";
 import { OptionField } from "./fields/OptionField";
 import { FileField } from "./fields/FileField";
-import { MultipleFilesField } from "./fields/MultipleFilesField";
+
 import { ArrayField } from "./fields/ArrayField";
 import { HtmlField } from "./fields/HtmlField";
 import { TimeField } from "./fields/TimeField";
@@ -23,16 +23,17 @@ interface FieldRendererProps {
   isLoadingDynamic?: boolean;
   dynamicError?: { message: string; type: string };
   onRetryDynamic?: () => void;
-  // Props for FileField and MultipleFilesField
+  // Props for FileField
   onUpload?: (file: File) => void;
   onViewFile?: (url: string, name: string, path: string) => void;
   onDelete?: (filePath: string) => Promise<void>; // Delete file from storage
   isUploading?: boolean;
   signedUrl?: string;
-  signedUrls?: Record<number, string>; // For multiple files: index to signed URL
   // Context for ArrayField to render children
   childFields?: any[]; // The full list of fields to find children from
   renderChild?: (field: any, value: any, onChange: (val: any) => void, hideLabel?: boolean) => React.ReactNode;
+  // Callback to get a signed URL for a storage path (used by ArrayField for ZIP download)
+  getSignedUrl?: (path: string, filename?: string) => Promise<string | null>;
   // Field configuration from form settings
   fieldConfig?: {
     compact_mode?: boolean;
@@ -103,22 +104,6 @@ export const FieldRenderer = (props: FieldRendererProps) => {
         primaryColor={primaryColor}
       />;
 
-    case "multiple_files":
-      return <MultipleFilesField
-        field={field}
-        value={value}
-        onChange={onChange}
-        disabled={disabled}
-        required={required}
-        labelPosition={labelPosition}
-        onUpload={otherProps.onUpload!}
-        onView={otherProps.onViewFile!}
-        onDelete={otherProps.onDelete}
-        isUploading={otherProps.isUploading}
-        signedUrls={otherProps.signedUrls}
-        primaryColor={primaryColor}
-      />;
-
     case "signature":
       return <SignatureField
         field={field}
@@ -149,6 +134,7 @@ export const FieldRenderer = (props: FieldRendererProps) => {
         enableAddItem={otherProps.fieldConfig?.array_enable_add_item !== false}
         enableDelete={otherProps.fieldConfig?.array_enable_delete !== false}
         primaryColor={primaryColor}
+        getSignedUrl={otherProps.getSignedUrl}
       />;
 
     case "html":

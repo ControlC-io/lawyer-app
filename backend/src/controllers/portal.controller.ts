@@ -601,7 +601,7 @@ export const portalController = {
       const fieldsList = dataStructure?.fields ?? (Array.isArray(dataStructure) ? dataStructure : []);
       const fileFieldIds = new Set(
         fieldsList
-          .filter((f: any) => ['file', 'multiple_files', 'signature'].includes(f.field_type || f.type || ''))
+          .filter((f: any) => ['file', 'signature'].includes(f.field_type || f.type || ''))
           .map((f: any) => f.id)
       );
 

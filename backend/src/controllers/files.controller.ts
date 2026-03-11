@@ -54,7 +54,7 @@ export const filesController = {
     try {
       if (!(await resolveCompanyForRequest(req, res))) return;
       const { executionId } = req.params;
-      const { field_name, file_url, file_base64, file_name, mime_type } = req.body;
+      const { field_name, file_url, file_base64, file_name, mime_type, sub_field_name, index } = req.body;
       const companyId = req.company!.id;
 
       if (!executionId || !field_name) {
@@ -119,6 +119,14 @@ export const filesController = {
       }
 
       const fieldId = field.id;
+
+      // Early validation: if sub_field_name is provided, field must be an array
+      if (sub_field_name && field.field_type !== 'array') {
+        return res.status(400).json({
+          error: 'Invalid field type',
+          details: `Field "${field_name}" is not an array field. sub_field_name can only be used with array fields.`,
+        });
+      }
 
       // Prepare file data
       let fileBuffer: Buffer;
@@ -198,40 +206,88 @@ export const filesController = {
 
       // Update execution data with file path
       const currentValues = (executionDataRow.values || {}) as Record<string, any>;
-      const fieldType = field.field_type || 'file';
-      const isMultipleFiles = fieldType === 'multiple_files';
+      let updatedValues: Record<string, any>;
+      let responseExtra: Record<string, any> = {};
 
-      let updatedFieldValue: any;
+      if (sub_field_name) {
+        // --- Array sub-field upload ---
 
-      if (isMultipleFiles) {
-        const currentFileArray = Array.isArray(currentValues[fieldId]?.value)
-          ? currentValues[fieldId].value
-          : currentValues[fieldId]?.value
-          ? [currentValues[fieldId].value]
+        // Find the sub-field definition by name among children of this array field
+        const subField = (workflow.data_structure as any[]).find(
+          (f: any) => f.name === sub_field_name && f.parent_item_id === fieldId
+        );
+
+        if (!subField) {
+          return res.status(404).json({
+            error: 'Sub-field not found',
+            details: `Sub-field "${sub_field_name}" not found in array field "${field_name}"`,
+          });
+        }
+
+        if (subField.field_type !== 'file') {
+          return res.status(400).json({
+            error: 'Invalid sub-field type',
+            details: `Sub-field "${sub_field_name}" is not a file field.`,
+          });
+        }
+
+        const subFieldId = subField.id;
+        const currentArray = Array.isArray(currentValues[fieldId]?.value)
+          ? [...currentValues[fieldId].value]
           : [];
-        const currentOriginalNames = Array.isArray(currentValues[fieldId]?.original_name)
-          ? currentValues[fieldId].original_name
-          : currentValues[fieldId]?.original_name
-          ? [currentValues[fieldId].original_name]
-          : [];
 
-        updatedFieldValue = {
-          ...currentValues[fieldId],
-          value: [...currentFileArray, storagePath],
-          original_name: [...currentOriginalNames, fileName],
-        };
-      } else {
-        updatedFieldValue = {
-          ...currentValues[fieldId],
+        const fileValue = {
           value: storagePath,
           original_name: fileName,
         };
-      }
 
-      const updatedValues = {
-        ...currentValues,
-        [fieldId]: updatedFieldValue,
-      };
+        let targetIndex: number;
+
+        if (index !== undefined && index !== null) {
+          // Update existing item at specific index
+          if (index < 0 || index >= currentArray.length) {
+            return res.status(400).json({
+              error: 'Index out of range',
+              details: `Index ${index} is out of range. Array has ${currentArray.length} items.`,
+            });
+          }
+          currentArray[index] = {
+            ...currentArray[index],
+            [subFieldId]: fileValue,
+          };
+          targetIndex = index;
+        } else {
+          // Append new item
+          const newItem: Record<string, any> = {
+            _id: crypto.randomUUID(),
+            [subFieldId]: fileValue,
+          };
+          currentArray.push(newItem);
+          targetIndex = currentArray.length - 1;
+        }
+
+        updatedValues = {
+          ...currentValues,
+          [fieldId]: {
+            ...currentValues[fieldId],
+            value: currentArray,
+          },
+        };
+
+        responseExtra = {
+          sub_field_name,
+          index: targetIndex,
+        };
+      } else {
+        updatedValues = {
+          ...currentValues,
+          [fieldId]: {
+            ...currentValues[fieldId],
+            value: storagePath,
+            original_name: fileName,
+          },
+        };
+      }
 
       await prisma.workflowExecutionData.update({
         where: { id: executionDataRow.id },
@@ -244,6 +300,7 @@ export const filesController = {
         file_path: storagePath,
         field_name,
         field_id: fieldId,
+        ...responseExtra,
       });
     } catch (error) {
       console.error('Error uploading execution file:', error);
@@ -527,98 +584,92 @@ export const filesController = {
         return res.status(400).json({ error: 'Source file not configured' });
       }
 
-      // Resolve source file from execution data
+      // Fetch workflow data_structure to check if source field is an array child
+      const workflow = await prisma.workflow.findFirst({
+        where: {
+          executions: { some: { id: executionId } },
+        },
+        select: { data_structure: true },
+      });
+
+      const dataStructure = (workflow?.data_structure as any[]) || [];
+      const sourceField = dataStructure.find((f: any) => f.id === sourceFileId);
+
+      // Determine if source file field is a child of an array
+      // parent_item_id is "" (empty string) for top-level fields, or a UUID for array children
+      const parentArrayId = sourceField?.parent_item_id || null;
+      const isArrayChild = !!parentArrayId;
+
+      console.log(`[processFileStep] sourceFileId=${sourceFileId}, isArrayChild=${isArrayChild}, parentArrayId=${parentArrayId}, sourceField found=${!!sourceField}`);
+
       const allValues = (executionData.values || {}) as Record<string, any>;
-      const fileValueWrapper = allValues[sourceFileId];
 
-      if (!fileValueWrapper) {
-        return res.status(400).json({
-          error: `File data not found for field ${sourceFileId}`,
-        });
-      }
-
-      let sourceFilePath: string;
-      if (typeof fileValueWrapper === 'object' && fileValueWrapper.value !== undefined) {
-        sourceFilePath = fileValueWrapper.value;
-      } else if (typeof fileValueWrapper === 'string') {
-        sourceFilePath = fileValueWrapper;
-      } else {
-        return res.status(400).json({
-          error: `Unexpected file value format for field ${sourceFileId}`,
-        });
-      }
-
-      // Download file from MinIO
-      const fileStream = await storageService.downloadFile(
-        storageService.getDocumentsBucket(),
-        sourceFilePath
-      );
-
-      // Convert stream to buffer
-      const chunks: Buffer[] = [];
-      for await (const chunk of fileStream) {
-        chunks.push(Buffer.from(chunk));
-      }
-      const fileBuffer = Buffer.concat(chunks);
-
-      // Extract original filename
-      const originalFileName =
-        sourceFilePath.split('?')[0].split('/').pop()?.replace(/^\d+_/, '') ||
-        'unknown_file';
-
-      // Upload to new location
-      const newPath = `companies/${execution.company_id}/${Date.now()}_${originalFileName}`;
-      const fileStat = await storageService.getFileStat(
-        storageService.getDocumentsBucket(),
-        sourceFilePath
-      );
-
-      await storageService.uploadFile(
-        storageService.getDocumentsBucket(),
-        newPath,
-        fileBuffer,
-        fileStat.contentType
-      );
-
-      // Resolve metadata
-      const metadataValues: Array<{ keyId: string; value: string }> = [];
-
+      // Pre-fetch metadata keys (shared for both paths)
+      let keyMap = new Map<string, string>();
       if (metadataConfig.length > 0) {
         const metadataKeys = await prisma.filesMetadataKey.findMany({
           where: { company_id: execution.company_id! },
           select: { id: true, name: true },
         });
-
-        const keyMap = new Map<string, string>();
         for (const key of metadataKeys) {
           if (key.name != null) {
             keyMap.set(key.name, key.id);
           }
         }
+      }
 
+      // Helper: process a single file (download, copy, create record, attach metadata)
+      const processSingleFile = async (
+        sourceFilePath: string,
+        resolveBindValue: (bindId: string) => any,
+      ): Promise<{ fileId: string; filePath: string } | null> => {
+        if (!sourceFilePath) return null;
+
+        // Download file from MinIO
+        const fileStream = await storageService.downloadFile(
+          storageService.getDocumentsBucket(),
+          sourceFilePath
+        );
+        const chunks: Buffer[] = [];
+        for await (const chunk of fileStream) {
+          chunks.push(Buffer.from(chunk));
+        }
+        const fileBuffer = Buffer.concat(chunks);
+
+        const originalFileName =
+          sourceFilePath.split('?')[0].split('/').pop()?.replace(/^\d+_/, '') ||
+          'unknown_file';
+
+        const newPath = `companies/${execution.company_id}/${Date.now()}_${originalFileName}`;
+        const fileStat = await storageService.getFileStat(
+          storageService.getDocumentsBucket(),
+          sourceFilePath
+        );
+
+        await storageService.uploadFile(
+          storageService.getDocumentsBucket(),
+          newPath,
+          fileBuffer,
+          fileStat.contentType
+        );
+
+        // Resolve metadata
+        const metadataValues: Array<{ keyId: string; value: string }> = [];
         for (const item of metadataConfig) {
-          const keyName = item.key;
-          const keyId = keyMap.get(keyName);
-
+          const keyId = keyMap.get(item.key);
           if (!keyId) {
-            console.warn(`Metadata key not found: ${keyName}`);
+            console.warn(`Metadata key not found: ${item.key}`);
             continue;
           }
 
           let value = item.value;
-
-          if (
-            item.mode === 'bind' &&
-            value.startsWith('{{') &&
-            value.endsWith('}}')
-          ) {
+          if (item.mode === 'bind' && value.startsWith('{{') && value.endsWith('}}')) {
             const bindId = value.slice(2, -2);
-            const bindValueWrapper = allValues[bindId];
-            if (bindValueWrapper !== undefined) {
-              value =
-                typeof bindValueWrapper === 'object' && bindValueWrapper.value !== undefined
-                  ? bindValueWrapper.value
-                  : bindValueWrapper;
+            const resolved = resolveBindValue(bindId);
+            if (resolved !== undefined) {
+              value = typeof resolved === 'object' && resolved?.value !== undefined
+                ? resolved.value
+                : resolved;
             } else {
               value = null;
             }
@@ -628,39 +679,126 @@ export const filesController = {
             metadataValues.push({ keyId, value: String(value) });
           }
         }
-      }
 
-      // Create file record
-      const newFile = await prisma.file.create({
-        data: {
-          name: originalFileName,
-          folder_id: null,
-          storage_path: newPath,
-          size_bytes: BigInt(fileBuffer.length),
-          mime_type: fileStat.contentType || null,
-          company_id: execution.company_id!,
-          uploaded_by: executionStep.assigned_to_user_id,
-        },
-      });
-
-      // Insert metadata values
-      if (metadataValues.length > 0) {
-        await prisma.filesMetadataValue.createMany({
-          data: metadataValues.map((m) => ({
-            files_id: newFile.id,
-            metadata_id: m.keyId,
-            value: m.value,
+        // Create file record
+        const newFile = await prisma.file.create({
+          data: {
+            name: originalFileName,
+            folder_id: null,
+            storage_path: newPath,
+            size_bytes: BigInt(fileBuffer.length),
+            mime_type: fileStat.contentType || null,
             company_id: execution.company_id!,
-          })),
+            uploaded_by: executionStep.assigned_to_user_id,
+          },
         });
-      }
 
-      // Trigger OCR if enabled in node config
-      if (config.ocrEnabled) {
-        const { processDocumentOcr } = require('../services/ocr.service');
-        processDocumentOcr(newFile.id).catch((err: Error) => {
-          console.error(`OCR processing failed for workflow file ${newFile.id}:`, err);
-        });
+        if (metadataValues.length > 0) {
+          await prisma.filesMetadataValue.createMany({
+            data: metadataValues.map((m) => ({
+              files_id: newFile.id,
+              metadata_id: m.keyId,
+              value: m.value,
+              company_id: execution.company_id!,
+            })),
+          });
+        }
+
+        // Trigger OCR if enabled
+        if (config.ocrEnabled) {
+          const { processDocumentOcr } = require('../services/ocr.service');
+          processDocumentOcr(newFile.id).catch((err: Error) => {
+            console.error(`OCR processing failed for workflow file ${newFile.id}:`, err);
+          });
+        }
+
+        return { fileId: newFile.id, filePath: sourceFilePath };
+      };
+
+      let stepData: any;
+
+      if (isArrayChild && parentArrayId) {
+        // Source file is inside an array — iterate all items
+        const arrayWrapper = allValues[parentArrayId];
+        console.log(`[processFileStep] arrayWrapper type=${typeof arrayWrapper}, isArray=${Array.isArray(arrayWrapper)}, hasValue=${!!(arrayWrapper?.value)}`);
+
+        const arrayItems: any[] = Array.isArray(arrayWrapper)
+          ? arrayWrapper
+          : (arrayWrapper?.value && Array.isArray(arrayWrapper.value)
+            ? arrayWrapper.value
+            : []);
+
+        console.log(`[processFileStep] arrayItems count=${arrayItems.length}`);
+
+        if (arrayItems.length === 0) {
+          return res.status(400).json({ error: 'Array is empty, no files to process' });
+        }
+
+        const results: Array<{ fileId: string; filePath: string }> = [];
+        for (let i = 0; i < arrayItems.length; i++) {
+          const item = arrayItems[i];
+          const fileVal = item[sourceFileId];
+          if (!fileVal) continue; // Skip items without a file
+
+          const filePath = typeof fileVal === 'object' && fileVal.value !== undefined
+            ? fileVal.value
+            : typeof fileVal === 'string' ? fileVal : null;
+          if (!filePath) continue;
+
+          // For array child metadata binds: resolve from the same array item at index i
+          const result = await processSingleFile(filePath, (bindId) => {
+            // Check if bind target is a sibling field in the same array
+            const bindField = dataStructure.find((f: any) => f.id === bindId);
+            if (bindField?.parent_item_id === parentArrayId) {
+              // Sibling field — resolve from same array item
+              return item[bindId];
+            }
+            // Top-level field — resolve from execution values
+            return allValues[bindId];
+          });
+
+          if (result) results.push(result);
+        }
+
+        if (results.length === 0) {
+          return res.status(400).json({ error: 'No files found in array items' });
+        }
+
+        stepData = {
+          success: true,
+          files: results.map(r => ({ new_file_id: r.fileId, original_file_id: r.filePath })),
+          count: results.length,
+        };
+      } else {
+        // Standard single file processing (top-level file field)
+        const fileValueWrapper = allValues[sourceFileId];
+        if (!fileValueWrapper) {
+          return res.status(400).json({
+            error: `File data not found for field ${sourceFileId}`,
+          });
+        }
+
+        let sourceFilePath: string;
+        if (typeof fileValueWrapper === 'object' && fileValueWrapper.value !== undefined) {
+          sourceFilePath = fileValueWrapper.value;
+        } else if (typeof fileValueWrapper === 'string') {
+          sourceFilePath = fileValueWrapper;
+        } else {
+          return res.status(400).json({
+            error: `Unexpected file value format for field ${sourceFileId}`,
+          });
+        }
+
+        const result = await processSingleFile(sourceFilePath, (bindId) => allValues[bindId]);
+        if (!result) {
+          return res.status(400).json({ error: 'Failed to process file' });
+        }
+
+        stepData = {
+          success: true,
+          new_file_id: result.fileId,
+          original_file_id: result.filePath,
+        };
       }
 
       // Mark step as completed
@@ -669,11 +807,7 @@ export const filesController = {
         data: {
           status: 'completed',
           completed_at: new Date(),
-          step_data: {
-            success: true,
-            new_file_id: newFile.id,
-            original_file_id: sourceFilePath,
-          },
+          step_data: stepData,
         },
       });
 

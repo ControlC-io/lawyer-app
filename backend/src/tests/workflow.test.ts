@@ -42,7 +42,7 @@ jest.mock('../services/ai.service', () => ({
   }
 }));
 
-// Mock Storage Service (for getExecutionData file/multiple_files branches)
+// Mock Storage Service (for getExecutionData file field branches)
 jest.mock('../services/storage.service', () => ({
   storageService: {
     getSignedUrl: jest.fn().mockResolvedValue('https://signed.example/'),
@@ -673,7 +673,8 @@ describe('Workflow Endpoints', () => {
         workflow: {
           data_structure: [
             { id: 'f1', name: 'File1', field_type: 'file' },
-            { id: 'f2', name: 'Files2', field_type: 'multiple_files' },
+            { id: 'f2', name: 'Files2', field_type: 'array' },
+            { id: 'f2-child', name: 'FileItem', field_type: 'file', parent_item_id: 'f2' },
           ],
         },
         execution_steps: [],
@@ -681,7 +682,7 @@ describe('Workflow Endpoints', () => {
           {
             values: {
               f1: { value: 'path/to/file1.pdf' },
-              f2: { value: ['path/a', 'path/b'] },
+              f2: { value: [{ 'f2-child': { value: 'path/a' } }, { 'f2-child': { value: 'path/b' } }] },
             },
           },
         ],
@@ -827,6 +828,94 @@ describe('Workflow Endpoints', () => {
         });
       expect(response.status).toBe(200);
       expect(prisma.workflowExecutionData.update).toHaveBeenCalled();
+    });
+  });
+
+  describe('PATCH /api/workflows/executions/:executionId/data/array-item', () => {
+    const mockDataStructure = [
+      { id: 'arr1', name: 'documents', field_type: 'array' },
+      { id: 'file1', name: 'attachment', field_type: 'file', parent_item_id: 'arr1' },
+      { id: 'text1', name: 'description', field_type: 'text', parent_item_id: 'arr1' },
+    ];
+
+    it('should update a sub-field in an existing array item', async () => {
+      (prisma.company.findUnique as jest.Mock).mockResolvedValue(mockCompany);
+      (prisma.workflowExecution.findFirst as jest.Mock).mockResolvedValue({
+        id: 'exec-123',
+        workflow: { data_structure: mockDataStructure },
+      });
+      (prisma.workflowExecutionData.findFirst as jest.Mock).mockResolvedValue({
+        id: 'data-123',
+        values: {
+          arr1: {
+            value: [
+              { _id: 'item-1', file1: { value: 'path/file.pdf', original_name: 'file.pdf' } },
+            ],
+          },
+        },
+      });
+
+      const response = await request(app)
+        .patch('/api/workflows/executions/exec-123/data/array-item')
+        .set(mockAuthHeaders)
+        .send({
+          field_name: 'documents',
+          index: 0,
+          sub_field_name: 'description',
+          value: 'Invoice Q1',
+        });
+
+      expect(response.status).toBe(200);
+      expect(response.body.success).toBe(true);
+
+      const updateCall = (prisma.workflowExecutionData.update as jest.Mock).mock.calls[0][0];
+      const updatedArr = updateCall.data.values.arr1.value;
+      expect(updatedArr[0].text1).toBe('Invoice Q1');
+      // File sub-field should be preserved
+      expect(updatedArr[0].file1.value).toBe('path/file.pdf');
+    });
+
+    it('should return 400 when index is out of range', async () => {
+      (prisma.company.findUnique as jest.Mock).mockResolvedValue(mockCompany);
+      (prisma.workflowExecution.findFirst as jest.Mock).mockResolvedValue({
+        id: 'exec-123',
+        workflow: { data_structure: mockDataStructure },
+      });
+      (prisma.workflowExecutionData.findFirst as jest.Mock).mockResolvedValue({
+        id: 'data-123',
+        values: { arr1: { value: [{ _id: 'item-1' }] } },
+      });
+
+      const response = await request(app)
+        .patch('/api/workflows/executions/exec-123/data/array-item')
+        .set(mockAuthHeaders)
+        .send({ field_name: 'documents', index: 5, sub_field_name: 'description', value: 'x' });
+
+      expect(response.status).toBe(400);
+    });
+
+    it('should return 400 when field is not an array', async () => {
+      (prisma.company.findUnique as jest.Mock).mockResolvedValue(mockCompany);
+      (prisma.workflowExecution.findFirst as jest.Mock).mockResolvedValue({
+        id: 'exec-123',
+        workflow: { data_structure: [{ id: 'f1', name: 'title', field_type: 'text' }] },
+      });
+
+      const response = await request(app)
+        .patch('/api/workflows/executions/exec-123/data/array-item')
+        .set(mockAuthHeaders)
+        .send({ field_name: 'title', index: 0, sub_field_name: 'description', value: 'x' });
+
+      expect(response.status).toBe(400);
+    });
+
+    it('should return 400 when required fields are missing', async () => {
+      const response = await request(app)
+        .patch('/api/workflows/executions/exec-123/data/array-item')
+        .set(mockAuthHeaders)
+        .send({ field_name: 'documents' });
+
+      expect(response.status).toBe(400);
     });
   });
 

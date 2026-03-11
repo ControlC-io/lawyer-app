@@ -76,6 +76,17 @@ router.put(
 );
 
 /**
+ * PATCH /api/workflows/executions/:executionId/data/array-item
+ * Update a single sub-field in an existing array item
+ * Auth: API Key
+ */
+router.patch(
+  '/executions/:executionId/data/array-item',
+  apiKeyAuth,
+  asyncHandler(workflowController.patchArrayItem)
+);
+
+/**
  * PATCH /api/workflows/executions/:executionId/name
  * Rename an execution
  * Auth: API Key

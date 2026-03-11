@@ -21,7 +21,6 @@ export const useExecutionForm = (
   const [uploadingFiles, setUploadingFiles] = useState<Record<string, boolean>>({});
   const [ocrTriggeredFiles, setOcrTriggeredFiles] = useState<Record<string, boolean>>({});
   const [signedUrls, setSignedUrls] = useState<Record<string, string>>({});
-  const [multipleFilesSignedUrls, setMultipleFilesSignedUrls] = useState<Record<string, Record<number, string>>>({});
   const [dynamicOptions, setDynamicOptions] = useState<Record<string, string[]>>({});
   const [loadingDynamicOptions, setLoadingDynamicOptions] = useState<Record<string, boolean>>({});
   const [dynamicOptionsErrors, setDynamicOptionsErrors] = useState<Record<string, { message: string; type: 'api_error' | 'format_error' }>>({});
@@ -159,44 +158,34 @@ export const useExecutionForm = (
                 newSignedUrls[cacheKey] = signedUrl;
               }
             }
-          } else if (fieldType === "multiple_files") {
-            // Normalize value: can be array of paths, object { value: paths }, or array of { value, original_name }
-            const raw = values[field.id];
-            let filePaths: string[] = [];
-            if (Array.isArray(raw)) {
-              if (raw.length > 0 && typeof raw[0] === "object" && raw[0] !== null) {
-                filePaths = raw.map((item: any) => item.value ?? item);
-              } else {
-                filePaths = raw;
-              }
-            } else if (raw && typeof raw === "object" && "value" in raw) {
-              filePaths = Array.isArray(raw.value) ? raw.value : [raw.value];
-            }
-            const rawOriginalNames =
-              raw && typeof raw === "object" && Array.isArray((raw as { original_name?: string[] }).original_name)
-                ? (raw as { original_name: string[] }).original_name
-                : null;
-            if (filePaths.length > 0) {
-              const cacheKey = `${eds.id}-${field.id}`;
-              const signedUrlsMap: Record<number, string> = {};
+          }
 
-              for (let i = 0; i < filePaths.length; i++) {
-                const filePath = filePaths[i];
-                if (filePath && typeof filePath === "string") {
-                  const originalName = rawOriginalNames?.[i];
-                  const displayName =
-                    typeof originalName === "string" && originalName.length > 0
-                      ? originalName
-                      : filePath.split("/").pop()?.replace(/^\d+_/, "") ?? undefined;
-                  const signedUrl = await getSignedUrl(filePath, displayName);
-                  if (signedUrl) {
-                    signedUrlsMap[i] = signedUrl;
+          // Handle file sub-fields inside array items
+          if (fieldType === "array" && !field.parent_item_id) {
+            const arrayValue = values[field.id]?.value;
+            if (arrayValue && Array.isArray(arrayValue)) {
+              // Find child fields that are file type
+              const childFileFields = fields.filter(
+                (f) => f.parent_item_id === field.id && ((f.field_type || f.type) === "file" || (f.field_type || f.type) === "signature")
+              );
+              for (const childField of childFileFields) {
+                for (const item of arrayValue) {
+                  const childVal = item[childField.id];
+                  if (!childVal) continue;
+                  const childFilePath = typeof childVal === "string" ? childVal : childVal?.value;
+                  const childOriginalName = typeof childVal === "object" ? childVal?.original_name : undefined;
+                  if (childFilePath && typeof childFilePath === "string") {
+                    const displayName =
+                      typeof childOriginalName === "string" && childOriginalName.length > 0
+                        ? childOriginalName
+                        : childFilePath.split("/").pop()?.replace(/^\d+_/, "") ?? undefined;
+                    const signedUrl = await getSignedUrl(childFilePath, displayName);
+                    if (signedUrl) {
+                      // Key by storage path so FileField can look it up
+                      newSignedUrls[childFilePath] = signedUrl;
+                    }
                   }
                 }
-              }
-
-              if (Object.keys(signedUrlsMap).length > 0) {
-                setMultipleFilesSignedUrls((prev) => ({ ...prev, [cacheKey]: signedUrlsMap }));
               }
             }
           }
@@ -387,10 +376,7 @@ export const useExecutionForm = (
       );
       const filePath = res?.file_path;
       const signedUrl = filePath ? await getSignedUrl(filePath, file.name) : null;
-      if (fieldType === "multiple_files" && signedUrl) {
-        const currentSignedUrls = multipleFilesSignedUrls[cacheKey] || {};
-        setMultipleFilesSignedUrls((prev) => ({ ...prev, [cacheKey]: { ...currentSignedUrls, 0: signedUrl } }));
-      } else if (signedUrl) {
+      if (signedUrl) {
         setSignedUrls((prev) => ({ ...prev, [cacheKey]: signedUrl }));
       }
       if (ocrEnabled) {
@@ -554,28 +540,70 @@ export const useExecutionForm = (
     }
   };
 
+  /**
+   * Upload a file for use as an array child field value.
+   * Unlike handleFileUpload, this does NOT update execution data directly —
+   * the caller is responsible for passing the result to onChildChange.
+   */
+  const uploadFileForArrayChild = async (
+    childFieldId: string,
+    file: File,
+    parentFieldName: string,
+    childFieldName: string,
+  ): Promise<{ value: string; original_name: string; signedUrl?: string }> => {
+    if (!file || !apiKey) throw new Error("File or API key missing");
+    setUploadingFiles((prev) => ({ ...prev, [childFieldId]: true }));
+    try {
+      const buf = await file.arrayBuffer();
+      const base64 = arrayBufferToBase64(buf);
+      const body: Record<string, any> = {
+        field_name: parentFieldName,
+        sub_field_name: childFieldName,
+        file_base64: base64,
+        file_name: file.name,
+        mime_type: file.type,
+      };
+      const res = await api.post<{ file_path?: string }>(
+        `/api/files/workflows/executions/${executionId}/files`,
+        body,
+        { apiKey: apiKey ?? undefined }
+      );
+      const storagePath = res?.file_path;
+      if (!storagePath) throw new Error("No file_path returned from upload");
+      const signedUrl = await getSignedUrl(storagePath, file.name);
+      if (signedUrl) {
+        setSignedUrls((prev) => ({ ...prev, [storagePath]: signedUrl }));
+      }
+      toast({ title: "File uploaded successfully", description: file.name });
+      return { value: storagePath, original_name: file.name, signedUrl: signedUrl ?? undefined };
+    } finally {
+      setUploadingFiles((prev) => ({ ...prev, [childFieldId]: false }));
+    }
+  };
+
+  /**
+   * Delete a file from storage without modifying execution data.
+   * Used for array child file fields where the caller manages the data update via onChildChange.
+   */
+  const deleteFileFromStorage = async (filePath: string): Promise<void> => {
+    // Remove the cached signed URL
+    setSignedUrls((prev) => {
+      const updated = { ...prev };
+      delete updated[filePath];
+      return updated;
+    });
+  };
+
   const handleFileDelete = async (fieldId: string, filePath: string) => {
     const info = findFieldDefinition(fieldId);
     if (!info?.def?.name || !apiKey) return;
     const row = info.execRow as { id: string; values?: Record<string, any> };
-    const fieldType = info.def.field_type || info.def.type;
     const currentValues = ((row as any).values ?? {}) as Record<string, any>;
     const currentValueObj = currentValues[fieldId] || {};
-    let payload: any;
-    if (fieldType === "multiple_files") {
-      const currentFileArray = Array.isArray(currentValueObj.value) ? currentValueObj.value : (currentValueObj.value ? [currentValueObj.value] : []);
-      const currentOriginalNames = Array.isArray(currentValueObj.original_name) ? currentValueObj.original_name : (currentValueObj.original_name ? [currentValueObj.original_name] : []);
-      const fileIndex = currentFileArray.findIndex((p: string) => p === filePath);
-      if (fileIndex === -1) return;
-      const newFileArray = currentFileArray.filter((_: any, i: number) => i !== fileIndex);
-      const newOriginalNames = currentOriginalNames.filter((_: any, i: number) => i !== fileIndex);
-      payload = { ...currentValueObj, value: newFileArray.length > 0 ? newFileArray : null, original_name: newOriginalNames.length > 0 ? newOriginalNames : undefined };
-    } else {
-      const currentFilePath = typeof currentValueObj === "string" ? currentValueObj : (currentValueObj.value ?? currentValueObj);
-      if (currentFilePath !== filePath) return;
-      // Backend stores this as the field's .value; send null so DB has value: null and persists correctly
-      payload = null;
-    }
+    const currentFilePath = typeof currentValueObj === "string" ? currentValueObj : (currentValueObj.value ?? currentValueObj);
+    if (currentFilePath !== filePath) return;
+    // Backend stores this as the field's .value; send null so DB has value: null and persists correctly
+    const payload: any = null;
     try {
       await api.put(
         `/api/workflows/executions/${executionId}/data`,
@@ -611,7 +639,6 @@ export const useExecutionForm = (
     uploadingFiles,
     ocrTriggeredFiles,
     signedUrls,
-    multipleFilesSignedUrls,
     dynamicOptions,
     setDynamicOptions,
     loadingDynamicOptions,
@@ -639,7 +666,9 @@ export const useExecutionForm = (
     handleSaveValue,
     getSignedUrl,
     retryDynamicOptions,
-    handleFileDelete
+    handleFileDelete,
+    uploadFileForArrayChild,
+    deleteFileFromStorage,
   };
 };
 

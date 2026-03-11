@@ -322,8 +322,8 @@ paths:
       summary: Get execution data
       description: |
         Retrieve all data and steps for a specific execution. JWT required.
-        When the workflow has a data_structure with file or multiple_files fields, the response includes
-        **signed_url** / **signed_urls** (and execution_data_mapped fields like `{field_name}_signed_url`) as
+        When the workflow has a data_structure with file fields (including file sub-fields inside arrays), the response includes
+        **signed_url** (and execution_data_mapped fields like `{field_name}_signed_url`) as
         **full proxy URLs** (same as /api/files/document?token=...), so clients can preview or download
         without hitting MinIO directly. Set BACKEND_URL in production so these URLs use your API origin.
       tags: [Workflows]

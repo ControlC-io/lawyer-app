@@ -36,8 +36,7 @@ export const ExternalForm = () => {
     const [errors, setErrors] = useState<Record<string, string>>({});
     const [isPreviewOpen, setIsPreviewOpen] = useState(false);
     const [previewFile, setPreviewFile] = useState<{ url: string; name: string } | null>(null);
-    const [signedUrls, setSignedUrls] = useState<Record<string, string>>({}); // fieldId -> signedUrl for single files
-    const [signedUrlsMultiple, setSignedUrlsMultiple] = useState<Record<string, Record<number, string>>>({}); // fieldId -> {index -> signedUrl} for multiple files
+    const [signedUrls, setSignedUrls] = useState<Record<string, string>>({}); // fieldId -> signedUrl for files
     const [formPageIndex, setFormPageIndex] = useState(0);
 
     useEffect(() => {
@@ -342,66 +341,21 @@ export const ExternalForm = () => {
             if (!uploadResult) return;
 
                 // Update form data with the file path and original name
-                const fieldType = fieldDef.field_type || fieldDef.type;
-                if (fieldType === "multiple_files") {
-                    // For multiple_files, append to array
-                    setFormData(prev => {
-                        const currentValue = prev[fieldId];
-                        let currentFiles: string[] = [];
-                        let currentOriginalNames: string[] = [];
-                        
-                        if (currentValue && typeof currentValue === 'object' && 'value' in currentValue) {
-                            currentFiles = Array.isArray(currentValue.value) ? currentValue.value : [currentValue.value];
-                            currentOriginalNames = Array.isArray(currentValue.original_name) ? currentValue.original_name : [];
-                        } else if (Array.isArray(currentValue)) {
-                            currentFiles = currentValue;
-                        } else if (currentValue) {
-                            currentFiles = [currentValue];
-                        }
-                        
-                        const newFiles = [...currentFiles, uploadResult.path];
-                        const newOriginalNames = [...currentOriginalNames, uploadResult.original_name || file.name];
-                        
-                        // Update signed URLs for multiple files
-                        if (uploadResult.signedUrl) {
-                            setSignedUrlsMultiple(prev => {
-                                const current = prev[fieldId] || {};
-                                const newIndex = newFiles.length - 1;
-                                return {
-                                    ...prev,
-                                    [fieldId]: {
-                                        ...current,
-                                        [newIndex]: uploadResult.signedUrl!
-                                    }
-                                };
-                            });
-                        }
-                        
-                        return { 
-                            ...prev, 
-                            [fieldId]: {
-                                value: newFiles,
-                                original_name: newOriginalNames
-                            }
-                        };
-                    });
-                } else {
-                    // For single file, replace value with object containing path and original name
-                    setFormData(prev => ({ 
-                        ...prev, 
-                        [fieldId]: {
-                            value: uploadResult.path,
-                            original_name: uploadResult.original_name || file.name
-                        }
-                    }));
-
-                    // Store signed URL for single file
-                    if (uploadResult.signedUrl) {
-                        setSignedUrls(prev => ({
-                            ...prev,
-                            [fieldId]: uploadResult.signedUrl!
-                        }));
+                // Replace value with object containing path and original name
+                setFormData(prev => ({
+                    ...prev,
+                    [fieldId]: {
+                        value: uploadResult.path,
+                        original_name: uploadResult.original_name || file.name
                     }
+                }));
+
+                // Store signed URL
+                if (uploadResult.signedUrl) {
+                    setSignedUrls(prev => ({
+                        ...prev,
+                        [fieldId]: uploadResult.signedUrl!
+                    }));
                 }
 
                 toast({
@@ -410,10 +364,7 @@ export const ExternalForm = () => {
                 });
         };
 
-        const fieldType = fieldDef.field_type || fieldDef.type;
-        const isMultipleFiles = fieldType === "multiple_files";
         const signedUrl = signedUrls[fieldId];
-        const signedUrlsForField = signedUrlsMultiple[fieldId] || {};
 
         return (
             <div className="space-y-2" key={fieldId}>
@@ -434,7 +385,6 @@ export const ExternalForm = () => {
                     onUpload={handleFileUpload}
                     onViewFile={handleViewFile}
                     signedUrl={signedUrl}
-                    signedUrls={isMultipleFiles ? signedUrlsForField : undefined}
                     // Basic props
                     disabled={submitting}
                     required={evaluateFieldRules(fieldId, "required", renderFieldRules, currentValues, false)}

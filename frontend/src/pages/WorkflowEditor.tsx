@@ -140,7 +140,7 @@ const FIELD_TYPES = [
   { value: "multiple_option", label: "Multiple Options" },
   { value: "array", label: "Array" },
   { value: "file", label: "File" },
-  { value: "multiple_files", label: "Multiple Files" },
+
   { value: "html", label: "HTML" },
   { value: "signature", label: "Handwritten Signature" },
 ];
@@ -916,7 +916,7 @@ export default function WorkflowEditor() {
   };
 
   const handleEditField = (field: DataStructureField) => {
-    const fieldType = field.parent_item_id && (field.field_type === "file" || field.field_type === "multiple_files" || field.field_type === "signature" || field.field_type === "array")
+    const fieldType = field.parent_item_id && (field.field_type === "signature" || field.field_type === "array")
       ? "text"
       : field.field_type;
 
@@ -963,7 +963,7 @@ export default function WorkflowEditor() {
   const handleSubmitField = (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (fieldFormData.parent_item_id && (fieldFormData.field_type === "file" || fieldFormData.field_type === "multiple_files" || fieldFormData.field_type === "signature" || fieldFormData.field_type === "array")) {
+    if (fieldFormData.parent_item_id && (fieldFormData.field_type === "signature" || fieldFormData.field_type === "array")) {
       toast.error(t("workflowEditor.cannotAddFileTypes"));
       return;
     }
@@ -1408,7 +1408,7 @@ export default function WorkflowEditor() {
                       {FIELD_TYPES
                         .filter((type) => {
                           if (fieldFormData.parent_item_id) {
-                            return type.value !== "file" && type.value !== "multiple_files" && type.value !== "signature" && type.value !== "array";
+                            return type.value !== "signature" && type.value !== "array";
                           }
                           return true;
                         })

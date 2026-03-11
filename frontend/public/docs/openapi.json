@@ -87,7 +87,7 @@
     "/workflows/executions/{executionId}": {
       "get": {
         "summary": "Get execution data",
-        "description": "Retrieve all data and steps for a specific execution. JWT required.\nWhen the workflow has a data_structure with file or multiple_files fields, the response includes\n**signed_url** / **signed_urls** (and execution_data_mapped fields like `{field_name}_signed_url`) as\n**full proxy URLs** (same as /api/files/document?token=...), so clients can preview or download\nwithout hitting MinIO directly. Set BACKEND_URL in production so these URLs use your API origin.\n",
+        "description": "Retrieve all data and steps for a specific execution. JWT required.\nWhen the workflow has a data_structure with file fields (including file sub-fields inside arrays), the response includes\n**signed_url** (and execution_data_mapped fields like `{field_name}_signed_url`) as\n**full proxy URLs** (same as /api/files/document?token=...), so clients can preview or download\nwithout hitting MinIO directly. Set BACKEND_URL in production so these URLs use your API origin.\n",
         "tags": [
           "Workflows"
         ],
