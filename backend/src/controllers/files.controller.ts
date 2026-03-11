@@ -206,9 +206,6 @@ export const filesController = {
 
       // Update execution data with file path
       const currentValues = (executionDataRow.values || {}) as Record<string, any>;
-      const fieldType = field.field_type || 'file';
-      const isMultipleFiles = fieldType === 'multiple_files';
-
       let updatedValues: Record<string, any>;
       let responseExtra: Record<string, any> = {};
 
@@ -280,26 +277,6 @@ export const filesController = {
         responseExtra = {
           sub_field_name,
           index: targetIndex,
-        };
-      } else if (isMultipleFiles) {
-        const currentFileArray = Array.isArray(currentValues[fieldId]?.value)
-          ? currentValues[fieldId].value
-          : currentValues[fieldId]?.value
-          ? [currentValues[fieldId].value]
-          : [];
-        const currentOriginalNames = Array.isArray(currentValues[fieldId]?.original_name)
-          ? currentValues[fieldId].original_name
-          : currentValues[fieldId]?.original_name
-          ? [currentValues[fieldId].original_name]
-          : [];
-
-        updatedValues = {
-          ...currentValues,
-          [fieldId]: {
-            ...currentValues[fieldId],
-            value: [...currentFileArray, storagePath],
-            original_name: [...currentOriginalNames, fileName],
-          },
         };
       } else {
         updatedValues = {

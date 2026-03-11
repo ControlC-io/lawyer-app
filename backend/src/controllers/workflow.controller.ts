@@ -684,10 +684,6 @@ export const workflowController = {
           try {
             if (field.field_type === 'file' && fieldValue?.value) {
               fileSignedUrls[field.id] = getDocumentProxyUrl(fieldValue.value);
-            } else if (field.field_type === 'multiple_files' && Array.isArray(fieldValue?.value)) {
-              fileSignedUrls[field.id] = fieldValue.value.map((filePath: string) =>
-                getDocumentProxyUrl(filePath)
-              );
             }
           } catch {
             // Keep execution response available even when signed URL generation fails.
@@ -713,8 +709,6 @@ export const workflowController = {
 
           if (field.field_type === 'file' && fileSignedUrls[field.id]) {
             result.signed_url = fileSignedUrls[field.id];
-          } else if (field.field_type === 'multiple_files' && fileSignedUrls[field.id]) {
-            result.signed_urls = fileSignedUrls[field.id];
           }
 
           return result;
@@ -727,8 +721,6 @@ export const workflowController = {
 
           if (field.field_type === 'file' && fileSignedUrls[field.id]) {
             (execution as any).execution_data_mapped[`${field.name}_signed_url`] = fileSignedUrls[field.id];
-          } else if (field.field_type === 'multiple_files' && fileSignedUrls[field.id]) {
-            (execution as any).execution_data_mapped[`${field.name}_signed_urls`] = fileSignedUrls[field.id];
           }
         });
       }
