@@ -8,6 +8,7 @@
     "build": "npx prisma generate --schema=./prisma/schema.prisma && tsc",
     "migrate:deploy": "sh ./scripts/migrate.sh",
     "migrate:dev": "prisma migrate dev",
+    "migrate:multiple-files": "node dist/scripts/migrate-multiple-files.js",
     "test": "jest",
     "test:coverage": "jest --coverage"
   },

@@ -9,7 +9,7 @@
  * 3. Transforms execution data (WorkflowExecution.execution_data and WorkflowExecutionData.values)
  * 4. Updates WorkflowStep form_fields config to move allowed_file_types to child field
  *
- * Run with: npx ts-node backend/prisma/migrations/manual/migrate-multiple-files.ts
+ * Run with: node dist/scripts/migrate-multiple-files.js
  */
 
 import { PrismaClient } from "@prisma/client";
