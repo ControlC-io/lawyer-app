@@ -159,6 +159,36 @@ export const useExecutionForm = (
               }
             }
           }
+
+          // Handle file sub-fields inside array items
+          if (fieldType === "array" && !field.parent_item_id) {
+            const arrayValue = values[field.id]?.value;
+            if (arrayValue && Array.isArray(arrayValue)) {
+              // Find child fields that are file type
+              const childFileFields = fields.filter(
+                (f) => f.parent_item_id === field.id && ((f.field_type || f.type) === "file" || (f.field_type || f.type) === "signature")
+              );
+              for (const childField of childFileFields) {
+                for (const item of arrayValue) {
+                  const childVal = item[childField.id];
+                  if (!childVal) continue;
+                  const childFilePath = typeof childVal === "string" ? childVal : childVal?.value;
+                  const childOriginalName = typeof childVal === "object" ? childVal?.original_name : undefined;
+                  if (childFilePath && typeof childFilePath === "string") {
+                    const displayName =
+                      typeof childOriginalName === "string" && childOriginalName.length > 0
+                        ? childOriginalName
+                        : childFilePath.split("/").pop()?.replace(/^\d+_/, "") ?? undefined;
+                    const signedUrl = await getSignedUrl(childFilePath, displayName);
+                    if (signedUrl) {
+                      // Key by storage path so FileField can look it up
+                      newSignedUrls[childFilePath] = signedUrl;
+                    }
+                  }
+                }
+              }
+            }
+          }
         }
       }
 
@@ -510,6 +540,55 @@ export const useExecutionForm = (
     }
   };
 
+  /**
+   * Upload a file for use as an array child field value.
+   * Unlike handleFileUpload, this does NOT update execution data directly —
+   * the caller is responsible for passing the result to onChildChange.
+   */
+  const uploadFileForArrayChild = async (fieldId: string, file: File): Promise<{ value: string; original_name: string; signedUrl?: string }> => {
+    if (!file || !apiKey) throw new Error("File or API key missing");
+    setUploadingFiles((prev) => ({ ...prev, [fieldId]: true }));
+    try {
+      const buf = await file.arrayBuffer();
+      const base64 = arrayBufferToBase64(buf);
+      const body: Record<string, any> = {
+        field_name: fieldId,
+        file_base64: base64,
+        file_name: file.name,
+        mime_type: file.type,
+      };
+      const res = await api.post<{ file_path?: string }>(
+        `/api/files/workflows/executions/${executionId}/files`,
+        body,
+        { apiKey: apiKey ?? undefined }
+      );
+      const storagePath = res?.file_path;
+      if (!storagePath) throw new Error("No file_path returned from upload");
+      const signedUrl = await getSignedUrl(storagePath, file.name);
+      // Cache the signed URL using the storage path as key so FileField can find it
+      if (signedUrl) {
+        setSignedUrls((prev) => ({ ...prev, [storagePath]: signedUrl }));
+      }
+      toast({ title: "File uploaded successfully", description: file.name });
+      return { value: storagePath, original_name: file.name, signedUrl: signedUrl ?? undefined };
+    } finally {
+      setUploadingFiles((prev) => ({ ...prev, [fieldId]: false }));
+    }
+  };
+
+  /**
+   * Delete a file from storage without modifying execution data.
+   * Used for array child file fields where the caller manages the data update via onChildChange.
+   */
+  const deleteFileFromStorage = async (filePath: string): Promise<void> => {
+    // Remove the cached signed URL
+    setSignedUrls((prev) => {
+      const updated = { ...prev };
+      delete updated[filePath];
+      return updated;
+    });
+  };
+
   const handleFileDelete = async (fieldId: string, filePath: string) => {
     const info = findFieldDefinition(fieldId);
     if (!info?.def?.name || !apiKey) return;
@@ -582,7 +661,9 @@ export const useExecutionForm = (
     handleSaveValue,
     getSignedUrl,
     retryDynamicOptions,
-    handleFileDelete
+    handleFileDelete,
+    uploadFileForArrayChild,
+    deleteFileFromStorage,
   };
 };
 
