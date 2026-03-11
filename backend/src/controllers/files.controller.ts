@@ -54,7 +54,7 @@ export const filesController = {
     try {
       if (!(await resolveCompanyForRequest(req, res))) return;
       const { executionId } = req.params;
-      const { field_name, file_url, file_base64, file_name, mime_type } = req.body;
+      const { field_name, file_url, file_base64, file_name, mime_type, sub_field_name, index } = req.body;
       const companyId = req.company!.id;
 
       if (!executionId || !field_name) {
@@ -119,6 +119,14 @@ export const filesController = {
       }
 
       const fieldId = field.id;
+
+      // Early validation: if sub_field_name is provided, field must be an array
+      if (sub_field_name && field.field_type !== 'array') {
+        return res.status(400).json({
+          error: 'Invalid field type',
+          details: `Field "${field_name}" is not an array field. sub_field_name can only be used with array fields.`,
+        });
+      }
 
       // Prepare file data
       let fileBuffer: Buffer;
@@ -201,9 +209,85 @@ export const filesController = {
       const fieldType = field.field_type || 'file';
       const isMultipleFiles = fieldType === 'multiple_files';
 
-      let updatedFieldValue: any;
+      let updatedValues: Record<string, any>;
+      let responseExtra: Record<string, any> = {};
 
-      if (isMultipleFiles) {
+      if (sub_field_name) {
+        // --- Array sub-field upload ---
+        if (field.field_type !== 'array') {
+          return res.status(400).json({
+            error: 'Invalid field type',
+            details: `Field "${field_name}" is not an array field. sub_field_name can only be used with array fields.`,
+          });
+        }
+
+        // Find the sub-field definition by name among children of this array field
+        const subField = (workflow.data_structure as any[]).find(
+          (f: any) => f.name === sub_field_name && f.parent_item_id === fieldId
+        );
+
+        if (!subField) {
+          return res.status(400).json({
+            error: 'Sub-field not found',
+            details: `Sub-field "${sub_field_name}" not found as a child of array field "${field_name}".`,
+          });
+        }
+
+        if (subField.field_type !== 'file') {
+          return res.status(400).json({
+            error: 'Invalid sub-field type',
+            details: `Sub-field "${sub_field_name}" is not a file field.`,
+          });
+        }
+
+        const subFieldId = subField.id;
+        const currentArray = Array.isArray(currentValues[fieldId]?.value)
+          ? [...currentValues[fieldId].value]
+          : [];
+
+        const fileValue = {
+          value: storagePath,
+          original_name: fileName,
+        };
+
+        let targetIndex: number;
+
+        if (index !== undefined && index !== null) {
+          // Update existing item at specific index
+          if (index < 0 || index >= currentArray.length) {
+            return res.status(400).json({
+              error: 'Index out of range',
+              details: `Index ${index} is out of range. Array has ${currentArray.length} items.`,
+            });
+          }
+          currentArray[index] = {
+            ...currentArray[index],
+            [subFieldId]: fileValue,
+          };
+          targetIndex = index;
+        } else {
+          // Append new item
+          const newItem: Record<string, any> = {
+            _id: crypto.randomUUID(),
+            [subFieldId]: fileValue,
+          };
+          currentArray.push(newItem);
+          targetIndex = currentArray.length - 1;
+        }
+
+        updatedValues = {
+          ...currentValues,
+          [fieldId]: {
+            ...currentValues[fieldId],
+            value: currentArray,
+          },
+        };
+
+        responseExtra = {
+          sub_field_name,
+          index: targetIndex,
+        };
+      } else if (isMultipleFiles) {
         const currentFileArray = Array.isArray(currentValues[fieldId]?.value)
           ? currentValues[fieldId].value
           : currentValues[fieldId]?.value
@@ -215,23 +299,24 @@ export const filesController = {
           ? [currentValues[fieldId].original_name]
           : [];
 
-        updatedFieldValue = {
-          ...currentValues[fieldId],
-          value: [...currentFileArray, storagePath],
-          original_name: [...currentOriginalNames, fileName],
+        updatedValues = {
+          ...currentValues,
+          [fieldId]: {
+            ...currentValues[fieldId],
+            value: [...currentFileArray, storagePath],
+            original_name: [...currentOriginalNames, fileName],
+          },
         };
       } else {
-        updatedFieldValue = {
-          ...currentValues[fieldId],
-          value: storagePath,
-          original_name: fileName,
+        updatedValues = {
+          ...currentValues,
+          [fieldId]: {
+            ...currentValues[fieldId],
+            value: storagePath,
+            original_name: fileName,
+          },
         };
       }
-
-      const updatedValues = {
-        ...currentValues,
-        [fieldId]: updatedFieldValue,
-      };
 
       await prisma.workflowExecutionData.update({
         where: { id: executionDataRow.id },
@@ -244,6 +329,7 @@ export const filesController = {
         file_path: storagePath,
         field_name,
         field_id: fieldId,
+        ...responseExtra,
       });
     } catch (error) {
       console.error('Error uploading execution file:', error);
