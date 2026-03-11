@@ -55,7 +55,7 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
   );
   const [users, setUsers] = useState<Array<{ id: string; email: string; full_name: string | null }>>([]);
   const [groups, setGroups] = useState<Array<{ id: string; name: string; description: string | null }>>([]);
-  const [dataStructureItems, setDataStructureItems] = useState<Array<{ id: string; name: string; data_structure_name: string; field_type?: string }>>([]);
+  const [dataStructureItems, setDataStructureItems] = useState<Array<{ id: string; name: string; data_structure_name: string; field_type?: string; parent_item_id?: string | null }>>([]);
   const [apiConfigurations, setApiConfigurations] = useState<Array<{ id: string; name: string; config_type: string; api_url?: string }>>([]);
   const [workflowStatuses, setWorkflowStatuses] = useState<Array<{ id: string; name: string; color: string; order: number }>>([]);
   const [agents, setAgents] = useState<Array<{ id: string; name: string; category_id: string | null }>>([]);
@@ -206,7 +206,8 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
             id: field.id,
             name: field.name,
             data_structure_name: "Workflow Data Structure",
-            field_type: field.field_type
+            field_type: field.field_type,
+            parent_item_id: field.parent_item_id || null,
           }));
         setDataStructureItems(allItems);
         return;
@@ -232,13 +233,14 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
       return;
     }
 
-    const allItems = (workflow.data_structure as Array<{ id?: string; name?: string; field_type?: string }>)
+    const allItems = (workflow.data_structure as Array<{ id?: string; name?: string; field_type?: string; parent_item_id?: string }>)
       .filter((field: any) => field && field.id && field.name) // Filter out invalid entries
       .map((field: any) => ({
         id: field.id,
         name: field.name,
         data_structure_name: "Workflow Data Structure",
-        field_type: field.field_type
+        field_type: field.field_type,
+        parent_item_id: field.parent_item_id || null,
       }));
 
     setDataStructureItems(allItems);
@@ -2278,15 +2280,20 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
                       <SelectItem value="none">Select a file field</SelectItem>
                       {dataStructureItems
                         .filter(item => item.field_type === 'file')
-                        .map((item) => (
-                          <SelectItem key={item.id} value={item.id}>
-                            {item.name}
-                          </SelectItem>
-                        ))}
+                        .map((item) => {
+                          const parentArray = item.parent_item_id
+                            ? dataStructureItems.find(p => p.id === item.parent_item_id)
+                            : null;
+                          return (
+                            <SelectItem key={item.id} value={item.id}>
+                              {parentArray ? `${parentArray.name} → ${item.name}` : item.name}
+                            </SelectItem>
+                          );
+                        })}
                     </SelectContent>
                   </Select>
                   <p className="text-xs text-muted-foreground">
-                    Select the file field from the data structure to operate on
+                    Select the file field from the data structure. For files inside arrays, each item with a file will be processed separately with its row metadata.
                   </p>
                 </div>
 
@@ -2329,11 +2336,26 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
                               <SelectItem value="bind">Bind Data</SelectItem>
                             </SelectContent>
                           </Select>
-                          {item.mode === "bind" ? (
+                          {item.mode === "bind" ? (() => {
+                            // Determine which fields to show for binding
+                            const sourceField = dataStructureItems.find(f => f.id === step.config.source_file_id);
+                            const sourceParentId = sourceField?.parent_item_id;
+                            // If source is an array child, show siblings first, then top-level fields
+                            const bindableItems = sourceParentId
+                              ? [
+                                  ...dataStructureItems.filter(f => f.parent_item_id === sourceParentId && f.id !== sourceField.id),
+                                  ...dataStructureItems.filter(f => !f.parent_item_id && f.field_type !== 'array'),
+                                ]
+                              : dataStructureItems;
+                            const boundItem = dataStructureItems.find(i => item.value === `{{${i.id}}}`);
+                            const boundParent = boundItem?.parent_item_id
+                              ? dataStructureItems.find(p => p.id === boundItem.parent_item_id)
+                              : null;
+                            return (
                             <div className="flex-1 flex gap-1">
                               <Input
                                 placeholder="Select data to bind"
-                                value={item.value.startsWith("{{") ? dataStructureItems.find(i => item.value === `{{${i.id}}}`)?.name || "Not found" : ""}
+                                value={boundItem ? (boundParent ? `${boundParent.name} → ${boundItem.name}` : boundItem.name) : (item.value.startsWith("{{") ? "Not found" : "")}
                                 disabled
                                 className="flex-1"
                               />
@@ -2345,9 +2367,15 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
                                 </PopoverTrigger>
                                 <PopoverContent className="w-80">
                                   <div className="space-y-2">
-                                    <Label className="text-xs font-medium">Bind to Data Structure Item</Label>
+                                    <Label className="text-xs font-medium">
+                                      {sourceParentId ? "Bind to Array Item Field (same row)" : "Bind to Data Structure Item"}
+                                    </Label>
                                     <div className="max-h-60 overflow-y-auto space-y-1">
-                                      {dataStructureItems.map((dsItem) => (
+                                      {bindableItems.map((dsItem) => {
+                                        const dsParent = dsItem.parent_item_id
+                                          ? dataStructureItems.find(p => p.id === dsItem.parent_item_id)
+                                          : null;
+                                        return (
                                         <Button
                                           key={dsItem.id}
                                           variant="ghost"
@@ -2356,12 +2384,15 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
                                           onClick={() => handleUpdateKeyValue("data", index, "value", `{{${dsItem.id}}}`)}
                                         >
                                           <div className="flex flex-col items-start">
-                                            <span className="font-medium">{dsItem.name}</span>
-                                            <span className="text-muted-foreground">{dsItem.data_structure_name}</span>
+                                            <span className="font-medium">{dsParent ? `${dsParent.name} → ${dsItem.name}` : dsItem.name}</span>
+                                            <span className="text-muted-foreground">
+                                              {dsItem.parent_item_id === sourceParentId ? "Same row" : dsItem.data_structure_name}
+                                            </span>
                                           </div>
                                         </Button>
-                                      ))}
-                                      {dataStructureItems.length === 0 && (
+                                        );
+                                      })}
+                                      {bindableItems.length === 0 && (
                                         <p className="text-xs text-muted-foreground p-2">No data structures linked to this workflow</p>
                                       )}
                                     </div>
@@ -2369,7 +2400,8 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
                                 </PopoverContent>
                               </Popover>
                             </div>
-                          ) : (
+                            );
+                          })() : (
                             <Input
                               placeholder="Static value"
                               value={item.value}

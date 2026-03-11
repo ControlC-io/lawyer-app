@@ -12,6 +12,8 @@
  * Run with: node dist/scripts/migrate-multiple-files.js
  */
 
+try { require('dotenv').config(); } catch (_) { /* dotenv not available, rely on env vars */ }
+
 import { PrismaClient } from "@prisma/client";
 import { randomUUID } from "crypto";
 

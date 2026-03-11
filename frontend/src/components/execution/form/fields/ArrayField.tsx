@@ -101,13 +101,29 @@ export const ArrayField = ({
     setIsDownloadingZip(true);
     try {
       const zip = new JSZip();
+
+      // Pre-compute unique filenames to avoid race condition in Promise.all
       const usedNames = new Set<string>();
+      const uniqueNames: string[] = fileEntries.map((entry) => {
+        let fileName = entry.name;
+        if (usedNames.has(fileName)) {
+          const ext = fileName.lastIndexOf('.');
+          const base = ext > 0 ? fileName.slice(0, ext) : fileName;
+          const extension = ext > 0 ? fileName.slice(ext) : '';
+          let counter = 1;
+          while (usedNames.has(fileName)) {
+            fileName = `${base} (${counter})${extension}`;
+            counter++;
+          }
+        }
+        usedNames.add(fileName);
+        return fileName;
+      });
 
       await Promise.all(
-        fileEntries.map(async (entry) => {
+        fileEntries.map(async (entry, i) => {
           try {
             let url: string | null = null;
-            // If path is already a URL, use it directly
             if (entry.path.startsWith('http')) {
               url = entry.path;
             } else {
@@ -119,21 +135,7 @@ export const ArrayField = ({
             if (!response.ok) return;
             const blob = await response.blob();
 
-            // Deduplicate filenames
-            let fileName = entry.name;
-            if (usedNames.has(fileName)) {
-              const ext = fileName.lastIndexOf('.');
-              const base = ext > 0 ? fileName.slice(0, ext) : fileName;
-              const extension = ext > 0 ? fileName.slice(ext) : '';
-              let counter = 1;
-              while (usedNames.has(fileName)) {
-                fileName = `${base} (${counter})${extension}`;
-                counter++;
-              }
-            }
-            usedNames.add(fileName);
-
-            zip.file(fileName, blob);
+            zip.file(uniqueNames[i], blob);
           } catch (err) {
             console.error(`Failed to fetch file for ZIP: ${entry.path}`, err);
           }
