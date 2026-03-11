@@ -897,6 +897,129 @@ export const workflowController = {
   },
 
   /**
+   * PATCH /api/workflows/executions/:executionId/data/array-item
+   * Update a single sub-field value in an existing array item
+   */
+  async patchArrayItem(req: AuthRequest, res: Response) {
+    try {
+      if (!(await resolveCompanyForRequest(req, res))) return;
+      const { executionId } = req.params;
+      const { field_name, index, sub_field_name, value } = req.body;
+      const companyId = req.company!.id;
+
+      if (!executionId || !field_name || index === undefined || index === null || !sub_field_name) {
+        return res.status(400).json({
+          error: 'Missing required fields',
+          details: 'field_name, index, sub_field_name, and value are required',
+        });
+      }
+
+      if (typeof index !== 'number' || index < 0 || !Number.isInteger(index)) {
+        return res.status(400).json({
+          error: 'Invalid index',
+          details: 'index must be a non-negative integer',
+        });
+      }
+
+      // Fetch execution with workflow
+      const execution = await prisma.workflowExecution.findFirst({
+        where: { id: executionId, company_id: companyId },
+        include: { workflow: true },
+      });
+
+      if (!execution) {
+        return res.status(404).json({ error: 'Execution not found or access denied' });
+      }
+
+      const dataStructure = execution.workflow.data_structure as any[];
+      if (!Array.isArray(dataStructure)) {
+        return res.status(400).json({ error: 'Workflow has no data structure' });
+      }
+
+      // Resolve field_name to field
+      const field = dataStructure.find((f: any) => f.name === field_name);
+      if (!field) {
+        return res.status(404).json({
+          error: 'Field not found',
+          details: `Field "${field_name}" not found in data structure`,
+        });
+      }
+
+      if (field.field_type !== 'array') {
+        return res.status(400).json({
+          error: 'Field is not an array',
+          details: `Field "${field_name}" is not an array field`,
+        });
+      }
+
+      // Resolve sub_field_name to child field
+      const subField = dataStructure.find(
+        (f: any) => f.name === sub_field_name && f.parent_item_id === field.id
+      );
+
+      if (!subField) {
+        return res.status(404).json({
+          error: 'Sub-field not found',
+          details: `Sub-field "${sub_field_name}" not found in array field "${field_name}"`,
+        });
+      }
+
+      // Fetch execution data
+      const existingData = await prisma.workflowExecutionData.findFirst({
+        where: { execution_id: executionId },
+      });
+
+      if (!existingData) {
+        return res.status(404).json({ error: 'Execution data not found' });
+      }
+
+      const currentValues = (existingData.values || {}) as Record<string, any>;
+      const currentArray = Array.isArray(currentValues[field.id]?.value)
+        ? [...currentValues[field.id].value]
+        : [];
+
+      if (index >= currentArray.length) {
+        return res.status(400).json({
+          error: 'Index out of range',
+          details: `Index ${index} is out of range. Array has ${currentArray.length} items.`,
+        });
+      }
+
+      // Update the sub-field in the array item
+      currentArray[index] = {
+        ...currentArray[index],
+        [subField.id]: value,
+      };
+
+      const updatedValues = {
+        ...currentValues,
+        [field.id]: {
+          ...currentValues[field.id],
+          value: currentArray,
+        },
+      };
+
+      await prisma.workflowExecutionData.update({
+        where: { id: existingData.id },
+        data: { values: updatedValues },
+      });
+
+      return res.json({
+        success: true,
+        message: 'Array item updated successfully',
+        field_name,
+        sub_field_name,
+        index,
+      });
+    } catch (error) {
+      console.error('Error patching array item:', error);
+      return res.status(500).json({
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  },
+
+  /**
    * PATCH /api/workflows/executions/:executionId/name
    * Rename an execution (was: rename-execution)
    */
