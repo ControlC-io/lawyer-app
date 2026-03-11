@@ -54,8 +54,15 @@ export const filesController = {
     try {
       if (!(await resolveCompanyForRequest(req, res))) return;
       const { executionId } = req.params;
-      const { field_name, file_url, file_base64, file_name, mime_type, sub_field_name, index } = req.body;
+      let { field_name, file_url, file_base64, file_name, mime_type, sub_field_name, index } = req.body;
       const companyId = req.company!.id;
+
+      // Support dot notation: "arrayName.childName" auto-parses into field_name + sub_field_name
+      if (field_name && typeof field_name === 'string' && field_name.includes('.') && !sub_field_name) {
+        const dotIndex = field_name.indexOf('.');
+        sub_field_name = field_name.substring(dotIndex + 1);
+        field_name = field_name.substring(0, dotIndex);
+      }
 
       if (!executionId || !field_name) {
         return res.status(400).json({

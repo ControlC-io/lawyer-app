@@ -123,7 +123,11 @@ export const HistoricalStepView = ({
       });
 
       for (const arrayField of arrayFields) {
-        const arrayValue = stepData[arrayField.id];
+        const rawArrayValue = stepData[arrayField.id];
+        // Array field data may be wrapped as { value: [...] } after migration
+        const arrayValue = rawArrayValue && typeof rawArrayValue === 'object' && !Array.isArray(rawArrayValue) && Array.isArray(rawArrayValue.value)
+          ? rawArrayValue.value
+          : rawArrayValue;
         if (!Array.isArray(arrayValue)) continue;
 
         const childFileFields = allFieldsFlat.filter((f: any) => {
@@ -258,7 +262,12 @@ export const HistoricalStepView = ({
 
                   <div className="space-y-4">
                     {rootFields.map((field: any) => {
-                      const value = stepData[field.id];
+                      const fieldType = field.field_type || field.type;
+                      const rawValue = stepData[field.id];
+                      // Array fields store data as { value: [...] } — unwrap for ArrayField component
+                      const value = fieldType === 'array' && rawValue && typeof rawValue === 'object' && !Array.isArray(rawValue) && Array.isArray(rawValue.value)
+                        ? rawValue.value
+                        : rawValue;
                       // Even if no value, we might want to show it as disabled field, 
                       // or hide it if it's truly empty and user prefers clean view. 
                       // The previous logic hid empty fields. 

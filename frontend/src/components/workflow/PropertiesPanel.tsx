@@ -247,6 +247,15 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
   };
 
 
+  // Helper: get display name for a field, prefixed with parent array name for child fields
+  const getFieldDisplayName = (field: { id: string; name: string; parent_item_id?: string | null }) => {
+    if (field.parent_item_id) {
+      const parent = dataStructureItems.find(f => f.id === field.parent_item_id);
+      if (parent) return `${parent.name}.${field.name}`;
+    }
+    return field.name;
+  };
+
   const fetchApiConfigurations = async () => {
     if (!companyId) return;
     const configType = step.action_type === "automatic" ? "automatic_action" : "agent_decision";
@@ -1058,7 +1067,7 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
 
                                               if (checked) {
                                                 newApiData.push({
-                                                  key: field.name,
+                                                  key: getFieldDisplayName(field),
                                                   value: `{{${field.id}}}`,
                                                   mode: "bind"
                                                 });
@@ -1079,7 +1088,7 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
                                             }}
                                           />
                                           <Label htmlFor={`form-action-${actionIndex}-send-${field.id}`} className="cursor-pointer">
-                                            {field.name}
+                                            {getFieldDisplayName(field)}
                                           </Label>
                                         </div>
                                       );
@@ -1137,7 +1146,7 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
 
                                               if (checked) {
                                                 newUpdateData.push({
-                                                  key: field.name,
+                                                  key: getFieldDisplayName(field),
                                                   value: field.id
                                                 });
                                               } else {
@@ -1157,7 +1166,7 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
                                             }}
                                           />
                                           <Label htmlFor={`form-action-${actionIndex}-update-${field.id}`} className="cursor-pointer">
-                                            {field.name}
+                                            {getFieldDisplayName(field)}
                                           </Label>
                                         </div>
                                       );
@@ -1280,9 +1289,9 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
                                   let newData = [...data];
                                   if (checked) {
                                     // Add to api_data
-                                    // We use field.name as the key, and {{field.id}} as the value
+                                    // Use parentName.childName for array child fields
                                     newData.push({
-                                      key: field.name,
+                                      key: getFieldDisplayName(field),
                                       value: `{{${field.id}}}`,
                                       mode: "bind"
                                     });
@@ -1329,7 +1338,7 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
                                 }}
                               />
                               <Label htmlFor={`send-${field.id}`} className="cursor-pointer">
-                                {field.name}
+                                {getFieldDisplayName(field)}
                               </Label>
                             </div>
                           );
@@ -1387,10 +1396,10 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
                                   let newUpdateData = [...(step.config.data_to_update || [])];
 
                                   if (checked) {
-                                    // Add to data_to_update
+                                    // Add to data_to_update — use parentName.childName for array child fields
                                     newUpdateData.push({
-                                      key: field.name, // Agent output key
-                                      value: field.id  // Workflow field ID to update
+                                      key: getFieldDisplayName(field),
+                                      value: field.id
                                     });
                                   } else {
                                     // Remove from data_to_update
@@ -1407,7 +1416,7 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
                                 }}
                               />
                               <Label htmlFor={`update-${field.id}`} className="cursor-pointer">
-                                {field.name}
+                                {getFieldDisplayName(field)}
                               </Label>
                             </div>
                           );
