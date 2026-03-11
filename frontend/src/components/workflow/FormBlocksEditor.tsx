@@ -818,7 +818,7 @@ function FieldSettingsDialog({
           </div>
 
           {/* File Settings */}
-          {(fieldInfo.field_type === "file" || fieldInfo.field_type === "multiple_files") && (
+          {fieldInfo.field_type === "file" && (
             <div className="space-y-4 pt-4 border-t">
               <Label className="text-sm font-semibold">File Settings</Label>
               <div className="space-y-4">

@@ -100,7 +100,6 @@ export default function CompanyPortal() {
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [previewFile, setPreviewFile] = useState<{ url: string; name: string } | null>(null);
   const [signedUrls, setSignedUrls] = useState<Record<string, string>>({});
-  const [signedUrlsMultiple, setSignedUrlsMultiple] = useState<Record<string, Record<number, string>>>({});
 
   // Primary color from portal; softer variant for borders
   const primaryColor = portal?.portal_primary_color || "#3B82F6";
@@ -358,41 +357,11 @@ export default function CompanyPortal() {
           { skipAuth: true }
         );
         const signedUrl = await generateSignedUrl(uploadResult.path);
-        const fieldType = fieldDef.field_type || fieldDef.type;
-
-        if (fieldType === "multiple_files") {
-          setFormData((prev) => {
-            const current = prev[fieldId];
-            let currentFiles: string[] = [];
-            let currentOriginalNames: string[] = [];
-            if (current && typeof current === "object" && "value" in current) {
-              currentFiles = Array.isArray(current.value) ? current.value : [current.value];
-              currentOriginalNames = Array.isArray(current.original_name) ? current.original_name : [];
-            } else if (Array.isArray(current)) {
-              currentFiles = current;
-            } else if (current) {
-              currentFiles = [current];
-            }
-            const newFiles = [...currentFiles, uploadResult.path];
-            const newOriginalNames = [...currentOriginalNames, uploadResult.original_name || file.name];
-            if (signedUrl) {
-              setSignedUrlsMultiple((p) => ({
-                ...p,
-                [fieldId]: { ...(p[fieldId] || {}), [newFiles.length - 1]: signedUrl },
-              }));
-            }
-            return {
-              ...prev,
-              [fieldId]: { value: newFiles, original_name: newOriginalNames },
-            };
-          });
-        } else {
-          setFormData((prev) => ({
-            ...prev,
-            [fieldId]: { value: uploadResult.path, original_name: uploadResult.original_name || file.name },
-          }));
-          if (signedUrl) setSignedUrls((prev) => ({ ...prev, [fieldId]: signedUrl }));
-        }
+        setFormData((prev) => ({
+          ...prev,
+          [fieldId]: { value: uploadResult.path, original_name: uploadResult.original_name || file.name },
+        }));
+        if (signedUrl) setSignedUrls((prev) => ({ ...prev, [fieldId]: signedUrl }));
       } catch (err: any) {
         toast({
           title: "Upload Failed",
@@ -401,9 +370,6 @@ export default function CompanyPortal() {
         });
       }
     };
-
-    const fieldType = fieldDef.field_type || fieldDef.type;
-    const isMultipleFiles = fieldType === "multiple_files";
 
     return (
       <div className="space-y-2 w-full min-w-0" key={fieldId}>
@@ -423,7 +389,6 @@ export default function CompanyPortal() {
           onUpload={handleFileUpload}
           onViewFile={handleViewFile}
           signedUrl={signedUrls[fieldId]}
-          signedUrls={isMultipleFiles ? signedUrlsMultiple[fieldId] : undefined}
           disabled={submitting}
           required={evaluateFieldRules(fieldId, "required", fieldRules, currentValues, false)}
           labelPosition={labelPosition}

@@ -93,7 +93,7 @@ export function FormStepFieldConfig({ item, step, onUpdate }: FormStepFieldConfi
                         </label>
                     </div>
 
-                    {(item.field_type === 'file' || item.field_type === 'multiple_files') && (
+                    {item.field_type === 'file' && (
                         <div className="space-y-1.5">
                             <Label className="text-xs font-medium text-muted-foreground">Allowed File Types</Label>
                             <Input

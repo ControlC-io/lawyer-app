@@ -2277,7 +2277,7 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
                     <SelectContent>
                       <SelectItem value="none">Select a file field</SelectItem>
                       {dataStructureItems
-                        .filter(item => item.field_type === 'file' || item.field_type === 'multiple_files')
+                        .filter(item => item.field_type === 'file')
                         .map((item) => (
                           <SelectItem key={item.id} value={item.id}>
                             {item.name}
