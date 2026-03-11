@@ -332,10 +332,41 @@ export async function resolveCompanyForRequest(
     return true;
   }
   if (req.user?.super_admin) {
-    const companyId =
+    let companyId =
       (req.headers['x-company-id'] as string) ||
       (req.body?.company_id as string) ||
       (req.query?.company_id as string);
+
+    // Auto-resolve company from execution if no company explicitly provided
+    if (!companyId && req.params?.executionId) {
+      try {
+        const execution = await prisma.workflowExecution.findUnique({
+          where: { id: req.params.executionId },
+          select: { company_id: true },
+        });
+        if (execution?.company_id) {
+          companyId = execution.company_id;
+        }
+      } catch (error) {
+        console.error('resolveCompanyForRequest: error looking up execution company:', error);
+      }
+    }
+
+    // Auto-resolve company from workflow if no company explicitly provided
+    if (!companyId && req.params?.workflowId) {
+      try {
+        const workflow = await prisma.workflow.findUnique({
+          where: { id: req.params.workflowId },
+          select: { company_id: true },
+        });
+        if (workflow?.company_id) {
+          companyId = workflow.company_id;
+        }
+      } catch (error) {
+        console.error('resolveCompanyForRequest: error looking up workflow company:', error);
+      }
+    }
+
     if (companyId && typeof companyId === 'string') {
       try {
         const company = await prisma.company.findFirst({

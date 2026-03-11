@@ -128,7 +128,7 @@ export const workflowController = {
         select: { company_id: true },
       });
       const executionCompanyId = execution?.company_id;
-      if (executionCompanyId && req.user && !req.company?.id) {
+      if (executionCompanyId && req.user && !req.company?.id && !req.user.super_admin) {
         const userCompany = await prisma.userCompany.findFirst({
           where: { user_id: req.user.id, company_id: executionCompanyId },
         });
