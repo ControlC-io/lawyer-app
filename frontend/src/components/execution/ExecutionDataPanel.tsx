@@ -1076,6 +1076,7 @@ export const ExecutionDataPanel = ({
           signedUrl={form.signedUrls[`${execRow.id}-${fieldUuid}`]}
           // ArrayField props
           fieldConfig={fieldConfig}
+          getSignedUrl={form.getSignedUrl}
           childFields={getAllFields()}
           renderChild={(childField, childValue, onChildChange, hideLabel, required, readonly) => {
             // Use required from configuration if provided, otherwise fallback to field's own required property
@@ -2196,6 +2197,7 @@ export const ExecutionDataPanel = ({
                   onUpload={file => form.handleFileUpload(field.id, file)} onViewFile={onFileView} isUploading={form.uploadingFiles[field.id]} signedUrl={form.signedUrls[`${eds.id}-${field.id}`]}
                   // ArrayField props
                   fieldConfig={fieldConfig}
+                  getSignedUrl={form.getSignedUrl}
                   childFields={getAllFields()} renderChild={(cf, cv, onChildChange, hideLabel, required, _readonly) => {
                     const cfType = cf.field_type || cf.type;
                     const isFileChild = cfType === 'file';

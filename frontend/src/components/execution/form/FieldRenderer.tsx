@@ -32,6 +32,8 @@ interface FieldRendererProps {
   // Context for ArrayField to render children
   childFields?: any[]; // The full list of fields to find children from
   renderChild?: (field: any, value: any, onChange: (val: any) => void, hideLabel?: boolean) => React.ReactNode;
+  // Callback to get a signed URL for a storage path (used by ArrayField for ZIP download)
+  getSignedUrl?: (path: string, filename?: string) => Promise<string | null>;
   // Field configuration from form settings
   fieldConfig?: {
     compact_mode?: boolean;
@@ -132,6 +134,7 @@ export const FieldRenderer = (props: FieldRendererProps) => {
         enableAddItem={otherProps.fieldConfig?.array_enable_add_item !== false}
         enableDelete={otherProps.fieldConfig?.array_enable_delete !== false}
         primaryColor={primaryColor}
+        getSignedUrl={otherProps.getSignedUrl}
       />;
 
     case "html":
