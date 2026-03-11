@@ -241,12 +241,22 @@ export const workflowController = {
         const rawDataStructure = (executionStep.step as any)?.workflow?.data_structure;
         const fields = Array.isArray(rawDataStructure) ? rawDataStructure : [];
         const fieldInfoMap: Record<string, { name: string; type: string }> = {};
+        // First pass: index all fields by id
         fields.forEach((field: any) => {
           if (field?.id) {
             fieldInfoMap[field.id] = {
               name: field.name || field.id,
               type: field.field_type || field.field_type_new || field.type || 'text',
             };
+          }
+        });
+        // Second pass: prefix child fields with parent array name (e.g. "documents.file")
+        fields.forEach((field: any) => {
+          if (field?.id && field.parent_item_id) {
+            const parent = fieldInfoMap[field.parent_item_id];
+            if (parent) {
+              fieldInfoMap[field.id].name = `${parent.name}.${field.name || field.id}`;
+            }
           }
         });
 
@@ -904,8 +914,15 @@ export const workflowController = {
     try {
       if (!(await resolveCompanyForRequest(req, res))) return;
       const { executionId } = req.params;
-      const { field_name, index, sub_field_name, value } = req.body;
+      let { field_name, index, sub_field_name, value } = req.body;
       const companyId = req.company!.id;
+
+      // Support dot notation: "arrayName.childName" auto-parses into field_name + sub_field_name
+      if (field_name && typeof field_name === 'string' && field_name.includes('.') && !sub_field_name) {
+        const dotIndex = field_name.indexOf('.');
+        sub_field_name = field_name.substring(dotIndex + 1);
+        field_name = field_name.substring(0, dotIndex);
+      }
 
       if (!executionId || !field_name || index === undefined || index === null || !sub_field_name) {
         return res.status(400).json({
