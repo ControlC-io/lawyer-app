@@ -331,11 +331,15 @@ export async function resolveCompanyForRequest(
   if (req.company) {
     return true;
   }
-  if (req.user?.super_admin) {
-    let companyId =
-      (req.headers['x-company-id'] as string) ||
-      (req.body?.company_id as string) ||
-      (req.query?.company_id as string);
+  if (req.user) {
+    const isSuperAdmin = !!req.user.super_admin;
+
+    // Super admins can specify company explicitly via header/body/query
+    let companyId = isSuperAdmin
+      ? (req.headers['x-company-id'] as string) ||
+        (req.body?.company_id as string) ||
+        (req.query?.company_id as string)
+      : undefined;
 
     // Auto-resolve company from execution if no company explicitly provided
     if (!companyId && req.params?.executionId) {
@@ -368,6 +372,23 @@ export async function resolveCompanyForRequest(
     }
 
     if (companyId && typeof companyId === 'string') {
+      // Non-super_admin JWT users must belong to the resolved company
+      if (!isSuperAdmin) {
+        try {
+          const membership = await prisma.userCompany.findFirst({
+            where: { user_id: req.user.id, company_id: companyId },
+          });
+          if (!membership) {
+            res.status(403).json({ error: 'Access denied to this company' });
+            return false;
+          }
+        } catch (error) {
+          console.error('resolveCompanyForRequest: error checking user membership:', error);
+          res.status(500).json({ error: 'Internal error resolving company access' });
+          return false;
+        }
+      }
+
       try {
         const company = await prisma.company.findFirst({
           where: { id: companyId, is_active: true },

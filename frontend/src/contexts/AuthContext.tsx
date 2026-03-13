@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, useCallback, useMemo } from "react";
+import { createContext, useContext, useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, setToken, clearToken } from "@/lib/api";
 
@@ -52,17 +52,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [userCompanies, setUserCompanies] = useState<UserCompany[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedCompanyId, setSelectedCompanyIdState] = useState<string | null>(null);
+  const [selectedCompanyId, setSelectedCompanyIdState] = useState<string | null>(
+    () => localStorage.getItem(SELECTED_COMPANY_KEY)
+  );
+  const selectedCompanyRef = useRef(selectedCompanyId);
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [permissions, setPermissions] = useState<string[]>([]);
   const navigate = useNavigate();
 
   const setSelectedCompanyId = useCallback((id: string | null) => {
     setSelectedCompanyIdState(id);
-    if (id) {
-      localStorage.setItem(SELECTED_COMPANY_KEY, id);
-    } else {
-      localStorage.removeItem(SELECTED_COMPANY_KEY);
+    selectedCompanyRef.current = id;
+    try {
+      if (id) {
+        localStorage.setItem(SELECTED_COMPANY_KEY, id);
+      } else {
+        localStorage.removeItem(SELECTED_COMPANY_KEY);
+      }
+    } catch {
+      // localStorage may be unavailable (private browsing, quota exceeded)
     }
   }, []);
 
@@ -107,10 +115,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setSession({ user: u });
 
       if (companies.length > 0) {
-        const storedCompanyId = localStorage.getItem(SELECTED_COMPANY_KEY);
-        const isStoredCompanyValid = storedCompanyId && companies.some((uc) => uc.company_id === storedCompanyId);
-        if (isStoredCompanyValid) {
-          setSelectedCompanyIdState(storedCompanyId);
+        const preferredId = selectedCompanyRef.current || localStorage.getItem(SELECTED_COMPANY_KEY);
+        const isPreferredValid = preferredId && companies.some((uc) => uc.company_id === preferredId);
+        if (isPreferredValid) {
+          setSelectedCompanyId(preferredId);
         } else {
           setSelectedCompanyId(companies[0].company_id);
         }

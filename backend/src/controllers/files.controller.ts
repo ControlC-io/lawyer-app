@@ -101,6 +101,7 @@ export const filesController = {
       });
 
       if (!execution) {
+        console.warn(`[uploadExecutionFile] Execution not found: executionId=${executionId}, resolved companyId=${companyId}, authMethod=${req.company ? 'api-key' : 'jwt'}, userId=${req.user?.id ?? 'none'}`);
         return res.status(404).json({
           error: 'Execution not found or access denied',
         });

@@ -19,11 +19,11 @@ router.post(
 /**
  * POST /api/workflows/executions/:executionId/files
  * Upload a file for an execution
- * Auth: API Key
+ * Auth: JWT or API Key
  */
 router.post(
   '/workflows/executions/:executionId/files',
-  apiKeyAuth,
+  authMiddleware,
   asyncHandler(filesController.uploadExecutionFile)
 );
 

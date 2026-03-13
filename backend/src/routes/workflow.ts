@@ -34,22 +34,22 @@ router.post(
 /**
  * POST /api/workflows/executions/:executionId/steps/:stepId/complete
  * Complete a step and advance the workflow
- * Auth: API Key
+ * Auth: JWT or API Key
  */
 router.post(
   '/executions/:executionId/steps/:stepId/complete',
-  apiKeyAuth,
+  authMiddleware,
   asyncHandler(workflowController.completeStep)
 );
 
 /**
  * POST /api/workflows/executions/:executionId/steps/:stepId/decision
  * Make a decision on a decision node
- * Auth: API Key
+ * Auth: JWT or API Key
  */
 router.post(
   '/executions/:executionId/steps/:stepId/decision',
-  apiKeyAuth,
+  authMiddleware,
   asyncHandler(workflowController.makeDecision)
 );
 
@@ -67,55 +67,55 @@ router.get(
 /**
  * PUT /api/workflows/executions/:executionId/data
  * Update execution data
- * Auth: API Key
+ * Auth: JWT or API Key
  */
 router.put(
   '/executions/:executionId/data',
-  apiKeyAuth,
+  authMiddleware,
   asyncHandler(workflowController.updateExecutionData)
 );
 
 /**
  * PATCH /api/workflows/executions/:executionId/data/array-item
  * Update a single sub-field in an existing array item
- * Auth: API Key
+ * Auth: JWT or API Key
  */
 router.patch(
   '/executions/:executionId/data/array-item',
-  apiKeyAuth,
+  authMiddleware,
   asyncHandler(workflowController.patchArrayItem)
 );
 
 /**
  * PATCH /api/workflows/executions/:executionId/name
  * Rename an execution
- * Auth: API Key
+ * Auth: JWT or API Key
  */
 router.patch(
   '/executions/:executionId/name',
-  apiKeyAuth,
+  authMiddleware,
   asyncHandler(workflowController.renameExecution)
 );
 
 /**
  * POST /api/workflows/executions/:executionId/logs
  * Add a log entry to an execution
- * Auth: API Key
+ * Auth: JWT or API Key
  */
 router.post(
   '/executions/:executionId/logs',
-  apiKeyAuth,
+  authMiddleware,
   asyncHandler(workflowController.addExecutionLog)
 );
 
 /**
  * PATCH /api/workflows/executions/:executionId/steps/:stepId
  * Update execution step (e.g. reassign)
- * Auth: API Key
+ * Auth: JWT or API Key
  */
 router.patch(
   '/executions/:executionId/steps/:stepId',
-  apiKeyAuth,
+  authMiddleware,
   asyncHandler(workflowController.updateExecutionStep)
 );
 
