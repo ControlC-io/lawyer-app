@@ -5,13 +5,18 @@ import { usersController } from '../controllers/users.controller';
 import { filesController } from '../controllers/files.controller';
 import { rolesController } from '../controllers/roles.controller';
 import { documentsController } from '../controllers/documents.controller';
-import { authMiddleware, ALL_COMPANIES, AuthRequest } from '../middleware/auth';
+import { authMiddleware, ALL_COMPANIES, AuthRequest, superAdminAuth } from '../middleware/auth';
 import { asyncHandler } from '../middleware/validation';
 import { requirePermission } from '../lib/rbac';
 import workflowDefinitionRoutes from './workflowDefinition';
 
 const router = Router();
 
+// ─── Super-admin routes (own auth, before authMiddleware blanket) ───
+/** POST /api/companies — create a new company */
+router.post('/', superAdminAuth, asyncHandler(companiesController.createCompany));
+
+// ─── All remaining routes require JWT / API key ───
 router.use(authMiddleware);
 
 /** Reject mutating requests when companyId='all' (reads only). */

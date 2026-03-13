@@ -6,6 +6,7 @@ import { canUserAccessFolder, getUserGroupIdsInCompany } from '../lib/folderAcce
 import { getAccessibleFileIds, canUserAccessFileByMetadata } from '../lib/documentAccess';
 import { storageService } from '../services/storage.service';
 
+
 /**
  * Ensure the authenticated user has access to the company (member of company).
  * Optionally require company_admin role.
@@ -73,6 +74,40 @@ export const companiesController = {
       return res.json(memberships.map((m) => ({ id: m.company.id, name: m.company.name })));
     } catch (error) {
       console.error('listCompanies error:', error);
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
+  /**
+   * POST /api/companies
+   * Create a new company (super admin only).
+   * Auto-generates an API key and seeds system roles.
+   */
+  async createCompany(req: AuthRequest, res: Response) {
+    try {
+      const { name } = req.body;
+      if (!name || typeof name !== 'string' || !name.trim()) {
+        return res.status(400).json({ error: 'Missing name', details: 'Company name is required' });
+      }
+
+      // Prisma middleware auto-generates API key and seeds system roles
+      const company = await prisma.company.create({
+        data: {
+          name: name.trim(),
+          is_active: true,
+        },
+        select: {
+          id: true,
+          name: true,
+          created_at: true,
+          api_key: true,
+          is_active: true,
+        },
+      });
+
+      return res.status(201).json(company);
+    } catch (error) {
+      console.error('createCompany error:', error);
       return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
     }
   },
