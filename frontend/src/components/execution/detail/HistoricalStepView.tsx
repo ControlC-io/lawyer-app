@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -184,6 +184,20 @@ export const HistoricalStepView = ({
     }
   };
 
+  const getSignedUrl = useCallback(async (path: string, filename?: string): Promise<string | null> => {
+    if (path.startsWith('http')) return path;
+    try {
+      const res = await api.post<{ signedUrl?: string }>('/api/files/signed-url', {
+        bucket: 'documents',
+        path: path.replace(/^\/+/, ''),
+        ...(filename ? { filename } : {}),
+      });
+      return res?.signedUrl || null;
+    } catch {
+      return null;
+    }
+  }, []);
+
   return (
     <div className="space-y-3 sm:space-y-4 w-full min-w-0 max-w-full overflow-hidden">
       <Card className="border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/20 w-full min-w-0 max-w-full overflow-x-hidden">
@@ -296,6 +310,7 @@ export const HistoricalStepView = ({
                             disabled={true}
                             childFields={allFields}
                             fieldConfig={fieldConfig}
+                            getSignedUrl={getSignedUrl}
                             renderChild={(childField, childValue, onChildChange, hideLabel, required) => {
                               const cfType = childField.field_type || childField.type;
                               const isFileChild = cfType === 'file' || cfType === 'signature';
