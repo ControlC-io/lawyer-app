@@ -222,7 +222,7 @@ export default function ApiConfigurations() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = 'floowly-api-documentation.json';
+      a.download = 'picobello-api-documentation.json';
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -274,7 +274,7 @@ export default function ApiConfigurations() {
             API Documentation
           </CardTitle>
           <CardDescription>
-            Download the complete OpenAPI/Swagger specification for the Floowly API
+            Download the complete OpenAPI/Swagger specification for the Picobello API
           </CardDescription>
         </CardHeader>
         <CardContent>

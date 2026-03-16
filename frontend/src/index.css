@@ -17,9 +17,11 @@ All colors MUST be HSL.
     --popover: 0 0% 100%;
     --popover-foreground: 240 10% 10%;
 
-    --primary: 262 83% 58%;
+    --primary: 221 77% 53%;
     --primary-foreground: 0 0% 100%;
-    --primary-glow: 262 100% 75%;
+    --primary-glow: 221 85% 65%;
+
+    --brand-secondary: 162 100% 36%;
 
     --secondary: 240 5% 96%;
     --secondary-foreground: 240 10% 10%;
@@ -27,15 +29,15 @@ All colors MUST be HSL.
     --muted: 240 5% 96%;
     --muted-foreground: 240 4% 46%;
 
-    --accent: 262 83% 95%;
-    --accent-foreground: 262 83% 40%;
+    --accent: 221 77% 95%;
+    --accent-foreground: 221 77% 40%;
 
     --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 100%;
 
     --border: 240 6% 90%;
     --input: 240 6% 90%;
-    --ring: 262 83% 58%;
+    --ring: 221 77% 53%;
 
     --radius: 0.75rem;
 
@@ -56,20 +58,21 @@ All colors MUST be HSL.
     --node-action: 217 91% 60%;
     --node-action-glow: 217 91% 80%;
 
-    /* Gradients */
-    --gradient-primary: linear-gradient(135deg, hsl(262 83% 58%), hsl(262 100% 75%));
+    /* Gradients - Picobello brand: primary #2a5ce5 → secondary #00b87d */
+    --gradient-primary: linear-gradient(135deg, hsl(221 77% 53%), hsl(162 100% 36%));
+    --gradient-primary-reverse: linear-gradient(135deg, hsl(162 100% 36%), hsl(221 77% 53%));
     --gradient-subtle: linear-gradient(180deg, hsl(240 20% 99%), hsl(240 15% 97%));
-    --shadow-glow: 0 8px 32px -8px hsl(262 83% 58% / 0.3);
+    --shadow-glow: 0 8px 32px -8px hsl(221 77% 53% / 0.3);
     --shadow-node: 0 4px 12px -2px hsl(240 10% 10% / 0.1);
 
     --sidebar-background: 0 0% 100%;
     --sidebar-foreground: 240 10% 10%;
-    --sidebar-primary: 262 83% 58%;
+    --sidebar-primary: 221 77% 53%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 262 83% 95%;
-    --sidebar-accent-foreground: 262 83% 40%;
+    --sidebar-accent: 221 77% 95%;
+    --sidebar-accent-foreground: 221 77% 40%;
     --sidebar-border: 240 6% 90%;
-    --sidebar-ring: 262 83% 58%;
+    --sidebar-ring: 221 77% 53%;
 
     /* Transitions */
     --transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
@@ -85,9 +88,9 @@ All colors MUST be HSL.
     --popover: 240 10% 13%;
     --popover-foreground: 240 5% 96%;
 
-    --primary: 262 83% 58%;
+    --primary: 221 77% 53%;
     --primary-foreground: 0 0% 100%;
-    --primary-glow: 262 100% 75%;
+    --primary-glow: 221 85% 65%;
 
     --secondary: 240 5% 20%;
     --secondary-foreground: 240 5% 96%;
@@ -96,26 +99,26 @@ All colors MUST be HSL.
     --muted-foreground: 240 5% 64%;
 
     --accent: 240 5% 20%;
-    --accent-foreground: 262 83% 58%;
+    --accent-foreground: 221 77% 58%;
 
     --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 100%;
 
     --border: 240 5% 20%;
     --input: 240 5% 20%;
-    --ring: 262 83% 58%;
+    --ring: 221 77% 53%;
 
     --gradient-subtle: linear-gradient(180deg, hsl(240 10% 10%), hsl(240 10% 8%));
-    --shadow-glow: 0 8px 32px -8px hsl(262 83% 58% / 0.5);
+    --shadow-glow: 0 8px 32px -8px hsl(221 77% 53% / 0.5);
 
     --sidebar-background: 240 10% 13%;
     --sidebar-foreground: 240 5% 96%;
-    --sidebar-primary: 262 83% 58%;
+    --sidebar-primary: 221 77% 53%;
     --sidebar-primary-foreground: 0 0% 100%;
     --sidebar-accent: 240 5% 20%;
-    --sidebar-accent-foreground: 262 83% 58%;
+    --sidebar-accent-foreground: 221 77% 58%;
     --sidebar-border: 240 5% 20%;
-    --sidebar-ring: 262 83% 58%;
+    --sidebar-ring: 221 77% 53%;
   }
 }
 
@@ -137,6 +140,14 @@ All colors MUST be HSL.
 
 .animate-flow {
   animation: flow-animation 1s linear infinite;
+}
+
+/* Picobello brand gradient (primary → secondary) */
+.bg-brand-gradient {
+  background: var(--gradient-primary);
+}
+.hover\:bg-brand-gradient:hover {
+  background: var(--gradient-primary);
 }
 
 /* Weekend gradient styling for calendar - only show when not selected or today */

@@ -10,8 +10,17 @@ import { storageService } from '../services/storage.service';
 /**
  * Ensure the authenticated user has access to the company (member of company).
  * Optionally require company_admin role.
+ * Company API key (req.company, no req.user) is treated as company_admin for that company only.
  */
 async function ensureCompanyAccess(req: AuthRequest, companyId: string, requireAdmin = false) {
+  // Company API key: treat as company_admin for that company only
+  if (req.company && !req.user) {
+    if (req.company.id !== companyId) {
+      return { error: { status: 403, body: { error: 'Forbidden', details: 'API key is not valid for this company' } } };
+    }
+    return { userCompany: { role: 'company_admin' as const } };
+  }
+
   const userId = req.user?.id;
   if (!userId) {
     return { error: { status: 401, body: { error: 'Unauthorized', details: 'Authentication required' } } };
@@ -62,6 +71,11 @@ export const companiesController = {
    */
   async listCompanies(req: AuthRequest, res: Response) {
     try {
+      // Company API key (no user): return the single company the key belongs to
+      if (req.company && !req.user) {
+        return res.json([{ id: req.company.id, name: req.company.name }]);
+      }
+
       const userId = req.user?.id;
       if (!userId) return res.status(401).json({ error: 'Unauthorized' });
       // Super admin API key or JWT super_admin: return all companies
@@ -662,9 +676,6 @@ export const companiesController = {
       if (access.error) {
         return res.status(access.error.status).json(access.error.body);
       }
-      if (!req.user?.super_admin && !userId) {
-        return res.status(401).json({ error: 'Unauthorized', details: 'Authentication required' });
-      }
 
       const where: Prisma.WorkflowExecutionWhereInput = {
         ...companyFilter(companyId),
@@ -675,7 +686,7 @@ export const companiesController = {
         where.workflow = { category_id: categoryId || null };
       }
 
-      const isPrivileged = req.user?.super_admin === true;
+      const isPrivileged = req.user?.super_admin === true || (!!req.company && !req.user);
       let userGroupIds: string[] = [];
       if (!isPrivileged && userId) {
         userGroupIds = await getUserGroupIdsForCompany(userId, companyId);
@@ -833,11 +844,8 @@ export const companiesController = {
       if (!companyId) return res.status(400).json({ error: 'Missing company ID' });
       const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
-      if (!req.user?.super_admin && !userId) {
-        return res.status(401).json({ error: 'Unauthorized', details: 'Authentication required' });
-      }
 
-      const isPrivileged = req.user?.super_admin === true;
+      const isPrivileged = req.user?.super_admin === true || (!!req.company && !req.user);
       const stepWhere: Prisma.WorkflowExecutionStepWhereInput = {
         ...companyFilter(companyId),
         status: status as any,

@@ -1,12 +1,13 @@
 {
-  "name": "Floowly",
+  "name": "Picobello",
   "version": "1.0.0",
-  "description": "Monorepo for Floowly",
+  "description": "Monorepo for Picobello",
   "private": true,
   "workspaces": [
     "frontend",
     "backend",
-    "shared"
+    "shared",
+    "mcp-server"
   ],
   "dependencies": {
     "@prisma/client": "5.22.0"

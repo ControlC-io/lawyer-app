@@ -4,6 +4,13 @@ import { prisma } from '../lib/prisma';
 import { workflowService } from '../services/workflow.service';
 
 async function ensureCompanyAccess(req: AuthRequest, companyId: string, requireAdmin = false) {
+  if (req.company && !req.user) {
+    if (req.company.id !== companyId) {
+      return { error: { status: 403, body: { error: 'Forbidden', details: 'API key is not valid for this company' } } };
+    }
+    return { userCompany: { role: 'company_admin' as const } };
+  }
+
   const userId = req.user?.id;
   if (!userId) {
     return { error: { status: 401, body: { error: 'Unauthorized', details: 'Authentication required' } } };
@@ -75,12 +82,8 @@ export const workflowDefinitionController = {
       const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
 
-      const userId = req.user?.id;
-      if (!userId) {
-        return res.status(401).json({ error: 'Unauthorized' });
-      }
-
-      const userGroupIds = await getUserGroupIds(userId);
+      const userId = req.user?.id ?? '';
+      const userGroupIds = userId ? await getUserGroupIds(userId) : [];
 
       // Build the base where clause
       const baseWhere: { company_id?: string; category_id?: string | null } = { ...companyFilter(companyId) };
@@ -88,7 +91,7 @@ export const workflowDefinitionController = {
         baseWhere.category_id = (rawCategoryId === '' || rawCategoryId === 'null') ? null : rawCategoryId;
       }
 
-      const isPrivileged = req.user?.super_admin === true;
+      const isPrivileged = req.user?.super_admin === true || (!!req.company && !req.user);
       const visibilityTypes = getPermissionTypeFallbacks('visibility');
       const workflows = await prisma.workflow.findMany({
         where: {

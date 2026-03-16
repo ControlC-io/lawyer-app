@@ -1,9 +1,9 @@
 {
   "openapi": "3.0.0",
   "info": {
-    "title": "Floowly API",
+    "title": "Picobello API",
     "version": "1.0.0",
-    "description": "API documentation for the Floowly backend services."
+    "description": "API documentation for the Picobello backend services."
   },
   "servers": [
     {

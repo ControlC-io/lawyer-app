@@ -5,6 +5,13 @@ import { getAccessibleFileIds, getAccessibleFileIdsWithLevels, buildVirtualTree,
 import { getUserGroupIdsInCompany } from '../lib/folderAccess';
 
 async function ensureCompanyAccess(req: AuthRequest, companyId: string) {
+  if (req.company && !req.user) {
+    if (req.company.id !== companyId) {
+      return { error: { status: 403, body: { error: 'Forbidden', details: 'API key is not valid for this company' } } };
+    }
+    return { userCompany: { role: 'company_admin' } };
+  }
+
   const userId = req.user?.id;
   if (!userId) {
     return { error: { status: 401, body: { error: 'Unauthorized', details: 'Authentication required' } } };
@@ -171,8 +178,11 @@ export const documentsController = {
     const access = await ensureCompanyAccess(req, companyId);
     if (access.error) return res.status(access.error.status).json(access.error.body);
 
-    const userId = req.user?.id;
-    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+    const userId = req.user?.id ?? '';
+    const isCompanyAdmin = access.userCompany?.role === 'company_admin' || !!req.user?.super_admin;
+    const userGroupIds = userId
+      ? await getUserGroupIdsInCompany(userId, companyId)
+      : [];
 
     // Super admin 'all': return all files across companies without permission filtering
     if (companyId === ALL_COMPANIES && req.user?.super_admin) {
@@ -189,9 +199,6 @@ export const documentsController = {
       }));
       return res.json({ files: serialized, hasWriteAccess: true });
     }
-
-    const isCompanyAdmin = access.userCompany?.role === 'company_admin' || !!req.user?.super_admin;
-    const userGroupIds = await getUserGroupIdsInCompany(userId, companyId);
 
     // Parse metadata filters from query: ?filters=[{"key_id":"x","value":"y"}] or [{"key_id":"x","missing":true}]
     let metadataFilters: Array<{ key_id: string; value: string }> | undefined;
@@ -311,9 +318,7 @@ export const documentsController = {
     const access = await ensureCompanyAccess(req, companyId);
     if (access.error) return res.status(access.error.status).json(access.error.body);
 
-    const userId = req.user?.id;
-    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
-
+    const userId = req.user?.id ?? '';
     const isCompanyAdmin = access.userCompany?.role === 'company_admin' || !!req.user?.super_admin;
 
     let accessibleIds: string[];
@@ -321,9 +326,9 @@ export const documentsController = {
       const allFiles = await prisma.file.findMany({ select: { id: true } });
       accessibleIds = allFiles.map((f) => f.id);
     } else {
-      const userGroupIds = await getUserGroupIdsInCompany(userId, companyId);
+      const userGroupIds = userId ? await getUserGroupIdsInCompany(userId, companyId) : [];
       accessibleIds = await getAccessibleFileIds({
-        userId,
+        userId: userId || 'api-key',
         companyId,
         isCompanyAdmin,
         userGroupIds,
@@ -401,7 +406,10 @@ export const documentsController = {
     if (access.error) return res.status(access.error.status).json(access.error.body);
 
     const userId = req.user?.id;
-    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+    if (!userId && !(access.userCompany?.role === 'company_admin')) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+    if (!userId) return res.json({ key_order: [] }); // API key: no per-user config
 
     const config = await prisma.userDocumentTreeConfig.findUnique({
       where: { user_id_company_id: { user_id: userId, company_id: companyId } },
@@ -417,7 +425,9 @@ export const documentsController = {
     if (access.error) return res.status(access.error.status).json(access.error.body);
 
     const userId = req.user?.id;
-    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+    if (!userId) {
+      return res.status(400).json({ error: 'Tree config is per-user; JWT required' });
+    }
 
     if (!Array.isArray(key_order)) {
       return res.status(400).json({ error: 'key_order must be an array of metadata key IDs' });
@@ -443,12 +453,12 @@ export const documentsController = {
     const access = await ensureCompanyAccess(req, companyId);
     if (access.error) return res.status(access.error.status).json(access.error.body);
 
-    const userId = req.user?.id;
-    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
-
+    const userId = req.user?.id ?? null;
     const isCompanyAdmin = access.userCompany?.role === 'company_admin' || !!req.user?.super_admin;
+    if (!userId && !isCompanyAdmin) return res.status(401).json({ error: 'Unauthorized' });
     if (!isCompanyAdmin) {
-      // Check if user has any write permission rules
+      // Check if user has any write permission rules (userId is defined when !isCompanyAdmin due to check above)
+      if (!userId) return res.status(401).json({ error: 'Unauthorized' });
       const userGroupIds = await getUserGroupIdsInCompany(userId, companyId);
       const rules = await prisma.documentPermissionRule.findMany({
         where: {
@@ -577,11 +587,10 @@ export const documentsController = {
     });
     keys.forEach((k) => { if (k.name) keyMap.set(k.name, k.id); });
 
-    const userId = req.user?.id;
-    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
-
+    const userId = req.user?.id ?? '';
     const isCompanyAdmin = access.userCompany?.role === 'company_admin' || !!req.user?.super_admin;
-    const userGroupIds = await getUserGroupIdsInCompany(userId, companyId);
+    if (!userId && !isCompanyAdmin) return res.status(401).json({ error: 'Unauthorized' });
+    const userGroupIds = userId ? await getUserGroupIdsInCompany(userId, companyId) : [];
 
     const files = await prisma.file.findMany({
       where: { id: { in: file_ids }, company_id: companyId },

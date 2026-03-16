@@ -53,11 +53,11 @@ const nodeStyles = {
     shape: "rounded-lg",
   },
   edit_form: {
-    bg: "bg-violet-100",
-    borderColor: "border-violet-400",
-    ringColor: "ring-violet-400",
-    textColor: "text-violet-700",
-    shadow: "shadow-violet-200/50",
+    bg: "bg-primary/10",
+    borderColor: "border-primary",
+    ringColor: "ring-primary",
+    textColor: "text-primary",
+    shadow: "shadow-primary/20",
     shape: "rounded-lg",
   },
   file: {

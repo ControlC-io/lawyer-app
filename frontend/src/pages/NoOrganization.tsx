@@ -17,8 +17,8 @@ export default function NoOrganization() {
       <Card className="w-full max-w-md border-2">
         <CardHeader className="text-center">
           <div className="flex justify-center mb-4">
-            <div className="p-3 rounded-full bg-violet-100 dark:bg-violet-900/30">
-              <Building2 className="h-10 w-10 text-violet-600" />
+            <div className="p-3 rounded-full bg-primary/10">
+              <Building2 className="h-10 w-10 text-primary" />
             </div>
           </div>
           <CardTitle className="text-2xl font-bold">{t("noOrganization.title")}</CardTitle>
@@ -28,7 +28,7 @@ export default function NoOrganization() {
         </CardHeader>
         <CardContent className="space-y-4">
           <Button 
-            className="w-full bg-gradient-to-r from-violet-500 to-purple-700 hover:from-violet-600 hover:to-purple-800 text-lg py-6"
+            className="w-full bg-brand-gradient text-white hover:opacity-90 text-lg py-6"
             asChild
           >
             <Link to="/?demo=true">
@@ -48,7 +48,7 @@ export default function NoOrganization() {
       <div className="mt-8">
         <img 
           src="/logo.png" 
-          alt="Floowly" 
+          alt="Picobello" 
           className="h-8 opacity-50 grayscale hover:grayscale-0 transition-all"
         />
       </div>

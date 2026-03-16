@@ -760,14 +760,14 @@ export default function CompanyPortal() {
           <div className="max-w-4xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-center gap-3 text-sm text-gray-500 font-normal">
             <span>This portal has been created with</span>
             <a
-              href="https://floowly.com"
+              href="https://picobello.com"
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-2 font-normal text-gray-600 hover:text-gray-800 transition-colors"
             >
               <img
                 src="/logo.png"
-                alt="Floowly"
+                alt="Picobello"
                 className="h-[20px] w-[60px] object-contain grayscale"
               />
             </a>
@@ -864,14 +864,14 @@ export default function CompanyPortal() {
         <div className="max-w-4xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-center gap-3 text-sm text-gray-500 font-normal">
           <span>This portal has been created with</span>
           <a
-            href="https://floowly.com"
+            href="https://picobello.com"
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center gap-2 font-normal text-gray-600 hover:text-gray-800 transition-colors"
           >
             <img
               src="/logo.png"
-              alt="Floowly"
+              alt="Picobello"
               className="h-[20px] w-[60px] object-contain grayscale"
             />
           </a>

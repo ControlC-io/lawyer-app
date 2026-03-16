@@ -11,7 +11,7 @@ const tools = [
   { type: "end" as const, icon: Circle, label: "End", color: "text-red-600" },
   { type: "decision" as const, icon: Diamond, label: "Decision", color: "text-yellow-600" },
   { type: "action" as const, icon: Square, label: "Action", color: "text-blue-600" },
-  { type: "edit_form" as const, icon: FileEdit, label: "Form", color: "text-purple-600" },
+  { type: "edit_form" as const, icon: FileEdit, label: "Form", color: "text-primary" },
   { type: "file" as const, icon: FolderOpen, label: "File", color: "text-orange-600" },
 ];
 

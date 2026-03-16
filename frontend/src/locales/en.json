@@ -30,7 +30,7 @@
   },
   "hero": {
     "badge": "AI automation with human supervision",
-    "title": "Floowly, your junior {rotating}",
+    "title": "Picobello, your junior {rotating}",
     "rotatingWords": ["assistant", "buyer", "accountant", "salesperson", "HR officer"],
     "subtitle": "Create, manage, and execute your business processes with ease. Automate repetitive tasks and boost productivity.",
     "ctaPrimary": "Get started for free",
@@ -57,7 +57,7 @@
     },
     "apiIntegrations": {
       "title": "API Integrations",
-      "description": "Connect Floowly to your existing tools via APIs. Automate data exchanges between your systems."
+      "description": "Connect Picobello to your existing tools via APIs. Automate data exchanges between your systems."
     },
     "multiTenant": {
       "title": "Multi-Tenant Management",
@@ -74,7 +74,7 @@
   },
   "useCases": {
     "title": "Use Cases by Department",
-    "subtitle": "Discover how Floowly can transform your company's processes",
+    "subtitle": "Discover how Picobello can transform your company's processes",
     "filterAll": "All Departments",
     "showMore": "Show more",
     "showLess": "Show less",
@@ -179,7 +179,7 @@
   },
   "cta": {
     "title": "Ready to transform your processes?",
-    "subtitle": "Join Floowly today and discover how to simplify your workflows",
+    "subtitle": "Join Picobello today and discover how to simplify your workflows",
     "primary": "Create free account",
     "secondary": "Contact sales"
   },
@@ -512,7 +512,7 @@
   },
   "noOrganization": {
     "title": "No Organization Found",
-    "description": "It seems you are not yet part of an organization. You need to be invited to an organization or create one to access Floowly.",
+    "description": "It seems you are not yet part of an organization. You need to be invited to an organization or create one to access Picobello.",
     "cta": "Request a Demo to Create One",
     "backToLanding": "Back to Landing Page"
   },

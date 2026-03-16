@@ -165,7 +165,7 @@ export const ExecutionList = ({ executions }: ExecutionListProps) => {
                                                     <Badge
                                                         key={idx}
                                                         variant="outline"
-                                                        className="text-[10px] font-medium px-1.5 py-0 h-5 bg-purple-50/50 text-purple-700 border-purple-200 dark:bg-purple-900/10 dark:text-purple-300 dark:border-purple-800"
+                                                        className="text-[10px] font-medium px-1.5 py-0 h-5 bg-primary/10 text-primary border-primary/30 dark:bg-primary/20 dark:text-primary dark:border-primary/50"
                                                     >
                                                         {stepName}
                                                     </Badge>
@@ -173,7 +173,7 @@ export const ExecutionList = ({ executions }: ExecutionListProps) => {
                                             ) : execution.current_step_name ? (
                                                 <Badge
                                                     variant="outline"
-                                                    className="text-[10px] font-medium px-1.5 py-0 h-5 bg-purple-50/50 text-purple-700 border-purple-200 dark:bg-purple-900/10 dark:text-purple-300 dark:border-purple-800"
+                                                    className="text-[10px] font-medium px-1.5 py-0 h-5 bg-primary/10 text-primary border-primary/30 dark:bg-primary/20 dark:text-primary dark:border-primary/50"
                                                 >
                                                     {execution.current_step_name}
                                                 </Badge>

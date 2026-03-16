@@ -99,7 +99,7 @@ export function FeedbackDialog({ isCollapsed = false, open: controlledOpen, onOp
       await api.post(
         "/api/public/feedback",
         {
-          userEmail: profile?.email || "anonymous@floowly.app",
+          userEmail: profile?.email || "anonymous@picobello.app",
           userName: profile?.full_name || "Anonymous User",
           feedback,
         },

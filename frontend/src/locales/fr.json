@@ -30,7 +30,7 @@
   },
   "hero": {
     "badge": "Automatisation IA avec supervision humaine",
-    "title": "Floowly, votre {rotating} junior",
+    "title": "Picobello, votre {rotating} junior",
     "rotatingWords": ["assistant", "acheteur", "comptable", "commercial", "HR officer"],
     "subtitle": "Créez, gérez et exécutez vos processus métier en toute simplicité. Automatisez vos tâches répétitives et gagnez en productivité.",
     "ctaPrimary": "Commencer gratuitement",
@@ -57,7 +57,7 @@
     },
     "apiIntegrations": {
       "title": "Intégrations API",
-      "description": "Connectez Floowly à vos outils existants via des API. Automatisez les échanges de données entre vos systèmes."
+      "description": "Connectez Picobello à vos outils existants via des API. Automatisez les échanges de données entre vos systèmes."
     },
     "multiTenant": {
       "title": "Gestion Multi-tenant",
@@ -74,7 +74,7 @@
   },
   "useCases": {
     "title": "Cas d'usage par département",
-    "subtitle": "Découvrez comment Floowly peut transformer les processus de votre entreprise",
+    "subtitle": "Découvrez comment Picobello peut transformer les processus de votre entreprise",
     "filterAll": "Tous les départements",
     "showMore": "Voir plus",
     "showLess": "Voir moins",
@@ -179,7 +179,7 @@
   },
   "cta": {
     "title": "Prêt à transformer vos processus ?",
-    "subtitle": "Rejoignez Floowly dès aujourd'hui et découvrez comment simplifier vos workflows",
+    "subtitle": "Rejoignez Picobello dès aujourd'hui et découvrez comment simplifier vos workflows",
     "primary": "Créer un compte gratuit",
     "secondary": "Contacter les ventes"
   },
@@ -512,7 +512,7 @@
   },
   "noOrganization": {
     "title": "Aucune organisation trouvée",
-    "description": "Il semble que vous ne fassiez pas encore partie d'une organisation. Vous devez être invité à une organisation ou en créer une pour accéder à Floowly.",
+    "description": "Il semble que vous ne fassiez pas encore partie d'une organisation. Vous devez être invité à une organisation ou en créer une pour accéder à Picobello.",
     "cta": "Demander une démo pour en créer une",
     "backToLanding": "Retour à l'accueil"
   },

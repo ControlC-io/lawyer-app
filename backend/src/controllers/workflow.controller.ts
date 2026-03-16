@@ -752,13 +752,15 @@ export const workflowController = {
     try {
       if (!(await resolveCompanyForRequest(req, res))) return;
       const { executionId } = req.params;
-      const { data } = req.body;
+      const { data, values } = req.body;
       const companyId = req.company!.id;
 
-      if (!executionId || !data || typeof data !== 'object') {
+      const hasData = data && typeof data === 'object';
+      const hasValues = values && typeof values === 'object';
+      if (!executionId || (!hasData && !hasValues)) {
         return res.status(400).json({
           error: 'missing or invalid parameters',
-          details: 'execution_id and data object are required',
+          details: 'execution_id and a data or values object are required',
         });
       }
 
@@ -793,6 +795,24 @@ export const workflowController = {
         }
       });
 
+      // Normalize input: accept data (field names) and/or values (field IDs)
+      const updatesByFieldId: Record<string, any> = {};
+      const unmatchedFields: string[] = [];
+      if (hasData) {
+        for (const [name, value] of Object.entries(data)) {
+          const fieldId = fieldNameToId[name];
+          if (fieldId) updatesByFieldId[fieldId] = value;
+          else unmatchedFields.push(name);
+        }
+      }
+      if (hasValues) {
+        for (const [key, value] of Object.entries(values)) {
+          const fieldId = fieldIdToField[key] ? key : fieldNameToId[key];
+          if (fieldId) updatesByFieldId[fieldId] = value;
+          else unmatchedFields.push(key);
+        }
+      }
+
       // Fetch existing execution data
       const existingData = await prisma.workflowExecutionData.findFirst({
         where: { execution_id: executionId },
@@ -804,17 +824,11 @@ export const workflowController = {
 
       const currentValues = (existingData.values || {}) as Record<string, any>;
       const transformedValues: Record<string, any> = {};
-      const unmatchedFields: string[] = [];
 
-      // Process each field in the data object
-      for (const [key, value] of Object.entries(data)) {
-        const fieldId = fieldNameToId[key];
-        const field = fieldId ? fieldIdToField[fieldId] : null;
-
-        if (!field) {
-          unmatchedFields.push(key);
-          continue;
-        }
+      // Process each field update (by field ID)
+      for (const [fieldId, value] of Object.entries(updatesByFieldId)) {
+        const field = fieldIdToField[fieldId];
+        if (!field) continue;
 
         // Handle array fields
         if (field.field_type === 'array' && Array.isArray(value)) {
@@ -896,7 +910,7 @@ export const workflowController = {
         success: true,
         message: 'execution data updated successfully',
         updated_record: updatedRecord,
-        updated_fields: Object.keys(data),
+        updated_fields: Object.keys(transformedValues),
       });
     } catch (error) {
       console.error('Error updating execution data:', error);

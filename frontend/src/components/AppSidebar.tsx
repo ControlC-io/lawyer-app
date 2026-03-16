@@ -98,12 +98,12 @@ export function AppSidebar() {
           <div className="flex items-center gap-2">
             <img 
               src={open ? "/logo.png" : "/favicon.png"}
-              alt="Floowly" 
+              alt="Picobello" 
               className="h-8"
             />
             {open && (
               <Badge 
-                className="text-xs font-bold cursor-pointer bg-gradient-to-r from-orange-500 to-red-600 text-white hover:from-orange-600 hover:to-red-700 transition-all shadow-md hover:shadow-lg px-3 py-1"
+                className="text-xs font-bold cursor-pointer bg-brand-gradient text-white hover:opacity-90 transition-all shadow-md hover:shadow-lg px-3 py-1"
                 onClick={() => setFeedbackDialogOpen(true)}
                 title="Click to send feedback"
               >
@@ -120,7 +120,7 @@ export function AppSidebar() {
                 {open ? (
                   <Button
                     onClick={() => setStartWorkflowDialogOpen(true)}
-                    className="w-full bg-gradient-to-r from-violet-500 to-purple-700 hover:from-violet-600 hover:to-purple-800 text-white shadow-md transition-all"
+                    className="w-full bg-brand-gradient text-white hover:opacity-90 shadow-md transition-all"
                     size="default"
                   >
                     <Play className="h-4 w-4 mr-2" />
@@ -129,7 +129,7 @@ export function AppSidebar() {
                 ) : (
                   <Button
                     onClick={() => setStartWorkflowDialogOpen(true)}
-                    className="w-full bg-gradient-to-r from-violet-500 to-purple-700 hover:from-violet-600 hover:to-purple-800 text-white shadow-md transition-all"
+                    className="w-full bg-brand-gradient text-white hover:opacity-90 shadow-md transition-all"
                     size="icon"
                     title={t("sidebar.startWorkflow")}
                   >
