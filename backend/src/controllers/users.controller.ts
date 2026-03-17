@@ -482,4 +482,154 @@ export const usersController = {
       });
     }
   },
+
+  /**
+   * POST /api/companies/:companyId/users (super admin only)
+   * Create a new user with email/password and add them to the company (no invitation).
+   * Body: { email, password, full_name?, role? }
+   */
+  async createUserForCompany(req: AuthRequest, res: Response) {
+    try {
+      if (!req.user?.super_admin) {
+        return res.status(403).json({ error: 'Forbidden', details: 'Super admin only' });
+      }
+      const { companyId } = req.params;
+      const { email, password, full_name, role } = req.body || {};
+      if (!companyId || !email || typeof email !== 'string' || !password || typeof password !== 'string') {
+        return res.status(400).json({
+          error: 'Missing required fields',
+          details: 'companyId, email and password are required',
+        });
+      }
+      const emailNorm = email.toLowerCase().trim();
+      if (password.length < 6) {
+        return res.status(400).json({ error: 'Password must be at least 6 characters' });
+      }
+      const companyRole = role === 'company_admin' ? 'company_admin' : 'user';
+
+      const existingUser = await prisma.user.findUnique({
+        where: { email: emailNorm },
+        select: { id: true },
+      });
+      if (existingUser) {
+        return res.status(400).json({ error: 'User already exists', details: 'Use "Add existing user" to link this email to the company' });
+      }
+
+      const company = await prisma.company.findUnique({
+        where: { id: companyId },
+        select: { id: true },
+      });
+      if (!company) {
+        return res.status(404).json({ error: 'Company not found' });
+      }
+
+      const hashedPassword = await bcrypt.hash(password, 10);
+
+      const user = await prisma.user.create({
+        data: {
+          email: emailNorm,
+          encrypted_password: hashedPassword,
+          email_confirmed_at: new Date(),
+        },
+        select: { id: true, email: true },
+      });
+
+      await prisma.profile.create({
+        data: {
+          id: user.id,
+          email: user.email,
+          full_name: typeof full_name === 'string' ? full_name.trim() || null : null,
+        },
+      });
+
+      await prisma.userCompany.create({
+        data: {
+          user_id: user.id,
+          company_id: companyId,
+          role: companyRole,
+        },
+      });
+
+      const profile = await prisma.profile.findUnique({
+        where: { id: user.id },
+        select: { id: true, email: true, full_name: true },
+      });
+      return res.status(201).json({
+        id: profile?.id,
+        email: profile?.email,
+        full_name: profile?.full_name,
+        role: companyRole,
+      });
+    } catch (error) {
+      console.error('createUserForCompany error:', error);
+      return res.status(500).json({
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  },
+
+  /**
+   * POST /api/companies/:companyId/users/link (super admin only)
+   * Add an existing user (by email) to the company. Body: { email, role? }
+   */
+  async addExistingUserToCompany(req: AuthRequest, res: Response) {
+    try {
+      if (!req.user?.super_admin) {
+        return res.status(403).json({ error: 'Forbidden', details: 'Super admin only' });
+      }
+      const { companyId } = req.params;
+      const { email, role } = req.body || {};
+      if (!companyId || !email || typeof email !== 'string') {
+        return res.status(400).json({
+          error: 'Missing required fields',
+          details: 'companyId and email are required',
+        });
+      }
+      const emailNorm = email.toLowerCase().trim();
+      const companyRole = role === 'company_admin' ? 'company_admin' : 'user';
+
+      const profile = await prisma.profile.findFirst({
+        where: { email: emailNorm },
+        select: { id: true, email: true, full_name: true },
+      });
+      if (!profile) {
+        return res.status(404).json({ error: 'User not found', details: 'No account exists with this email. Use "Create user" to create one with a password.' });
+      }
+
+      const company = await prisma.company.findUnique({
+        where: { id: companyId },
+        select: { id: true },
+      });
+      if (!company) {
+        return res.status(404).json({ error: 'Company not found' });
+      }
+
+      const existing = await prisma.userCompany.findFirst({
+        where: { user_id: profile.id, company_id: companyId },
+      });
+      if (existing) {
+        return res.status(400).json({ error: 'User already in company', details: 'This user is already a member of this company' });
+      }
+
+      await prisma.userCompany.create({
+        data: {
+          user_id: profile.id,
+          company_id: companyId,
+          role: companyRole,
+        },
+      });
+
+      return res.status(201).json({
+        id: profile.id,
+        email: profile.email,
+        full_name: profile.full_name,
+        role: companyRole,
+      });
+    } catch (error) {
+      console.error('addExistingUserToCompany error:', error);
+      return res.status(500).json({
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  },
 };

@@ -21,8 +21,11 @@ import { FormBlocksEditor } from "./FormBlocksEditor";
 import { FieldRulesEditor } from "./FieldRulesEditor";
 import { FieldValidationsEditor } from "./FieldValidationsEditor";
 import { getIconComponent } from "@/lib/iconUtils";
+import { getTagColors } from "@/lib/tagColors";
 import { Folder } from "lucide-react";
 import { PermissionTargetPicker } from "./PermissionTargetPicker";
+import { InteractivePromptEditor } from "@/components/promptTemplate/InteractivePromptEditor";
+import type { PromptValues } from "@/lib/promptTemplate";
 
 type KeyValuePair = { key: string; value: string; mode?: "static" | "bind" };
 
@@ -61,6 +64,8 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
   const [agents, setAgents] = useState<Array<{ id: string; name: string; category_id: string | null }>>([]);
   const [agentCategories, setAgentCategories] = useState<Array<{ id: string; name: string; icon: string | null }>>([]);
   const [metadataKeys, setMetadataKeys] = useState<Array<{ id: string; name: string }>>([]);
+  const [agentPromptTemplate, setAgentPromptTemplate] = useState<string>("");
+  const [agentPromptTemplateLoading, setAgentPromptTemplateLoading] = useState(false);
 
   // Default to assign to execution creator (true) if not set
   const assignToExecutionCreator = step.config.assign_to_execution_creator !== false;
@@ -179,6 +184,25 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
     fetchAgents();
     fetchAgentCategories();
   }, [companyId, workflowId, step.step_type]);
+
+  useEffect(() => {
+    if (step.action_type === "agent" && step.config.agent_id) {
+      setAgentPromptTemplateLoading(true);
+      api
+        .get<{ prompt_template?: string | null }>(`/api/agents/configurations/${step.config.agent_id}`)
+        .then((config) => {
+          setAgentPromptTemplate(config.prompt_template ?? "");
+        })
+        .catch(() => {
+          setAgentPromptTemplate("");
+        })
+        .finally(() => {
+          setAgentPromptTemplateLoading(false);
+        });
+    } else {
+      setAgentPromptTemplate("");
+    }
+  }, [step.action_type, step.config.agent_id]);
 
   useEffect(() => {
     fetchDataStructureItems();
@@ -835,7 +859,7 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
                             <div className="flex items-center gap-2">
                               <div
                                 className="w-3 h-3 rounded-full"
-                                style={{ backgroundColor: status.color }}
+                                style={{ backgroundColor: getTagColors(status.color).dot }}
                               />
                               <span>{status.name}</span>
                             </div>
@@ -964,7 +988,6 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
                             id: crypto.randomUUID(),
                             agent_id: null,
                             api_data: [],
-                            additional_comment: "",
                             data_to_update: []
                           };
                           onUpdateStep({
@@ -1045,9 +1068,9 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
                                 <div className="space-y-2">
                                   <Label>Data to Send</Label>
                                   <p className="text-xs text-muted-foreground mb-2">
-                                    Select data fields to send to the agent.
+                                    Click fields to select or deselect data to send to the agent.
                                   </p>
-                                  <div className="border rounded-md p-3 space-y-2 max-h-60 overflow-y-auto">
+                                  <div className="border rounded-md p-3 flex flex-wrap gap-2 max-h-60 overflow-y-auto">
                                     {dataStructureItems.length === 0 && (
                                       <p className="text-sm text-muted-foreground">No data structure fields defined.</p>
                                     )}
@@ -1056,77 +1079,50 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
                                       const isSelected = currentApiData.some((d: any) => d.value === `{{${field.id}}}`);
 
                                       return (
-                                        <div key={field.id} className="flex items-center space-x-2">
-                                          <Switch
-                                            id={`form-action-${actionIndex}-send-${field.id}`}
-                                            checked={isSelected}
-                                            onCheckedChange={(checked) => {
-                                              const currentActions = step.config.form_actions || [];
-                                              const currentAction = currentActions[actionIndex] || {};
-                                              let newApiData = [...(currentAction.api_data || [])];
+                                        <Badge
+                                          key={field.id}
+                                          variant={isSelected ? "default" : "outline"}
+                                          className={`cursor-pointer shrink-0 ${!isSelected ? "text-muted-foreground hover:text-foreground" : ""}`}
+                                          onClick={() => {
+                                            const currentActions = step.config.form_actions || [];
+                                            const currentAction = currentActions[actionIndex] || {};
+                                            let newApiData = [...(currentAction.api_data || [])];
 
-                                              if (checked) {
-                                                newApiData.push({
-                                                  key: getFieldDisplayName(field),
-                                                  value: `{{${field.id}}}`,
-                                                  mode: "bind"
-                                                });
-                                              } else {
-                                                newApiData = newApiData.filter((d: any) => d.value !== `{{${field.id}}}`);
-                                              }
-
-                                              const updatedActions = currentActions.map((a: any, idx: number) =>
-                                                idx === actionIndex ? { ...a, api_data: newApiData } : a
-                                              );
-                                              onUpdateStep({
-                                                ...step,
-                                                config: {
-                                                  ...step.config,
-                                                  form_actions: updatedActions
-                                                }
+                                            if (isSelected) {
+                                              newApiData = newApiData.filter((d: any) => d.value !== `{{${field.id}}}`);
+                                            } else {
+                                              newApiData.push({
+                                                key: getFieldDisplayName(field),
+                                                value: `{{${field.id}}}`,
+                                                mode: "bind"
                                               });
-                                            }}
-                                          />
-                                          <Label htmlFor={`form-action-${actionIndex}-send-${field.id}`} className="cursor-pointer">
-                                            {getFieldDisplayName(field)}
-                                          </Label>
-                                        </div>
+                                            }
+
+                                            const updatedActions = currentActions.map((a: any, idx: number) =>
+                                              idx === actionIndex ? { ...a, api_data: newApiData } : a
+                                            );
+                                            onUpdateStep({
+                                              ...step,
+                                              config: {
+                                                ...step.config,
+                                                form_actions: updatedActions
+                                              }
+                                            });
+                                          }}
+                                        >
+                                          {getFieldDisplayName(field)}
+                                        </Badge>
                                       );
                                     })}
                                   </div>
                                 </div>
 
                                 <div className="space-y-2">
-                                  <Label>Additional Comment</Label>
-                                  <p className="text-xs text-muted-foreground mb-2">
-                                    Optional comment to send with the webhook request.
-                                  </p>
-                                  <Textarea
-                                    value={action.additional_comment || ""}
-                                    onChange={(e) => {
-                                      const currentActions = step.config.form_actions || [];
-                                      const updatedActions = currentActions.map((a: any, idx: number) =>
-                                        idx === actionIndex ? { ...a, additional_comment: e.target.value } : a
-                                      );
-                                      onUpdateStep({
-                                        ...step,
-                                        config: {
-                                          ...step.config,
-                                          form_actions: updatedActions
-                                        }
-                                      });
-                                    }}
-                                    placeholder="Enter additional comments..."
-                                    className="min-h-[80px]"
-                                  />
-                                </div>
-
-                                <div className="space-y-2">
                                   <Label>Data to Update</Label>
                                   <p className="text-xs text-muted-foreground mb-2">
-                                    Select data fields to update from agent response.
+                                    Click fields to select or deselect data to update from agent response.
                                   </p>
-                                  <div className="border rounded-md p-3 space-y-2 max-h-60 overflow-y-auto">
+                                  <div className="border rounded-md p-3 flex flex-wrap gap-2 max-h-60 overflow-y-auto">
                                     {dataStructureItems.length === 0 && (
                                       <p className="text-sm text-muted-foreground">No data structure fields defined.</p>
                                     )}
@@ -1135,40 +1131,38 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
                                       const isSelected = currentUpdateData.some((d: any) => d.value === field.id);
 
                                       return (
-                                        <div key={`update-${actionIndex}-${field.id}`} className="flex items-center space-x-2">
-                                          <Switch
-                                            id={`form-action-${actionIndex}-update-${field.id}`}
-                                            checked={isSelected}
-                                            onCheckedChange={(checked) => {
-                                              const currentActions = step.config.form_actions || [];
-                                              const currentAction = currentActions[actionIndex] || {};
-                                              let newUpdateData = [...(currentAction.data_to_update || [])];
+                                        <Badge
+                                          key={`update-${actionIndex}-${field.id}`}
+                                          variant={isSelected ? "default" : "outline"}
+                                          className={`cursor-pointer shrink-0 ${!isSelected ? "text-muted-foreground hover:text-foreground" : ""}`}
+                                          onClick={() => {
+                                            const currentActions = step.config.form_actions || [];
+                                            const currentAction = currentActions[actionIndex] || {};
+                                            let newUpdateData = [...(currentAction.data_to_update || [])];
 
-                                              if (checked) {
-                                                newUpdateData.push({
-                                                  key: getFieldDisplayName(field),
-                                                  value: field.id
-                                                });
-                                              } else {
-                                                newUpdateData = newUpdateData.filter((d: any) => d.value !== field.id);
-                                              }
-
-                                              const updatedActions = currentActions.map((a: any, idx: number) =>
-                                                idx === actionIndex ? { ...a, data_to_update: newUpdateData } : a
-                                              );
-                                              onUpdateStep({
-                                                ...step,
-                                                config: {
-                                                  ...step.config,
-                                                  form_actions: updatedActions
-                                                }
+                                            if (isSelected) {
+                                              newUpdateData = newUpdateData.filter((d: any) => d.value !== field.id);
+                                            } else {
+                                              newUpdateData.push({
+                                                key: getFieldDisplayName(field),
+                                                value: field.id
                                               });
-                                            }}
-                                          />
-                                          <Label htmlFor={`form-action-${actionIndex}-update-${field.id}`} className="cursor-pointer">
-                                            {getFieldDisplayName(field)}
-                                          </Label>
-                                        </div>
+                                            }
+
+                                            const updatedActions = currentActions.map((a: any, idx: number) =>
+                                              idx === actionIndex ? { ...a, data_to_update: newUpdateData } : a
+                                            );
+                                            onUpdateStep({
+                                              ...step,
+                                              config: {
+                                                ...step.config,
+                                                form_actions: updatedActions
+                                              }
+                                            });
+                                          }}
+                                        >
+                                          {getFieldDisplayName(field)}
+                                        </Badge>
                                       );
                                     })}
                                   </div>
@@ -1208,7 +1202,7 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
                           <div className="flex items-center gap-2">
                             <div
                               className="w-3 h-3 rounded-full"
-                              style={{ backgroundColor: status.color }}
+                              style={{ backgroundColor: getTagColors(status.color).dot }}
                             />
                             <span>{status.name}</span>
                           </div>
@@ -1269,156 +1263,121 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
                     <div className="space-y-2">
                       <Label>Data to Send</Label>
                       <p className="text-xs text-muted-foreground mb-2">
-                        Select data fields to send to the agent.
+                        Click fields to select or deselect data to send to the agent.
                       </p>
-                      <div className="border rounded-md p-3 space-y-2 max-h-60 overflow-y-auto">
+                      <div className="border rounded-md p-3 flex flex-wrap gap-2 max-h-60 overflow-y-auto">
                         {dataStructureItems.length === 0 && (
                           <p className="text-sm text-muted-foreground">No data structure fields defined.</p>
                         )}
                         {dataStructureItems.map((field) => {
-                          // Check if this field is currently selected in api_data
-                          // We look for an entry where value is the binding {{field.id}}
                           const isSelected = data.some(d => d.value === `{{${field.id}}}`);
 
                           return (
-                            <div key={field.id} className="flex items-center space-x-2">
-                              <Switch
-                                id={`send-${field.id}`}
-                                checked={isSelected}
-                                onCheckedChange={(checked) => {
-                                  let newData = [...data];
-                                  if (checked) {
-                                    // Add to api_data
-                                    // Use parentName.childName for array child fields
-                                    newData.push({
-                                      key: getFieldDisplayName(field),
-                                      value: `{{${field.id}}}`,
-                                      mode: "bind"
-                                    });
-                                  } else {
-                                    // Remove from api_data
-                                    newData = newData.filter(d => d.value !== `{{${field.id}}}`);
+                            <Badge
+                              key={field.id}
+                              variant={isSelected ? "default" : "outline"}
+                              className={`cursor-pointer shrink-0 ${!isSelected ? "text-muted-foreground hover:text-foreground" : ""}`}
+                              onClick={() => {
+                                let newData = [...data];
+                                if (isSelected) {
+                                  newData = newData.filter(d => d.value !== `{{${field.id}}}`);
+                                } else {
+                                  newData.push({
+                                    key: getFieldDisplayName(field),
+                                    value: `{{${field.id}}}`,
+                                    mode: "bind"
+                                  });
+                                }
+                                setData(newData);
+                                onUpdateStep({
+                                  ...step,
+                                  config: {
+                                    ...step.config,
+                                    api_data: JSON.stringify(newData)
                                   }
-
-                                  setData(newData);
-                                  onUpdateStep({
-                                    ...step,
-                                    config: {
-                                      ...step.config,
-                                      api_data: JSON.stringify(newData.map(d => ({
-                                        key: d.key,
-                                        value: d.value,
-                                        mode: "static" // The backend handles {{}} resolution regardless of this flag usually, but let's keep it consistent or check if 'bind' is needed. 
-                                        // Actually, the previous code used 'mode' state. 
-                                        // Let's look at handleUpdateKeyValue: it updates the state 'data' and then saves.
-                                        // The save logic maps it. 
-                                        // Wait, the previous save logic in handleAddKeyValue/handleDeleteKeyValue mapped everything to "static" if using saved config? 
-                                        // No, that was specific to handleConfigSelect.
-                                        // Here we are in "Agent" mode, which might behave like "Custom" config or "Saved" config?
-                                        // The Agent selection just sets 'agent_id'. It doesn't load a full 'api_configuration' into the step config in the same way "automatic" does (which overwrites api_url etc).
-                                        // So we should preserve "bind" mode if we want the UI to reflect it correctly if we ever switch back to the complex view (though we are removing it).
-                                        // But for the backend, it just needs the value to be "{{...}}".
-                                      })))
-                                    }
-                                  });
-
-                                  // We also need to update the step config immediately because 'setData' is async/local
-                                  // The above onUpdateStep does that.
-                                  // But wait, 'data' state is used for rendering. We updated 'newData' and called 'setData(newData)'.
-                                  // And we called onUpdateStep.
-                                  // One detail: The previous code for 'api_data' saving in 'handleUpdateKeyValue' saved 'mode' property.
-                                  // Let's save 'mode: "bind"' to be safe and consistent.
-                                  onUpdateStep({
-                                    ...step,
-                                    config: {
-                                      ...step.config,
-                                      api_data: JSON.stringify(newData)
-                                    }
-                                  });
-                                }}
-                              />
-                              <Label htmlFor={`send-${field.id}`} className="cursor-pointer">
-                                {getFieldDisplayName(field)}
-                              </Label>
-                            </div>
+                                });
+                              }}
+                            >
+                              {getFieldDisplayName(field)}
+                            </Badge>
                           );
                         })}
                       </div>
                     </div>
 
-                    {/* Additional Comment */}
-                    <div className="space-y-2">
-                      <Label>Additional Comment</Label>
-                      <p className="text-xs text-muted-foreground mb-2">
-                        Optional comment to send with the webhook request.
-                      </p>
-                      <Textarea
-                        value={step.config.additional_comment || ""}
-                        onChange={(e) => {
-                          onUpdateStep({
-                            ...step,
-                            config: {
-                              ...step.config,
-                              additional_comment: e.target.value,
-                            },
-                          });
-                        }}
-                        placeholder="Enter additional comments..."
-                        className="min-h-[80px]"
-                      />
-                    </div>
+                    {/* Interactive prompt (when agent has a prompt template) */}
+                    {step.config.agent_id && (
+                      <>
+                        {agentPromptTemplateLoading ? (
+                          <p className="text-sm text-muted-foreground">Loading prompt template…</p>
+                        ) : agentPromptTemplate.trim() ? (
+                          <div className="space-y-2">
+                            <Label>Interactive prompt</Label>
+                            <p className="text-xs text-muted-foreground mb-2">
+                              Fill the placeholders below. The resolved prompt will be sent to the agent API when this step runs.
+                            </p>
+                            <InteractivePromptEditor
+                              key={step.id}
+                              template={agentPromptTemplate}
+                              promptValues={(step.config.prompt_values as PromptValues) ?? {}}
+                              onChange={(nextValues) => {
+                                onUpdateStep({
+                                  ...step,
+                                  config: {
+                                    ...step.config,
+                                    prompt_values: nextValues,
+                                  },
+                                });
+                              }}
+                              className="rounded-md border bg-muted/30 p-3"
+                            />
+                          </div>
+                        ) : null}
+                      </>
+                    )}
 
                     {/* Data to Update */}
                     <div className="space-y-2">
                       <Label>Data to Update</Label>
                       <p className="text-xs text-muted-foreground mb-2">
-                        Select data fields to update from agent response.
+                        Click fields to select or deselect data to update from agent response.
                       </p>
-                      <div className="border rounded-md p-3 space-y-2 max-h-60 overflow-y-auto">
+                      <div className="border rounded-md p-3 flex flex-wrap gap-2 max-h-60 overflow-y-auto">
                         {dataStructureItems.length === 0 && (
                           <p className="text-sm text-muted-foreground">No data structure fields defined.</p>
                         )}
                         {dataStructureItems.map((field) => {
-                          // Check if this field is currently selected in data_to_update
-                          // data_to_update is array of { key, value } where value is the field ID (based on my previous implementation plan)
-                          // Wait, in the previous step I implemented data_to_update as { key: "Agent Key", value: "Field ID" }.
-                          // Now we want simple selection.
-                          // If selected, we assume Agent Key = Field Name (or ID?), and Value = Field ID.
                           const currentUpdateData = step.config.data_to_update || [];
                           const isSelected = currentUpdateData.some((d: any) => d.value === field.id);
 
                           return (
-                            <div key={`update-${field.id}`} className="flex items-center space-x-2">
-                              <Switch
-                                id={`update-${field.id}`}
-                                checked={isSelected}
-                                onCheckedChange={(checked) => {
-                                  let newUpdateData = [...(step.config.data_to_update || [])];
+                            <Badge
+                              key={`update-${field.id}`}
+                              variant={isSelected ? "default" : "outline"}
+                              className={`cursor-pointer shrink-0 ${!isSelected ? "text-muted-foreground hover:text-foreground" : ""}`}
+                              onClick={() => {
+                                let newUpdateData = [...(step.config.data_to_update || [])];
 
-                                  if (checked) {
-                                    // Add to data_to_update — use parentName.childName for array child fields
-                                    newUpdateData.push({
-                                      key: getFieldDisplayName(field),
-                                      value: field.id
-                                    });
-                                  } else {
-                                    // Remove from data_to_update
-                                    newUpdateData = newUpdateData.filter((d: any) => d.value !== field.id);
-                                  }
-
-                                  onUpdateStep({
-                                    ...step,
-                                    config: {
-                                      ...step.config,
-                                      data_to_update: newUpdateData
-                                    }
+                                if (isSelected) {
+                                  newUpdateData = newUpdateData.filter((d: any) => d.value !== field.id);
+                                } else {
+                                  newUpdateData.push({
+                                    key: getFieldDisplayName(field),
+                                    value: field.id
                                   });
-                                }}
-                              />
-                              <Label htmlFor={`update-${field.id}`} className="cursor-pointer">
-                                {getFieldDisplayName(field)}
-                              </Label>
-                            </div>
+                                }
+
+                                onUpdateStep({
+                                  ...step,
+                                  config: {
+                                    ...step.config,
+                                    data_to_update: newUpdateData
+                                  }
+                                });
+                              }}
+                            >
+                              {getFieldDisplayName(field)}
+                            </Badge>
                           );
                         })}
                       </div>

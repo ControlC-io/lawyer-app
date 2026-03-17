@@ -437,6 +437,15 @@ export const superAdminAuth = (req: AuthRequest, res: Response, next: NextFuncti
   return res.status(403).json({ error: 'Forbidden', details: 'Super admin API key required' });
 };
 
+/**
+ * Require req.user with super_admin (use after authMiddleware).
+ * Use for routes that accept either JWT super admin or super admin API key.
+ */
+export const requireSuperAdmin = (req: AuthRequest, res: Response, next: NextFunction) => {
+  if (req.user?.super_admin) return next();
+  return res.status(403).json({ error: 'Forbidden', details: 'Super admin only' });
+};
+
 /** Sentinel value for `:companyId` meaning "all companies" (super admin only). */
 export const ALL_COMPANIES = 'all';
 

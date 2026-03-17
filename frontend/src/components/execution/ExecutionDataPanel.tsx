@@ -22,6 +22,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { getFormPagesFromConfig, evaluateFieldRules, validateAllFields, type FieldRule, type FieldValidationRule } from "@/lib/formConfig";
+import { resolvePromptTemplate, type PromptValues } from "@/lib/promptTemplate";
 import { FormPageStepper } from "@/components/execution/FormPageStepper";
 interface ExecutionDataPanelProps {
   executionId: string;
@@ -1755,15 +1756,16 @@ export const ExecutionDataPanel = ({
                             }
                           });
 
-                          // Build request body (exact same structure as process-automatic-step)
                           const requestBody: any = {
                             execution_id: executionId,
                             execution_step_id: runningStep.id,
                             agent_id: formAction.agent_id,
                             data_to_send: dataToSendWithTypes,
                             data_to_update: dataToUpdateWithTypes,
-                            additional_comment: formAction.additional_comment || ''
                           };
+                          if (agentConfig.prompt_template && formAction.prompt_values && typeof formAction.prompt_values === 'object') {
+                            requestBody.prompt = resolvePromptTemplate(agentConfig.prompt_template, formAction.prompt_values as PromptValues);
+                          }
 
                           // Call the agent API with from=form query parameter
                           const apiMethod = agentConfig.api_method || 'POST';

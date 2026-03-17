@@ -5,16 +5,16 @@ import { usersController } from '../controllers/users.controller';
 import { filesController } from '../controllers/files.controller';
 import { rolesController } from '../controllers/roles.controller';
 import { documentsController } from '../controllers/documents.controller';
-import { authMiddleware, ALL_COMPANIES, AuthRequest, superAdminAuth } from '../middleware/auth';
+import { authMiddleware, ALL_COMPANIES, AuthRequest, requireSuperAdmin } from '../middleware/auth';
 import { asyncHandler } from '../middleware/validation';
 import { requirePermission } from '../lib/rbac';
 import workflowDefinitionRoutes from './workflowDefinition';
 
 const router = Router();
 
-// ─── Super-admin routes (own auth, before authMiddleware blanket) ───
-/** POST /api/companies — create a new company */
-router.post('/', superAdminAuth, asyncHandler(companiesController.createCompany));
+// ─── Super-admin routes: auth then require super_admin (JWT or super-admin API key) ───
+/** POST /api/companies — create a new company (super admin only; API key generated on create) */
+router.post('/', authMiddleware, requireSuperAdmin, asyncHandler(companiesController.createCompany));
 
 // ─── All remaining routes require JWT / API key ───
 router.use(authMiddleware);
@@ -58,6 +58,18 @@ router.delete(
 router.get(
   '/:companyId/users',
   asyncHandler(usersController.getCompanyUsers)
+);
+/** Super admin only: add existing user (by email) to company */
+router.post(
+  '/:companyId/users/link',
+  requireSuperAdmin,
+  asyncHandler(usersController.addExistingUserToCompany)
+);
+/** Super admin only: create new user with password and add to company */
+router.post(
+  '/:companyId/users',
+  requireSuperAdmin,
+  asyncHandler(usersController.createUserForCompany)
 );
 router.delete(
   '/:companyId/users/:userId',

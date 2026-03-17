@@ -73,7 +73,7 @@ export function WorkflowCanvasDialog({
         target_step_id: String(conn.target_step_id ?? ""),
         output_name: (conn.output_name as string) || "default",
         config: (conn.config as Record<string, unknown>) || {
-          color: "hsl(var(--primary))",
+          color: "#2a5ce5",
           style: "solid",
         },
       })) as WorkflowConnection[]

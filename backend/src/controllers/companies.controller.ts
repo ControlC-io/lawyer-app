@@ -71,18 +71,21 @@ export const companiesController = {
    */
   async listCompanies(req: AuthRequest, res: Response) {
     try {
-      // Company API key (no user): return the single company the key belongs to
+      // Company API key (no user): return the single company the key belongs to (already active, since auth passed)
       if (req.company && !req.user) {
-        return res.json([{ id: req.company.id, name: req.company.name }]);
+        return res.json([{ id: req.company.id, name: req.company.name, is_active: true }]);
       }
 
       const userId = req.user?.id;
       if (!userId) return res.status(401).json({ error: 'Unauthorized' });
-      // Super admin API key or JWT super_admin: return all companies
+      // Super admin API key or JWT super_admin: return all companies (with is_active for toggle)
       const superAdmin = req.user?.super_admin ?? await prisma.profileAdminRole.findUnique({ where: { profile_id: userId }, select: { super_admin: true } }).then((r) => r?.super_admin ?? false);
       if (superAdmin) {
-        const all = await prisma.company.findMany({ select: { id: true, name: true }, orderBy: { name: 'asc' } });
-        return res.json(all);
+        const all = await prisma.company.findMany({
+          select: { id: true, name: true, is_active: true },
+          orderBy: { name: 'asc' },
+        });
+        return res.json(all.map((c) => ({ id: c.id, name: c.name, is_active: c.is_active ?? true })));
       }
       const memberships = await prisma.userCompany.findMany({ where: { user_id: userId }, include: { company: { select: { id: true, name: true } } } });
       return res.json(memberships.map((m) => ({ id: m.company.id, name: m.company.name })));

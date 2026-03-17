@@ -22,6 +22,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { IconPicker } from "@/components/workflow/IconPicker";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
+import { getTagColors, TAG_COLORS, DEFAULT_STATUS_COLOR } from "@/lib/tagColors";
 import { useCompanyId } from "@/hooks/useCompanyId";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { PermissionTargetPicker } from "@/components/workflow/PermissionTargetPicker";
@@ -203,7 +204,7 @@ export default function WorkflowEditor() {
   const [editingStatusId, setEditingStatusId] = useState<string | null>(null);
   const [statusFormData, setStatusFormData] = useState<StatusFormData>({
     name: "",
-    color: "#3b82f6",
+    color: DEFAULT_STATUS_COLOR,
   });
   
   // Drag and drop state
@@ -430,7 +431,7 @@ export default function WorkflowEditor() {
         source_step_id: conn.source_step_id,
         target_step_id: conn.target_step_id,
         output_name: conn.output_name || "default",
-        config: conn.config || { color: "hsl(var(--primary))", style: "solid" },
+        config: conn.config || { color: "#2a5ce5", style: "solid" },
       })) as WorkflowConnection[];
 
       // Restore saved state if available, otherwise use loaded data
@@ -530,7 +531,7 @@ export default function WorkflowEditor() {
         source_step_id: conn.source_step_id,
         target_step_id: conn.target_step_id,
         output_name: conn.output_name || "default",
-        config: conn.config || { color: "hsl(var(--primary))", style: "solid" },
+        config: conn.config || { color: "#2a5ce5", style: "solid" },
       }));
       await api.put(`/api/companies/${companyId}/workflows/${id}/connections`, {
         connections: connectionsPayload,
@@ -631,7 +632,7 @@ export default function WorkflowEditor() {
       source_step_id: sourceId,
       target_step_id: targetId,
       output_name: outputName,
-      config: { color: "hsl(var(--primary))", style: "solid" },
+      config: { color: "#2a5ce5", style: "solid" },
     };
     setConnections([...connections, newConnection]);
   };
@@ -1235,7 +1236,7 @@ export default function WorkflowEditor() {
 
       setIsStatusDialogOpen(false);
       setEditingStatusId(null);
-      setStatusFormData({ name: "", color: "#3b82f6" });
+      setStatusFormData({ name: "", color: DEFAULT_STATUS_COLOR });
     } catch (error: any) {
       console.error("Error saving status:", error);
       toast.error(`${t("workflowEditor.failedToSaveStatus")}: ${error.message || 'Unknown error'}`);
@@ -2280,7 +2281,7 @@ export default function WorkflowEditor() {
                           <GripVertical className="h-5 w-5 text-muted-foreground flex-shrink-0" />
                           <div
                             className="w-4 h-4 rounded-full flex-shrink-0 border-2 border-background shadow-sm"
-                            style={{ backgroundColor: status.color }}
+                            style={{ backgroundColor: getTagColors(status.color).dot }}
                           />
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2">
@@ -2354,6 +2355,18 @@ export default function WorkflowEditor() {
                         </div>
                         <div>
                           <Label htmlFor="status-color">{t("workflowEditor.statusColor")}</Label>
+                          <div className="flex flex-wrap gap-2 mt-1.5 mb-2">
+                            {TAG_COLORS.map((preset) => (
+                              <button
+                                key={preset.id}
+                                type="button"
+                                title={preset.label}
+                                className="h-8 w-8 rounded-full border-2 border-background shadow-sm transition-transform hover:scale-110 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+                                style={{ backgroundColor: preset.dot }}
+                                onClick={() => setStatusFormData({ ...statusFormData, color: preset.dot })}
+                              />
+                            ))}
+                          </div>
                           <div className="flex items-center gap-3">
                             <Input
                               id="status-color"
@@ -2366,7 +2379,7 @@ export default function WorkflowEditor() {
                               type="text"
                               value={statusFormData.color}
                               onChange={(e) => setStatusFormData({ ...statusFormData, color: e.target.value })}
-                              placeholder="#3b82f6"
+                              placeholder={DEFAULT_STATUS_COLOR}
                               pattern="^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$"
                               className="flex-1"
                             />

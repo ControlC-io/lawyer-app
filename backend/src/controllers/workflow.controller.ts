@@ -7,6 +7,7 @@ import { notificationService } from '../services/notification.service';
 import { emailService } from '../services/email.service';
 import { storageService } from '../services/storage.service';
 import { aiService } from '../services/ai.service';
+import { resolvePromptTemplate, type PromptValues } from '../lib/promptTemplate';
 import crypto from 'crypto';
 
 async function resolveExecutionVisibilityForUser(userId: string, companyId: string) {
@@ -162,25 +163,26 @@ export const workflowController = {
       let apiMethod = config.api_method || 'POST';
       let apiHeaders: any[] = [];
       let apiData: any[] = [];
+      let agentConfig: { id: string; api_url: string; api_method: string; api_headers: unknown; prompt_template?: string | null } | null = null;
 
       // Handle agent configuration
       if (config.agent_id) {
-        const agentConfig = await prisma.agentConfiguration.findUnique({
+        const loaded = await prisma.agentConfiguration.findUnique({
           where: { id: config.agent_id },
         });
 
-        if (!agentConfig) {
+        if (!loaded) {
           return res.status(400).json({
             error: 'Invalid configuration',
             details: 'Could not find the agent configuration',
           });
         }
-
-        apiUrl = agentConfig.api_url;
-        apiMethod = agentConfig.api_method || 'POST';
-        apiHeaders = typeof agentConfig.api_headers === 'string'
-          ? JSON.parse(agentConfig.api_headers as string)
-          : (agentConfig.api_headers || []) as any[];
+        agentConfig = loaded;
+        apiUrl = loaded.api_url;
+        apiMethod = loaded.api_method || 'POST';
+        apiHeaders = typeof loaded.api_headers === 'string'
+          ? JSON.parse(loaded.api_headers as string)
+          : (loaded.api_headers || []) as any[];
         apiData = typeof config.api_data === 'string'
           ? JSON.parse(config.api_data)
           : (config.api_data || []);
@@ -295,8 +297,11 @@ export const workflowController = {
           agent_id: config.agent_id,
           data_to_send: dataToSend,
           data_to_update: dataToUpdate,
-          additional_comment: (config.additional_comment as string) || '',
         };
+        if (agentConfig?.prompt_template && config.prompt_values && typeof config.prompt_values === 'object') {
+          const prompt = resolvePromptTemplate(agentConfig.prompt_template, config.prompt_values as PromptValues);
+          requestBody.prompt = prompt;
+        }
       } else {
         // Non-agent action: resolve bindings and send flat payload
         const resolvedData: Record<string, any> = {};

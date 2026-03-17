@@ -24,6 +24,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
+import { getTagColors, TAG_COLORS, DEFAULT_STATUS_COLOR } from "@/lib/tagColors";
 import { formatDistanceToNow } from "date-fns";
 import { fr, enUS } from "date-fns/locale";
 import { useCompanyId } from "@/hooks/useCompanyId";
@@ -238,7 +239,7 @@ export default function WorkflowList() {
   const [editingStatusId, setEditingStatusId] = useState<string | null>(null);
   const [statusFormData, setStatusFormData] = useState<StatusFormData>({
     name: "",
-    color: "#3b82f6",
+    color: DEFAULT_STATUS_COLOR,
   });
   const [draggedStatusId, setDraggedStatusId] = useState<string | null>(null);
   const [dragOverStatusIndex, setDragOverStatusIndex] = useState<number | null>(null);
@@ -776,7 +777,7 @@ export default function WorkflowList() {
           source_step_id: stepIdMap.get(conn.source_step_id) || conn.source_step_id,
           target_step_id: stepIdMap.get(conn.target_step_id) || conn.target_step_id,
           output_name: conn.output_name || "default",
-          config: conn.config ? JSON.parse(JSON.stringify(conn.config)) : { color: "hsl(var(--primary))", style: "solid" },
+          config: conn.config ? JSON.parse(JSON.stringify(conn.config)) : { color: "#2a5ce5", style: "solid" },
         }));
         try {
           await api.put(
@@ -1353,7 +1354,7 @@ export default function WorkflowList() {
     setEditingPendingStatusId(null);
     setStatusFormData({
       name: "",
-      color: "#3b82f6",
+      color: DEFAULT_STATUS_COLOR,
     });
     setIsStatusDialogOpen(true);
   };
@@ -1435,7 +1436,7 @@ export default function WorkflowList() {
       setIsStatusDialogOpen(false);
       setEditingStatusId(null);
       setEditingPendingStatusId(null);
-      setStatusFormData({ name: "", color: "#3b82f6" });
+      setStatusFormData({ name: "", color: DEFAULT_STATUS_COLOR });
       return;
     }
 
@@ -1466,7 +1467,7 @@ export default function WorkflowList() {
 
       setIsStatusDialogOpen(false);
       setEditingStatusId(null);
-      setStatusFormData({ name: "", color: "#3b82f6" });
+      setStatusFormData({ name: "", color: DEFAULT_STATUS_COLOR });
     } catch (error) {
       console.error("Error saving status:", error);
       toast.error("Failed to save status");
@@ -2765,7 +2766,7 @@ export default function WorkflowList() {
                           <GripVertical className="h-5 w-5 text-muted-foreground flex-shrink-0" />
                           <div
                             className="w-4 h-4 rounded-full flex-shrink-0 border-2 border-background shadow-sm"
-                            style={{ backgroundColor: status.color }}
+                            style={{ backgroundColor: getTagColors(status.color).dot }}
                           />
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2">
@@ -2834,7 +2835,7 @@ export default function WorkflowList() {
                           <GripVertical className="h-5 w-5 text-muted-foreground flex-shrink-0" />
                           <div
                             className="w-4 h-4 rounded-full flex-shrink-0 border-2 border-background shadow-sm"
-                            style={{ backgroundColor: pending.color }}
+                            style={{ backgroundColor: getTagColors(pending.color).dot }}
                           />
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2">
@@ -2894,6 +2895,18 @@ export default function WorkflowList() {
                         </div>
                         <div>
                           <Label htmlFor="status-color">Color</Label>
+                          <div className="flex flex-wrap gap-2 mt-1.5 mb-2">
+                            {TAG_COLORS.map((preset) => (
+                              <button
+                                key={preset.id}
+                                type="button"
+                                title={preset.label}
+                                className="h-8 w-8 rounded-full border-2 border-background shadow-sm transition-transform hover:scale-110 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+                                style={{ backgroundColor: preset.dot }}
+                                onClick={() => setStatusFormData({ ...statusFormData, color: preset.dot })}
+                              />
+                            ))}
+                          </div>
                           <div className="flex items-center gap-3">
                             <Input
                               id="status-color"
@@ -2906,7 +2919,7 @@ export default function WorkflowList() {
                               type="text"
                               value={statusFormData.color}
                               onChange={(e) => setStatusFormData({ ...statusFormData, color: e.target.value })}
-                              placeholder="#3b82f6"
+                              placeholder={DEFAULT_STATUS_COLOR}
                               pattern="^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$"
                               className="flex-1"
                             />

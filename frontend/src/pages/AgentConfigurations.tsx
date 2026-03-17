@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { Plus, Trash2, Edit, ArrowLeft, Save, X, Settings, Shield, Grid, Layers, ChevronDown, BarChart2, ArrowUpDown, ArrowUp, ArrowDown, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -17,6 +17,8 @@ import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { InteractivePromptEditor } from "@/components/promptTemplate/InteractivePromptEditor";
+import { resolvePromptTemplate, type PromptValues } from "@/lib/promptTemplate";
 
 // Types
 interface AgentCategory {
@@ -35,6 +37,7 @@ interface AgentConfiguration {
     api_method: string;
     api_headers: any;
     api_params: any;
+    prompt_template?: string | null;
     category_id: string | null;
     agent_type?: string;
     created_at: string;
@@ -112,6 +115,7 @@ export default function AgentConfigurations() {
         agent_type: "action" as "action" | "decision",
         api_headers: [] as { key: string; value: string }[],
         api_params: [] as { key: string; value: string }[],
+        prompt_template: "",
     });
 
     const [categoryForm, setCategoryForm] = useState({
@@ -125,6 +129,16 @@ export default function AgentConfigurations() {
         company_id: "",
         enabled: true,
     });
+
+    const promptTemplateTextareaRef = useRef<HTMLTextAreaElement>(null);
+    const [promptPreviewOpen, setPromptPreviewOpen] = useState(false);
+    const [generatedPromptOpen, setGeneratedPromptOpen] = useState(false);
+    const [promptPreviewValues, setPromptPreviewValues] = useState<PromptValues>({});
+
+    const generatedPrompt = useMemo(() => {
+        if (!configForm.prompt_template?.trim()) return "";
+        return resolvePromptTemplate(configForm.prompt_template, promptPreviewValues);
+    }, [configForm.prompt_template, promptPreviewValues]);
 
     useEffect(() => {
         if (!isSuperAdmin) {
@@ -314,6 +328,7 @@ export default function AgentConfigurations() {
                     agent_type: (config.agent_type || "action") as "action" | "decision",
                     api_headers: parsedHeaders.length > 0 ? parsedHeaders : [{ key: "", value: "" }],
                     api_params: parsedParams.length > 0 ? parsedParams : [{ key: "", value: "" }],
+                    prompt_template: config.prompt_template ?? "",
                 });
             } else {
                 setEditingConfig(null);
@@ -326,6 +341,7 @@ export default function AgentConfigurations() {
                     agent_type: "action",
                     api_headers: [{ key: "", value: "" }],
                     api_params: [{ key: "", value: "" }],
+                    prompt_template: "",
                 });
             }
             setConfigDialogOpen(true);
@@ -346,6 +362,7 @@ export default function AgentConfigurations() {
                 agent_type: configForm.agent_type,
                 api_headers: configForm.api_headers.filter(h => h.key && h.value),
                 api_params: configForm.api_params.filter(p => p.key && p.value),
+                prompt_template: configForm.prompt_template?.trim() || null,
             };
 
             if (editingConfig) {
@@ -586,40 +603,30 @@ export default function AgentConfigurations() {
                             .filter(config => agentTypeFilter === "all" || (config.agent_type || "action") === agentTypeFilter)
                             .map((config) => (
                             <Card key={config.id}>
-                                <CardHeader>
-                                    <div className="flex justify-between items-start">
-                                        <div>
-                                            <CardTitle className="text-lg">{config.name}</CardTitle>
-                                            <CardDescription className="mt-1">{config.description || "No description"}</CardDescription>
+                                <CardContent className="pt-6">
+                                    <div className="flex flex-col gap-3">
+                                        <div className="flex items-start justify-between gap-2">
+                                            <CardTitle className="text-lg leading-tight">{config.name}</CardTitle>
+                                            <div className="flex items-center gap-1.5 shrink-0">
+                                                <Badge variant={(config.agent_type || "action") === "action" ? "default" : "secondary"}>
+                                                    {(config.agent_type || "action") === "action" ? "Action" : "Decision"}
+                                                </Badge>
+                                                {config.category && (
+                                                    <Badge variant="outline">{config.category.name}</Badge>
+                                                )}
+                                            </div>
                                         </div>
-                                        <div className="flex flex-col gap-1 items-end">
-                                            <Badge variant={(config.agent_type || "action") === "action" ? "default" : "secondary"}>
-                                                {(config.agent_type || "action") === "action" ? "Action" : "Decision"}
-                                            </Badge>
-                                            {config.category && (
-                                                <Badge variant="outline">{config.category.name}</Badge>
-                                            )}
+                                        <CardDescription className="text-sm leading-snug">
+                                            {config.description || "No description"}
+                                        </CardDescription>
+                                        <div className="flex justify-end gap-2 pt-1">
+                                            <Button variant="ghost" size="icon" onClick={() => handleOpenConfigDialog(config)}>
+                                                <Edit className="h-4 w-4" />
+                                            </Button>
+                                            <Button variant="ghost" size="icon" onClick={() => handleDeleteConfig(config.id)}>
+                                                <Trash2 className="h-4 w-4" />
+                                            </Button>
                                         </div>
-                                    </div>
-                                </CardHeader>
-                                <CardContent>
-                                    <div className="space-y-2 text-sm">
-                                        <div className="flex justify-between">
-                                            <span className="font-medium">Method:</span>
-                                            <span>{config.api_method}</span>
-                                        </div>
-                                        <div className="flex justify-between">
-                                            <span className="font-medium">URL:</span>
-                                            <span className="truncate max-w-[200px]" title={config.api_url}>{config.api_url}</span>
-                                        </div>
-                                    </div>
-                                    <div className="flex justify-end gap-2 mt-4">
-                                        <Button variant="ghost" size="icon" onClick={() => handleOpenConfigDialog(config)}>
-                                            <Edit className="h-4 w-4" />
-                                        </Button>
-                                        <Button variant="ghost" size="icon" onClick={() => handleDeleteConfig(config.id)}>
-                                            <Trash2 className="h-4 w-4" />
-                                        </Button>
                                     </div>
                                 </CardContent>
                             </Card>
@@ -1033,9 +1040,155 @@ export default function AgentConfigurations() {
                             </Button>
                         </div>
 
+                        {/* Prompt template */}
+                        <div className="space-y-2">
+                            <Label>Prompt template</Label>
+                            <p className="text-xs text-muted-foreground">
+                                Define a template with placeholders. Use the syntax below; at workflow step level users will fill the interactive prompt and the resolved text will be sent to the agent API.
+                            </p>
+                            <Textarea
+                                ref={promptTemplateTextareaRef}
+                                className="font-mono text-sm min-h-[200px]"
+                                placeholder="e.g. {{text:name}}, {{textarea:context}}, {{select:sector:A,B,C}}"
+                                value={configForm.prompt_template}
+                                onChange={(e) => setConfigForm({ ...configForm, prompt_template: e.target.value })}
+                            />
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                                <p className="text-xs text-muted-foreground">
+                                    Preview how users will fill this prompt, and inspect the final generated text.
+                                </p>
+                                <div className="flex gap-2">
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        disabled={!configForm.prompt_template?.trim()}
+                                        onClick={() => setPromptPreviewOpen(true)}
+                                    >
+                                        Preview as user
+                                    </Button>
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        disabled={!configForm.prompt_template?.trim()}
+                                        onClick={() => setGeneratedPromptOpen(true)}
+                                    >
+                                        Generated prompt
+                                    </Button>
+                                </div>
+                            </div>
+                            <div className="space-y-1.5">
+                                <p className="text-xs text-muted-foreground">Insert placeholder:</p>
+                                <div className="flex flex-wrap gap-1.5">
+                                    {[
+                                        { tag: "{{text:champ}}", label: "text" },
+                                        { tag: "{{textarea:champ}}", label: "textarea" },
+                                        { tag: "{{number:champ:1:10}}", label: "number" },
+                                        { tag: "{{select:champ:A,B,C}}", label: "select" },
+                                        { tag: "{{multiselect:champ:A,B,C}}", label: "multiselect" },
+                                        { tag: "{{list:champ}}", label: "list" },
+                                        { tag: "{{table:champ:Col1,Col2}}", label: "table" },
+                                        { tag: "{{if:condition}}\nContent\n{{/if}}", label: "if" },
+                                        { tag: "{{switch:key}}\n{{case:A}}A{{/case}}\n{{/switch}}", label: "switch" },
+                                        { tag: "{{variable:nom:val}}", label: "variable" },
+                                        { tag: "{{hidden:nom:val}}", label: "hidden" },
+                                        { tag: "{{info:Instructions or note for users (not in generated prompt)}}", label: "info (editor only)" },
+                                    ].map(({ tag, label }) => (
+                                        <button
+                                            key={label}
+                                            type="button"
+                                            className="text-xs font-mono px-2 py-1 rounded border border-border bg-muted/50 hover:bg-muted text-foreground"
+                                            onClick={() => {
+                                                const ta = promptTemplateTextareaRef.current;
+                                                if (ta) {
+                                                    const start = ta.selectionStart;
+                                                    const end = ta.selectionEnd;
+                                                    const before = configForm.prompt_template.slice(0, start);
+                                                    const after = configForm.prompt_template.slice(end);
+                                                    setConfigForm({ ...configForm, prompt_template: before + tag + after });
+                                                    setTimeout(() => { ta.selectionStart = ta.selectionEnd = start + tag.length; ta.focus(); }, 0);
+                                                }
+                                            }}
+                                        >
+                                            {label}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+
                         <div className="flex justify-end gap-2 pt-4">
                             <Button variant="outline" onClick={() => setConfigDialogOpen(false)}>Cancel</Button>
                             <Button onClick={handleSaveConfig}>Save</Button>
+                        </div>
+                    </div>
+                </DialogContent>
+            </Dialog>
+
+            {/* PROMPT TEMPLATE PREVIEW (user-facing) */}
+            <Dialog open={promptPreviewOpen} onOpenChange={setPromptPreviewOpen}>
+                <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+                    <DialogHeader>
+                        <DialogTitle>Prompt template preview</DialogTitle>
+                        <DialogDescription>
+                            This is what end users will see when filling the interactive prompt at the workflow step level.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4 mt-4">
+                        {!configForm.prompt_template?.trim() ? (
+                            <p className="text-sm text-muted-foreground">No prompt template defined.</p>
+                        ) : (
+                            <InteractivePromptEditor
+                                template={configForm.prompt_template}
+                                promptValues={promptPreviewValues}
+                                onChange={setPromptPreviewValues}
+                                className="rounded-md border bg-muted/30 p-3"
+                            />
+                        )}
+                        <div className="flex justify-end gap-2">
+                            <Button
+                                type="button"
+                                variant="outline"
+                                disabled={!configForm.prompt_template?.trim()}
+                                onClick={() => setGeneratedPromptOpen(true)}
+                            >
+                                View generated prompt
+                            </Button>
+                            <Button type="button" onClick={() => setPromptPreviewOpen(false)}>
+                                Close
+                            </Button>
+                        </div>
+                    </div>
+                </DialogContent>
+            </Dialog>
+
+            {/* GENERATED PROMPT MODAL */}
+            <Dialog open={generatedPromptOpen} onOpenChange={setGeneratedPromptOpen}>
+                <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+                    <DialogHeader>
+                        <DialogTitle>Generated prompt</DialogTitle>
+                        <DialogDescription>
+                            This is the resolved text that will be sent to the agent API (based on the values in the preview).
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4 mt-4">
+                        {!configForm.prompt_template?.trim() ? (
+                            <p className="text-sm text-muted-foreground">No prompt template defined.</p>
+                        ) : (
+                            <div className="rounded-md border bg-muted/30 p-3">
+                                <pre className="whitespace-pre-wrap break-words font-mono text-sm leading-relaxed">
+                                    {generatedPrompt || "Fill some values in “Preview as user” to see the resolved prompt here."}
+                                </pre>
+                            </div>
+                        )}
+                        <div className="flex justify-end gap-2">
+                            <Button type="button" variant="outline" onClick={() => setPromptPreviewOpen(true)}>
+                                Back to preview
+                            </Button>
+                            <Button type="button" onClick={() => setGeneratedPromptOpen(false)}>
+                                Close
+                            </Button>
                         </div>
                     </div>
                 </DialogContent>

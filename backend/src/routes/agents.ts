@@ -14,6 +14,7 @@ router.patch('/categories/:categoryId', authMiddleware, asyncHandler(agentsContr
 router.delete('/categories/:categoryId', authMiddleware, asyncHandler(agentsController.deleteCategory));
 
 router.get('/configurations', authMiddleware, asyncHandler(agentsController.listConfigurations));
+router.get('/configurations/:configId', authMiddleware, asyncHandler(agentsController.getConfigurationById));
 router.post('/configurations', authMiddleware, asyncHandler(agentsController.createConfiguration));
 router.patch('/configurations/:configId', authMiddleware, asyncHandler(agentsController.updateConfiguration));
 router.delete('/configurations/:configId', authMiddleware, asyncHandler(agentsController.deleteConfiguration));

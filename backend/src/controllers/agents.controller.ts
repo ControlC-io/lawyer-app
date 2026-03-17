@@ -506,6 +506,26 @@ Les détails de structure sont identiques aux spécifications Supabase originale
   },
 
   /**
+   * GET /api/agents/configurations/:configId
+   * Get a single agent configuration by id (JWT). Used by workflow editor to load prompt_template.
+   */
+  async getConfigurationById(req: AuthRequest, res: Response) {
+    try {
+      if (!req.user?.id) return res.status(401).json({ error: 'Unauthorized' });
+      const { configId } = req.params;
+      const config = await prisma.agentConfiguration.findUnique({
+        where: { id: configId },
+        include: { category: true },
+      });
+      if (!config) return res.status(404).json({ error: 'Configuration not found' });
+      return res.json(config);
+    } catch (error) {
+      console.error('getConfigurationById error:', error);
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
+  /**
    * GET /api/agents/usage
    * List agent_usage table (read-only). Super admin only.
    */
@@ -612,6 +632,7 @@ Les détails de structure sont identiques aux spécifications Supabase originale
           api_method: body.api_method || 'POST',
           api_headers: body.api_headers ?? [],
           api_params: body.api_params ?? [],
+          prompt_template: body.prompt_template ?? null,
           category_id: body.category_id ?? null,
           agent_type: body.agent_type ?? null,
         },
@@ -637,6 +658,7 @@ Les détails de structure sont identiques aux spécifications Supabase originale
           ...(body.api_method !== undefined && { api_method: body.api_method }),
           ...(body.api_headers !== undefined && { api_headers: body.api_headers }),
           ...(body.api_params !== undefined && { api_params: body.api_params }),
+          ...(body.prompt_template !== undefined && { prompt_template: body.prompt_template }),
           ...(body.category_id !== undefined && { category_id: body.category_id }),
           ...(body.agent_type !== undefined && { agent_type: body.agent_type }),
         },

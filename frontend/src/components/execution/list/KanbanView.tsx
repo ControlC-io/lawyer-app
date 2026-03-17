@@ -8,6 +8,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { PlayCircle, Clock, CheckCircle, XCircle, Pause, User, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { getTagColors } from "@/lib/tagColors";
 
 interface Execution {
     id: string;
@@ -181,8 +182,7 @@ const KanbanColumn = ({
     executions: Array<{ execution: Execution; step: ExecutionStep }>;
     isUnassigned?: boolean;
 }) => {
-    const headerBgColor = isUnassigned ? undefined : `${color}15`;
-    const dotColor = isUnassigned ? 'bg-muted-foreground/30' : undefined;
+    const tagColors = color && !isUnassigned ? getTagColors(color) : null;
 
     return (
         <div className="flex-shrink-0 w-72 flex flex-col bg-muted/30 rounded-lg border border-border h-full max-h-full">
@@ -191,14 +191,16 @@ const KanbanColumn = ({
                     "p-2.5 border-b border-border rounded-t-lg flex-shrink-0",
                     isUnassigned && "bg-muted/50"
                 )}
-                style={headerBgColor ? { backgroundColor: headerBgColor } : undefined}
+                style={tagColors ? { backgroundColor: tagColors.bg } : undefined}
             >
                 <div className="flex items-center gap-2 mb-0.5">
                     <div
-                        className={cn("w-2.5 h-2.5 rounded-full", dotColor)}
-                        style={color && !isUnassigned ? { backgroundColor: color } : undefined}
+                        className={cn("w-2.5 h-2.5 rounded-full", !tagColors && "bg-muted-foreground/30")}
+                        style={tagColors ? { backgroundColor: tagColors.dot } : undefined}
                     />
-                    <h3 className="font-semibold text-sm">{title}</h3>
+                    <h3 className="font-semibold text-sm" style={tagColors ? { color: tagColors.text } : undefined}>
+                        {title}
+                    </h3>
                 </div>
                 <p className="text-[10px] text-muted-foreground">
                     {executions.length} {executions.length === 1 ? 'execution' : 'executions'}

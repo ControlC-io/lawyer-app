@@ -819,7 +819,7 @@ export function Canvas({
             const isHighlighted = isHovered || isStepHovered;
 
             const connConfig = connection.config || {
-              color: "hsl(var(--primary))",
+              color: "#2a5ce5",
               style: "solid" as const
             };
 
@@ -923,7 +923,7 @@ export function Canvas({
               <g>
                 <path
                   d={path}
-                  stroke="hsl(var(--primary))"
+                  stroke="#2a5ce5"
                   strokeWidth="2"
                   strokeDasharray="5,5"
                   fill="none"
@@ -931,7 +931,7 @@ export function Canvas({
                 />
                 <polygon
                   points="-8,-4 0,0 -8,4"
-                  fill="hsl(var(--primary))"
+                  fill="#2a5ce5"
                   transform={`translate(${end.x}, ${end.y}) rotate(${endAngle})`}
                   className="pointer-events-none"
                   opacity="0.7"
@@ -989,7 +989,7 @@ export function Canvas({
       {selectedConnection && (
         <ConnectionDialog
           open={true}
-          config={selectedConnection.config || { color: "hsl(var(--primary))", style: "solid" }}
+          config={selectedConnection.config || { color: "#2a5ce5", style: "solid" }}
           onClose={() => setSelectedConnection(null)}
           onSave={(config) => {
             onUpdateConnection(selectedConnection.id, config);

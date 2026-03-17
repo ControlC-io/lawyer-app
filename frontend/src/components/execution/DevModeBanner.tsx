@@ -8,6 +8,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { ChevronDown, ChevronUp, Wrench, Send, Loader2, Edit2, Check, X, Copy, ExternalLink } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { api } from "@/lib/api";
+import { resolvePromptTemplate, type PromptValues } from "@/lib/promptTemplate";
 
 interface WebhookConfig {
     url: string;
@@ -162,7 +163,6 @@ export const DevModeBanner = ({
                 let requestBody: any;
 
                 if (isAgentAction && stepConfig?.agent_id) {
-                    // Agent action step: same structured payload as backend (execution_id, execution_step_id, agent_id, data_to_send, data_to_update, additional_comment)
                     const rawDataStructure = execution?.workflow?.data_structure;
                     const fields = Array.isArray(rawDataStructure) ? rawDataStructure : [];
                     const fieldInfoMap: Record<string, { name: string; type: string }> = {};
@@ -210,8 +210,11 @@ export const DevModeBanner = ({
                         agent_id: stepConfig.agent_id,
                         data_to_send: dataToSendWithTypes,
                         data_to_update: dataToUpdateWithTypes,
-                        additional_comment: stepConfig.additional_comment || '',
                     };
+                    if (agentConfig?.prompt_template && stepConfig.prompt_values && typeof stepConfig.prompt_values === 'object') {
+                        const prompt = resolvePromptTemplate(agentConfig.prompt_template, stepConfig.prompt_values as PromptValues);
+                        requestBody.prompt = prompt;
+                    }
                 } else {
                     // Non-agent: flat payload with resolved bindings
                     const resolvedData: Record<string, any> = {};
@@ -420,8 +423,11 @@ export const DevModeBanner = ({
                         agent_id: stepConfig.agent_id,
                         data_to_send: dataToSendWithTypes,
                         data_to_update: dataToUpdateWithTypes,
-                        additional_comment: stepConfig.additional_comment || '',
                     };
+                    if (agentConfig?.prompt_template && stepConfig.prompt_values && typeof stepConfig.prompt_values === 'object') {
+                        const prompt = resolvePromptTemplate(agentConfig.prompt_template, stepConfig.prompt_values as PromptValues);
+                        requestBody.prompt = prompt;
+                    }
                 } else {
                     const resolvedData: Record<string, any> = {};
                     apiData.forEach((item: any) => {

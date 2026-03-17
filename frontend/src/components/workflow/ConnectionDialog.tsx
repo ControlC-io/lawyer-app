@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -17,18 +17,23 @@ interface ConnectionDialogProps {
 }
 
 const COLOR_OPTIONS = [
-  { value: "hsl(var(--primary))", label: "Primary", class: "bg-primary" },
-  { value: "hsl(var(--destructive))", label: "Red", class: "bg-destructive" },
-  { value: "hsl(var(--chart-1))", label: "Blue", class: "bg-chart-1" },
-  { value: "hsl(var(--chart-2))", label: "Green", class: "bg-chart-2" },
-  { value: "hsl(var(--chart-3))", label: "Orange", class: "bg-chart-3" },
-  { value: "hsl(var(--chart-4))", label: "Purple", class: "bg-chart-4" },
-  { value: "hsl(var(--muted-foreground) / 0.3)", label: "Gray", class: "bg-muted-foreground/30" },
+  { value: "#2a5ce5", label: "Primary" },
+  { value: "#00b87d", label: "Secondary" },
+  { value: "#9ca3af", label: "Grey" },
 ];
 
+const VALID_COLORS = new Set(COLOR_OPTIONS.map((o) => o.value));
+
 export function ConnectionDialog({ open, config, onClose, onSave, onDelete }: ConnectionDialogProps) {
-  const [color, setColor] = useState(config.color || "hsl(var(--primary))");
+  const [color, setColor] = useState(config.color || "#2a5ce5");
   const [style, setStyle] = useState<"solid" | "dashed">(config.style || "solid");
+
+  useEffect(() => {
+    if (open) {
+      setColor(VALID_COLORS.has(config.color ?? "") ? config.color! : "#2a5ce5");
+      setStyle(config.style || "solid");
+    }
+  }, [open, config.color, config.style]);
 
   const handleSave = () => {
     onSave({ color, style });
@@ -53,7 +58,7 @@ export function ConnectionDialog({ open, config, onClose, onSave, onDelete }: Co
                     htmlFor={option.value}
                     className="flex items-center gap-2 cursor-pointer flex-1"
                   >
-                    <div className={`w-6 h-6 rounded border border-border ${option.class}`} />
+                    <div className="w-6 h-6 rounded border border-border" style={{ backgroundColor: option.value }} />
                     <span className="text-sm">{option.label}</span>
                   </label>
                 </div>

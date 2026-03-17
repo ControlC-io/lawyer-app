@@ -140,54 +140,79 @@ export function AppSidebar() {
             </SidebarGroupContent>
           </SidebarGroup>
 
-          {menuSections.map((section) => (
-            <SidebarGroup key={section.groupLabelKey}>
-              <SidebarGroupLabel>{t(section.groupLabelKey)}</SidebarGroupLabel>
-              <SidebarGroupContent>
-                <SidebarMenu>
-                  {section.items
-                  .filter((item) => !item.permission || hasPermission(item.permission))
-                  .map((item) => {
-                    const isExecutions = item.titleKey === "sidebar.executions";
-                    return (
-                      <SidebarMenuItem key={item.titleKey}>
-                        <SidebarMenuButton
-                          asChild
-                          isActive={isItemActive(item)}
-                          className={isExecutions ? "bg-sidebar-accent/50 hover:bg-sidebar-accent font-semibold border-l-2 border-primary" : ""}
-                        >
-                          <Link to={item.url}>
-                            <item.icon className="h-4 w-4" />
-                            {open && <span>{t(item.titleKey)}</span>}
+          {menuSections.map((section) => {
+            const visibleItems = section.items.filter(
+              (item) => !item.permission || hasPermission(item.permission)
+            );
+            const hasExtraAdminItem =
+              section.groupLabelKey === "sidebar.groupAdministration" && hasPermission("usage.view");
+            const hasVisibleLinks = visibleItems.length > 0 || hasExtraAdminItem;
+
+            if (!hasVisibleLinks) return null;
+
+            return (
+              <SidebarGroup key={section.groupLabelKey}>
+                <SidebarGroupLabel>{t(section.groupLabelKey)}</SidebarGroupLabel>
+                <SidebarGroupContent>
+                  <SidebarMenu>
+                    {visibleItems.map((item) => {
+                      const isExecutions = item.titleKey === "sidebar.executions";
+                      return (
+                        <SidebarMenuItem key={item.titleKey}>
+                          <SidebarMenuButton
+                            asChild
+                            isActive={isItemActive(item)}
+                            className={isExecutions ? "bg-sidebar-accent/50 hover:bg-sidebar-accent font-semibold border-l-2 border-primary" : ""}
+                          >
+                            <Link to={item.url}>
+                              <item.icon className="h-4 w-4" />
+                              {open && <span>{t(item.titleKey)}</span>}
+                            </Link>
+                          </SidebarMenuButton>
+                        </SidebarMenuItem>
+                      );
+                    })}
+                    {hasExtraAdminItem && (
+                      <SidebarMenuItem>
+                        <SidebarMenuButton asChild isActive={location.pathname === "/agent-usage"}>
+                          <Link to="/agent-usage">
+                            <BarChart2 className="h-4 w-4" />
+                            {open && <span>{t("sidebar.agentUsage")}</span>}
                           </Link>
                         </SidebarMenuButton>
                       </SidebarMenuItem>
-                    );
-                  })}
-                  {section.groupLabelKey === "sidebar.groupAdministration" && isSuperAdmin && (
-                    <SidebarMenuItem>
-                      <SidebarMenuButton asChild isActive={location.pathname === "/agent-configurations"}>
-                        <Link to="/agent-configurations">
-                          <Bot className="h-4 w-4" />
-                          {open && <span>{t("sidebar.agentConfigurations")}</span>}
-                        </Link>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  )}
-                  {section.groupLabelKey === "sidebar.groupAdministration" && hasPermission('usage.view') && (
-                    <SidebarMenuItem>
-                      <SidebarMenuButton asChild isActive={location.pathname === "/agent-usage"}>
-                        <Link to="/agent-usage">
-                          <BarChart2 className="h-4 w-4" />
-                          {open && <span>{t("sidebar.agentUsage")}</span>}
-                        </Link>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  )}
+                    )}
+                  </SidebarMenu>
+                </SidebarGroupContent>
+              </SidebarGroup>
+            );
+          })}
+
+          {isSuperAdmin && (
+            <SidebarGroup>
+              <SidebarGroupLabel>{t("sidebar.groupSuperAdministration")}</SidebarGroupLabel>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  <SidebarMenuItem>
+                    <SidebarMenuButton asChild isActive={location.pathname === "/agent-configurations"}>
+                      <Link to="/agent-configurations">
+                        <Bot className="h-4 w-4" />
+                        {open && <span>{t("sidebar.agentConfigurations")}</span>}
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                  <SidebarMenuItem>
+                    <SidebarMenuButton asChild isActive={location.pathname === "/companies"}>
+                      <Link to="/companies">
+                        <Building2 className="h-4 w-4" />
+                        {open && <span>{t("sidebar.companies")}</span>}
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
                 </SidebarMenu>
               </SidebarGroupContent>
             </SidebarGroup>
-          ))}
+          )}
         </SidebarContent>
         <StartWorkflowDialog open={startWorkflowDialogOpen} onOpenChange={setStartWorkflowDialogOpen} />
         <SidebarFooter className="border-t p-2">
