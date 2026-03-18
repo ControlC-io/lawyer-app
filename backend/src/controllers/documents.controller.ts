@@ -238,10 +238,17 @@ export const documentsController = {
 
     if (accessibleIds.length === 0) return res.json({ files: [], hasWriteAccess: hasAnyWriteRule });
 
-    // Full-text search in OCR content
+    // Full-text search in OCR content (prefix matching enabled)
     const searchQuery = req.query.q as string | undefined;
     if (searchQuery && searchQuery.trim()) {
       const q = searchQuery.trim();
+      // Build a prefix tsquery: each word gets :* so "Richm" matches "Richmond"
+      const prefixQuery = q
+        .replace(/[^\w\s]/g, ' ')  // strip special chars to prevent tsquery syntax errors
+        .split(/\s+/)
+        .filter(Boolean)
+        .map(word => `${word}:*`)
+        .join(' & ');
       const searchResults = await prisma.$queryRaw`
         SELECT
           f.id,
@@ -252,17 +259,17 @@ export const documentsController = {
           f.created_at,
           f.company_id,
           f.ocr_status AS "ocrStatus",
-          ts_rank(to_tsvector('simple', coalesce(f.ocr_markdown, '')), plainto_tsquery('simple', ${q})) AS rank,
+          ts_rank(to_tsvector('simple', coalesce(f.ocr_markdown, '')), to_tsquery('simple', ${prefixQuery})) AS rank,
           ts_headline(
             'simple',
             coalesce(f.ocr_markdown, ''),
-            plainto_tsquery('simple', ${q}),
+            to_tsquery('simple', ${prefixQuery}),
             'StartSel=<mark>, StopSel=</mark>, MaxWords=35, MinWords=15, ShortWord=3, MaxFragments=2, FragmentDelimiter= … '
           ) AS "ocrSnippet"
         FROM "files" f
         WHERE f.company_id = ${companyId}::uuid
           AND f.id = ANY(${accessibleIds}::uuid[])
-          AND to_tsvector('simple', coalesce(f.ocr_markdown, '')) @@ plainto_tsquery('simple', ${q})
+          AND to_tsvector('simple', coalesce(f.ocr_markdown, '')) @@ to_tsquery('simple', ${prefixQuery})
         ORDER BY rank DESC
         LIMIT 100
       ` as any[];
