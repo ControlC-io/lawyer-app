@@ -66,6 +66,9 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
   const [metadataKeys, setMetadataKeys] = useState<Array<{ id: string; name: string }>>([]);
   const [agentPromptTemplate, setAgentPromptTemplate] = useState<string>("");
   const [agentPromptTemplateLoading, setAgentPromptTemplateLoading] = useState(false);
+  /** Cache of prompt templates per agent id, for form actions */
+  const [formActionAgentTemplates, setFormActionAgentTemplates] = useState<Record<string, string>>({});
+  const [formActionAgentTemplatesLoading, setFormActionAgentTemplatesLoading] = useState<Record<string, boolean>>({});
 
   // Default to assign to execution creator (true) if not set
   const assignToExecutionCreator = step.config.assign_to_execution_creator !== false;
@@ -203,6 +206,39 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
       setAgentPromptTemplate("");
     }
   }, [step.action_type, step.config.agent_id]);
+
+  // Load prompt templates for form action agents (edit_form step)
+  const formActionAgentIds = step.step_type === "edit_form"
+    ? (step.config.form_actions || []).map((a: any) => a.agent_id).filter(Boolean)
+    : [];
+  const formActionAgentIdsKey = [...new Set(formActionAgentIds)].sort().join(",");
+  useEffect(() => {
+    if (step.step_type !== "edit_form") {
+      setFormActionAgentTemplates({});
+      setFormActionAgentTemplatesLoading({});
+      return;
+    }
+    const agentIds = formActionAgentIdsKey ? formActionAgentIdsKey.split(",") : [];
+    if (agentIds.length === 0) {
+      setFormActionAgentTemplates({});
+      setFormActionAgentTemplatesLoading({});
+      return;
+    }
+    agentIds.forEach((agentId) => {
+      setFormActionAgentTemplatesLoading((prev) => ({ ...prev, [agentId]: true }));
+      api
+        .get<{ prompt_template?: string | null }>(`/api/agents/configurations/${agentId}`)
+        .then((config) => {
+          setFormActionAgentTemplates((prev) => ({ ...prev, [agentId]: config.prompt_template ?? "" }));
+        })
+        .catch(() => {
+          setFormActionAgentTemplates((prev) => ({ ...prev, [agentId]: "" }));
+        })
+        .finally(() => {
+          setFormActionAgentTemplatesLoading((prev) => ({ ...prev, [agentId]: false }));
+        });
+    });
+  }, [step.step_type, formActionAgentIdsKey]);
 
   useEffect(() => {
     fetchDataStructureItems();
@@ -1116,6 +1152,37 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
                                     })}
                                   </div>
                                 </div>
+
+                                {/* Interactive prompt (same editor as action step) */}
+                                {formActionAgentTemplatesLoading[action.agent_id] ? (
+                                  <p className="text-sm text-muted-foreground">Loading prompt template…</p>
+                                ) : (formActionAgentTemplates[action.agent_id] || "").trim() ? (
+                                  <div className="space-y-2">
+                                    <Label>Interactive prompt</Label>
+                                    <p className="text-xs text-muted-foreground mb-2">
+                                      Fill the placeholders below. The resolved prompt will be sent to the agent API when this action runs.
+                                    </p>
+                                    <InteractivePromptEditor
+                                      key={`form-action-${actionIndex}-${action.agent_id}`}
+                                      template={formActionAgentTemplates[action.agent_id]}
+                                      promptValues={(action.prompt_values as PromptValues) ?? {}}
+                                      onChange={(nextValues) => {
+                                        const currentActions = step.config.form_actions || [];
+                                        const updatedActions = currentActions.map((a: any, idx: number) =>
+                                          idx === actionIndex ? { ...a, prompt_values: nextValues } : a
+                                        );
+                                        onUpdateStep({
+                                          ...step,
+                                          config: {
+                                            ...step.config,
+                                            form_actions: updatedActions,
+                                          },
+                                        });
+                                      }}
+                                      className="rounded-md border bg-muted/30 p-3"
+                                    />
+                                  </div>
+                                ) : null}
 
                                 <div className="space-y-2">
                                   <Label>Data to Update</Label>
