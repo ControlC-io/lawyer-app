@@ -173,7 +173,18 @@ export const aiService = {
         };
       }
 
-      const result = await response.json();
+      // The async "dispatch" endpoints often return 202/200 with an empty body
+      // (or plain text) because work continues in the background.
+      // We therefore parse via `text()` and only JSON.parse when possible.
+      const responseText = await response.text();
+      let result: any = {};
+      if (responseText && responseText.trim().length > 0) {
+        try {
+          result = JSON.parse(responseText);
+        } catch {
+          result = { raw: responseText };
+        }
+      }
       return {
         success: true,
         data: result,

@@ -366,52 +366,34 @@ export const workflowController = {
       // `POST /api/workflows/executions/:executionId/steps/:stepId/complete` later.
       // So we must *not* mark the step as completed here when the dispatch succeeded.
       if (shouldAutoCompleteActionStep) {
-        // If the dispatch itself failed, there's no async callback coming in, so we
-        // complete + advance best-effort to avoid stalling the workflow.
+        // Dispatch-only: the step is closed by the external tool via the `/complete` endpoint.
+        // This endpoint must not mark the step as `completed` or advance the workflow.
         if (!result.success && executionStep?.status === 'running') {
           try {
             const executionDataSnapshot = await workflowService.getExecutionDataSnapshot(executionId);
-            const triggeredSteps = await (async () => {
-              await prisma.workflowExecutionStep.update({
-                where: { id: stepId },
-                data: {
-                  status: 'completed',
-                  completed_at: new Date(),
-                  step_data: {
-                    ...executionDataSnapshot,
-                    _automation: {
-                      processed_at: new Date().toISOString(),
-                      success: false,
-                      response: result.data ?? result.error,
-                    },
+            await prisma.workflowExecutionStep.update({
+              where: { id: stepId },
+              data: {
+                step_data: {
+                  ...executionDataSnapshot,
+                  _automation: {
+                    dispatch_at: new Date().toISOString(),
+                    success: false,
+                    response: result.data ?? result.error,
                   },
                 },
-              });
-
-              return workflowService.advanceWorkflow(
-                executionId,
-                executionStep.step_id,
-                executionStep.company_id!
-              );
-            })();
-
-            const nextSteps = Array.isArray(triggeredSteps) ? triggeredSteps : [];
-            return res.json({
-              success: false,
-              message: nextSteps.length > 0 ? 'Step completed and workflow advanced' : 'Step completed',
-              triggered_steps: nextSteps,
-              execution_status: nextSteps.length > 0 ? 'running' : 'completed',
-              response: result.data || result.error,
+              },
             });
-          } catch (completionError) {
-            // Fall through to the generic "failed" response below.
-            console.error('Auto-completion after dispatch failure failed:', completionError);
+          } catch (snapshotError) {
+            console.error('Failed to persist dispatch error to step_data:', snapshotError);
           }
         }
 
         return res.json({
           success: result.success,
-          message: result.success ? 'Action dispatched; waiting for completion callback' : 'Action dispatch failed',
+          message: result.success
+            ? 'Action dispatched; waiting for completion callback'
+            : 'Action dispatch failed; waiting for completion callback (if any)',
           execution_status: executionStep?.status === 'running' ? 'running' : executionStep?.status,
           response: result.data || result.error,
         });
@@ -424,15 +406,13 @@ export const workflowController = {
       });
     } catch (error) {
       console.error('Error processing automatic step:', error);
-      // Best-effort: if this is an auto-processing action step, don't stall the workflow due to UI removal.
+      // Dispatch-only contract: keep the step open for `/complete` callback.
       if (shouldAutoCompleteActionStep && executionStep?.status === 'running') {
         try {
           const executionDataSnapshot = await workflowService.getExecutionDataSnapshot(executionId);
           await prisma.workflowExecutionStep.update({
             where: { id: stepId },
             data: {
-              status: 'completed',
-              completed_at: new Date(),
               step_data: {
                 ...executionDataSnapshot,
                 _automation: {
@@ -443,18 +423,10 @@ export const workflowController = {
               },
             },
           });
-
-          const triggeredSteps = await workflowService.advanceWorkflow(
-            executionId,
-            executionStep.step_id,
-            executionStep.company_id!
-          );
-
           return res.json({
             success: false,
-            message: triggeredSteps.length > 0 ? 'Step completed and workflow advanced' : 'Step completed',
-            triggered_steps: triggeredSteps,
-            execution_status: triggeredSteps.length > 0 ? 'running' : 'completed',
+            message: 'Action processing errored; awaiting completion callback',
+            execution_status: 'running',
           });
         } catch (completionError) {
           // Fall through to the generic response.

@@ -302,6 +302,43 @@ describe('Workflow Endpoints', () => {
       expect(workflowService.advanceWorkflow).not.toHaveBeenCalled();
     });
 
+    it('should not complete/advance on dispatch failure for automatic action', async () => {
+      const mockExecutionStep = {
+        id: 'ex-step-123',
+        execution_id: 'exec-123',
+        status: 'running',
+        step: {
+          step_type: 'action',
+          action_type: 'automatic',
+          config: { api_url: 'http://example.com/api' },
+          workflow: { data_structure: [] }
+        }
+      };
+
+      (prisma.workflowExecutionStep.findFirst as jest.Mock).mockResolvedValue(mockExecutionStep);
+      (workflowService.getExecutionDataSnapshot as jest.Mock).mockResolvedValue({});
+      (aiService.callAgentEndpoint as jest.Mock).mockResolvedValue({
+        success: false,
+        error: 'dispatch failed',
+        details: 'some details'
+      });
+
+      const response = await request(app)
+        .post('/api/workflows/executions/exec-123/steps/ex-step-123/process')
+        .set(mockAuthHeaders);
+
+      expect(response.status).toBe(200);
+      expect(response.body.success).toBe(false);
+      expect(response.body.execution_status).toBe('running');
+      expect(response.body.message).toContain('waiting for completion callback');
+
+      // Controller may persist dispatch error in step_data, but must not complete/advance.
+      expect(workflowService.advanceWorkflow).not.toHaveBeenCalled();
+      const updateCalls = (prisma.workflowExecutionStep.update as jest.Mock).mock.calls;
+      expect(updateCalls.length).toBe(1);
+      expect(updateCalls[0][0]).toEqual(expect.objectContaining({ where: { id: 'ex-step-123' } }));
+    });
+
     it('should return 404 when execution step is not found', async () => {
       (prisma.workflowExecutionStep.findFirst as jest.Mock).mockResolvedValue(null);
       const response = await request(app)

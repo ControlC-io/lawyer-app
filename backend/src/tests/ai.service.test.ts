@@ -23,6 +23,33 @@ describe('ai.service', () => {
       expect(result).toEqual({ success: true, data: { result: 'ok' } });
     });
 
+    it('should treat empty successful response body as successful dispatch', async () => {
+      (fetch as unknown as jest.Mock).mockResolvedValue(
+        new Response('', { status: 202 })
+      );
+      const result = await aiService.callAgentEndpoint(
+        'http://agent.local/run',
+        'POST',
+        {},
+        { key: 'value' }
+      );
+      expect(result).toEqual({ success: true, data: {} });
+    });
+
+    it('should treat non-JSON successful body as successful dispatch with raw payload', async () => {
+      (fetch as unknown as jest.Mock).mockResolvedValue(
+        new Response('accepted', { status: 200 })
+      );
+      const result = await aiService.callAgentEndpoint(
+        'http://agent.local/run',
+        'POST',
+        {},
+        { key: 'value' }
+      );
+      expect(result.success).toBe(true);
+      expect(result.data).toEqual({ raw: 'accepted' });
+    });
+
     it('should return success: false with error and details on non-ok response', async () => {
       (fetch as unknown as jest.Mock).mockResolvedValue(
         new Response('Server error', { status: 500 })
