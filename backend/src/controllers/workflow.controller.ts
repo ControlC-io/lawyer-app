@@ -362,36 +362,58 @@ export const workflowController = {
       // Call external API
       const result = await aiService.callAgentEndpoint(apiUrl, apiMethod, headersObj, requestBody);
 
-      // For action steps (automatic + agent), complete and advance immediately after processing.
-      // Decision steps keep the existing human/agent-confirmation flow.
-      if (shouldAutoCompleteActionStep && executionStep?.status === 'running') {
-        const executionDataSnapshot = await workflowService.getExecutionDataSnapshot(executionId);
-        const triggeredSteps = await (async () => {
-          await prisma.workflowExecutionStep.update({
-            where: { id: stepId },
-            data: {
-              status: 'completed',
-              completed_at: new Date(),
-              // Persist snapshot plus automation metadata for debugging/tracing.
-              step_data: {
-                ...executionDataSnapshot,
-                _automation: {
-                  processed_at: new Date().toISOString(),
-                  success: result.success,
-                  response: result.data ?? result.error,
+      // For action steps (automatic + agent), the external tool is expected to call
+      // `POST /api/workflows/executions/:executionId/steps/:stepId/complete` later.
+      // So we must *not* mark the step as completed here when the dispatch succeeded.
+      if (shouldAutoCompleteActionStep) {
+        // If the dispatch itself failed, there's no async callback coming in, so we
+        // complete + advance best-effort to avoid stalling the workflow.
+        if (!result.success && executionStep?.status === 'running') {
+          try {
+            const executionDataSnapshot = await workflowService.getExecutionDataSnapshot(executionId);
+            const triggeredSteps = await (async () => {
+              await prisma.workflowExecutionStep.update({
+                where: { id: stepId },
+                data: {
+                  status: 'completed',
+                  completed_at: new Date(),
+                  step_data: {
+                    ...executionDataSnapshot,
+                    _automation: {
+                      processed_at: new Date().toISOString(),
+                      success: false,
+                      response: result.data ?? result.error,
+                    },
+                  },
                 },
-              },
-            },
-          });
+              });
 
-          return workflowService.advanceWorkflow(executionId, executionStep.step_id, executionStep.company_id!);
-        })();
+              return workflowService.advanceWorkflow(
+                executionId,
+                executionStep.step_id,
+                executionStep.company_id!
+              );
+            })();
+
+            const nextSteps = Array.isArray(triggeredSteps) ? triggeredSteps : [];
+            return res.json({
+              success: false,
+              message: nextSteps.length > 0 ? 'Step completed and workflow advanced' : 'Step completed',
+              triggered_steps: nextSteps,
+              execution_status: nextSteps.length > 0 ? 'running' : 'completed',
+              response: result.data || result.error,
+            });
+          } catch (completionError) {
+            // Fall through to the generic "failed" response below.
+            console.error('Auto-completion after dispatch failure failed:', completionError);
+          }
+        }
 
         return res.json({
           success: result.success,
-          message: triggeredSteps.length > 0 ? 'Step completed and workflow advanced' : 'Step completed',
-          triggered_steps: triggeredSteps,
-          execution_status: triggeredSteps.length > 0 ? 'running' : 'completed',
+          message: result.success ? 'Action dispatched; waiting for completion callback' : 'Action dispatch failed',
+          execution_status: executionStep?.status === 'running' ? 'running' : executionStep?.status,
+          response: result.data || result.error,
         });
       }
 

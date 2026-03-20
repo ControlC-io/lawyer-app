@@ -273,6 +273,35 @@ describe('Workflow Endpoints', () => {
       expect(aiService.callAgentEndpoint).toHaveBeenCalled();
     });
 
+    it('should dispatch automatic action without completing when status is running', async () => {
+      const mockExecutionStep = {
+        id: 'ex-step-123',
+        execution_id: 'exec-123',
+        status: 'running',
+        step: {
+          step_type: 'action',
+          action_type: 'automatic',
+          config: { api_url: 'http://example.com/api' },
+          workflow: { data_structure: [] }
+        }
+      };
+
+      (prisma.workflowExecutionStep.findFirst as jest.Mock).mockResolvedValue(mockExecutionStep);
+      (aiService.callAgentEndpoint as jest.Mock).mockResolvedValue({ success: true, data: { result: 'ok' } });
+
+      const response = await request(app)
+        .post('/api/workflows/executions/exec-123/steps/ex-step-123/process')
+        .set(mockAuthHeaders);
+
+      expect(response.status).toBe(200);
+      expect(response.body.success).toBe(true);
+      expect(response.body.execution_status).toBe('running');
+      expect(response.body.message).toContain('waiting for completion callback');
+
+      expect(prisma.workflowExecutionStep.update).not.toHaveBeenCalled();
+      expect(workflowService.advanceWorkflow).not.toHaveBeenCalled();
+    });
+
     it('should return 404 when execution step is not found', async () => {
       (prisma.workflowExecutionStep.findFirst as jest.Mock).mockResolvedValue(null);
       const response = await request(app)
