@@ -26,7 +26,7 @@ const shouldPollForStep = (executionSteps: any[] | undefined): boolean => {
   const isAutomaticAction = stepType === "action" && actionType === "automatic";
   const isAgentAction = stepType === "action" && actionType === "agent";
   const isAgentDecision = stepType === "decision" && decisionNodeType === "Agent";
-  const isAgentPlusHumanDecision = stepType === "decision" && decisionNodeType === "Agent + Human";
+  const isAgentPlusHumanDecision = stepType === "decision" && decisionNodeType === "Agent_Human";
 
   return isAutomaticAction || isAgentAction || isAgentDecision || isAgentPlusHumanDecision;
 };

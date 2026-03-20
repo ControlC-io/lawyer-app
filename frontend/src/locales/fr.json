@@ -437,6 +437,12 @@
     "failedToLoad": "Échec du chargement du workflow",
     "workflowSaved": "Workflow enregistré avec succès",
     "failedToSave": "Échec de l'enregistrement du workflow",
+    "unconnectedPortsWarningTitle": "Certaines entrées/sorties d'étapes ne sont pas connectées",
+    "unconnectedPortsWarningDescription": "Connectez les liens manquants, ou enregistrez quand même. Vous pourrez corriger le graphe plus tard.",
+    "unconnectedPortsWarningCount": "{{count}} port(s) d'étape non connectés",
+    "unconnectedPortsInputLabel": "Entrée",
+    "unconnectedPortsOutputLabel": "Sortie",
+    "saveWorkflowAnyway": "Enregistrer quand même",
     "general": "Général",
     "dataStructure": "Structure de données",
     "status": "Statut",
@@ -536,6 +542,8 @@
     "failedToSetDefault": "Échec de la définition du statut par défaut",
     "noWorkflowSelected": "Aucun workflow sélectionné",
     "statusNameRequired": "Le nom du statut est requis",
+    "deleteStepPastExecutionsConfirm": "Cette étape est référencée dans {{count}} exécution(s) passées. La supprimer supprimera également les étapes d'exécution historiques correspondantes. Continuer ?",
+    "failedToDeleteStep": "Échec de la suppression de l'étape",
     "cannotAddFileTypes": "Impossible d'ajouter des types de fichier, fichiers multiples, signature ou tableau comme sous-éléments d'un tableau"
   },
   "workflowExecutions": {
@@ -565,7 +573,12 @@
     "removeUserConfirm": "Êtes-vous sûr de vouloir retirer cet utilisateur de l'organisation ?",
     "removeUserSuccess": "L'utilisateur a été retiré de l'organisation avec succès",
     "failedToRemoveUser": "Échec du retrait de l'utilisateur de l'organisation",
-    "removeFromOrganization": "Retirer de l'organisation"
+    "removeFromOrganization": "Retirer de l'organisation",
+    "resetPassword": "Réinitialiser le mot de passe",
+    "resetPasswordTitle": "Réinitialiser le mot de passe",
+    "resetPasswordDescription": "Définissez un nouveau mot de passe pour cet utilisateur.",
+    "resetPasswordSuccess": "Mot de passe mis à jour avec succès",
+    "resetPasswordError": "Échec de la réinitialisation du mot de passe"
   },
   "noOrganization": {
     "title": "Aucune organisation trouvée",

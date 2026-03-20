@@ -45,11 +45,19 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
   const companyId = useCompanyId();
   const { isSuperAdmin } = useAuth();
   const navigate = useNavigate();
+  // API configurations are typed; for an "action" step we only want action-compatible configs.
+  // Otherwise the dropdown shows decision configs, which isn't allowed in the current UX.
+  const apiConfigTypeForStep: "automatic_action" | "agent_decision" | null =
+    step.step_type === "action" && step.action_type === "automatic"
+      ? "automatic_action"
+      : step.step_type === "decision"
+        ? "agent_decision"
+        : null;
   const [outputs, setOutputs] = useState<string[]>(
     step.step_type === "decision"
-      ? (step.config.outputs || ["Yes", "No"])
+      ? (step.config.outputs?.length ? step.config.outputs : ["Yes", "No"])
       : step.step_type === "edit_form"
-        ? (step.config.outputs || ["Submit", "Cancel"])
+        ? (step.config.outputs?.length ? step.config.outputs : ["Submit", "Cancel"])
         : step.step_type === "file"
           ? (step.config.outputs?.length ? [step.config.outputs[0]] : ["Done"])
           : step.step_type === "action"
@@ -75,8 +83,14 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
   const isStartOrEnd = step.step_type === "start" || step.step_type === "end";
   const requiresExplicitAssignment =
     (step.step_type === "action" && (step.action_type || "manual") === "manual") ||
-    (step.step_type === "decision" && ["Human", "Agent_Human", "Agent + Human"].includes(step.decision_node_type || "Human")) ||
+    (step.step_type === "decision" && ["Human", "Agent", "Agent_Human"].includes(step.decision_node_type || "Human")) ||
     (step.step_type === "edit_form" && step.config.allow_external_assignment !== true);
+  const isAgentDecisionNode =
+    step.step_type === "decision" &&
+    (step.decision_node_type === "Agent" || step.decision_node_type === "Agent_Human");
+  const [decisionSourceMode, setDecisionSourceMode] = useState<"none" | "integration" | "agent">(
+    step.config.agent_id ? "agent" : step.config.api_configuration_id ? "integration" : "none"
+  );
   const hasExplicitAssignment = Boolean(step.config.assigned_to_user_id || step.config.assigned_to_group_id);
   const [selectedConfigId, setSelectedConfigId] = useState<string>(
     step.config.api_configuration_id || "none"
@@ -123,10 +137,14 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
           if (metadataList) setMetadataKeys(metadataList);
         }
 
-        const apiConfigList = await api.get<Array<{ id: string; name: string; config_type: string }>>(
-          `/api/companies/${companyId}/api-configurations`
-        );
-        if (apiConfigList) setApiConfigurations(apiConfigList);
+        if (apiConfigTypeForStep) {
+          const apiConfigList = await api.get<Array<{ id: string; name: string; config_type: string }>>(
+            `/api/companies/${companyId}/api-configurations?config_type=${encodeURIComponent(apiConfigTypeForStep)}`
+          );
+          if (apiConfigList) setApiConfigurations(apiConfigList);
+        } else {
+          setApiConfigurations([]);
+        }
       } catch {
         // ignore
       }
@@ -186,7 +204,7 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
     fetchWorkflowStatuses();
     fetchAgents();
     fetchAgentCategories();
-  }, [companyId, workflowId, step.step_type]);
+  }, [companyId, workflowId, step.step_type, step.action_type]);
 
   useEffect(() => {
     if (step.action_type === "agent" && step.config.agent_id) {
@@ -243,6 +261,18 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
   useEffect(() => {
     fetchDataStructureItems();
   }, [dataStructure, workflowId, companyId]);
+
+  useEffect(() => {
+    const configId = step.config.api_configuration_id || "none";
+    setSelectedConfigId(configId);
+    setUseCustomConfig(configId === "none");
+  }, [step.id, step.config.api_configuration_id]);
+
+  useEffect(() => {
+    setDecisionSourceMode(
+      step.config.agent_id ? "agent" : step.config.api_configuration_id ? "integration" : "none"
+    );
+  }, [step.id]);
 
   // Initialize output_styles for outputs that don't have styles yet
   useEffect(() => {
@@ -395,6 +425,7 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
         ...step,
         config: {
           ...step.config,
+          agent_id: null,
           api_configuration_id: null,
         },
       });
@@ -441,6 +472,7 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
         ...step,
         config: {
           ...step.config,
+          agent_id: null,
           api_configuration_id: configId,
           api_url: config.api_url,
           api_method: config.api_method,
@@ -1860,7 +1892,7 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
                   <Label htmlFor="decision-type">Decision Type</Label>
                   <Select
                     value={step.decision_node_type || "Human"}
-                    onValueChange={(value) => onUpdateStep({ ...step, decision_node_type: value as "Agent" | "Human" | "Agent + Human" })}
+                    onValueChange={(value) => onUpdateStep({ ...step, decision_node_type: value as "Agent" | "Human" | "Agent_Human" })}
                   >
                     <SelectTrigger id="decision-type">
                       <SelectValue />
@@ -1868,14 +1900,136 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
                     <SelectContent>
                       <SelectItem value="Human">Human</SelectItem>
                       <SelectItem value="Agent">Agent</SelectItem>
-                      <SelectItem value="Agent + Human">Agent + Human</SelectItem>
+                      <SelectItem value="Agent_Human">Agent + Human</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
 
-                {(step.decision_node_type === "Agent" || step.decision_node_type === "Agent + Human") && (
+                {isAgentDecisionNode && (
                   <>
                     <div className="space-y-2">
+                      <Label htmlFor="decision-source">Webhook Source</Label>
+                      <Select
+                        value={decisionSourceMode}
+                        onValueChange={(value) => {
+                          setDecisionSourceMode(value as "none" | "integration" | "agent");
+                          if (value === "agent") {
+                            onUpdateStep({
+                              ...step,
+                              config: {
+                                ...step.config,
+                                agent_id: null,
+                                api_configuration_id: null,
+                                api_url: null,
+                                api_method: null,
+                                api_headers: null,
+                                api_params: null,
+                                api_data: null,
+                                api_path: null,
+                              },
+                            });
+                            return;
+                          }
+
+                          if (value === "integration") {
+                            onUpdateStep({
+                              ...step,
+                              config: {
+                                ...step.config,
+                                agent_id: null,
+                                api_configuration_id: null,
+                                api_url: null,
+                                api_method: null,
+                                api_headers: null,
+                                api_params: null,
+                                api_data: null,
+                                api_path: null,
+                              },
+                            });
+                            return;
+                          }
+
+                          onUpdateStep({
+                            ...step,
+                            config: {
+                              ...step.config,
+                              agent_id: null,
+                              api_configuration_id: null,
+                              api_url: null,
+                              api_method: null,
+                              api_headers: null,
+                              api_params: null,
+                              api_data: null,
+                              api_path: null,
+                            },
+                          });
+                        }}
+                      >
+                        <SelectTrigger id="decision-source">
+                          <SelectValue placeholder="Select webhook source" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">Select source</SelectItem>
+                          <SelectItem value="integration">Company Integration</SelectItem>
+                          <SelectItem value="agent">Shared Agent</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {decisionSourceMode === "integration" && (
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <Label htmlFor="decision-api-config">Decision Integration</Label>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => navigate("/api-configurations")}
+                          >
+                            <Settings className="h-4 w-4 mr-1" />
+                            Manage
+                          </Button>
+                        </div>
+                        <Select
+                          value={step.config.api_configuration_id || "none"}
+                          onValueChange={(value) => {
+                            if (value === "none") {
+                              onUpdateStep({
+                                ...step,
+                                config: {
+                                  ...step.config,
+                                  agent_id: null,
+                                  api_configuration_id: null,
+                                },
+                              });
+                              return;
+                            }
+                            handleConfigSelect(value);
+                          }}
+                        >
+                          <SelectTrigger id="decision-api-config">
+                            <SelectValue placeholder="Select integration" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">Select integration</SelectItem>
+                            {apiConfigurations.map((config) => (
+                              <SelectItem key={config.id} value={config.id}>
+                                {config.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        {step.config.api_configuration_id && (
+                          <Alert>
+                            <AlertDescription className="text-xs">
+                              Using company decision integration configuration for this step.
+                            </AlertDescription>
+                          </Alert>
+                        )}
+                      </div>
+                    )}
+
+                    {decisionSourceMode === "agent" && (
+                      <div className="space-y-2">
                       <div className="flex items-center justify-between">
                         <Label htmlFor="agent-select">Select Agent</Label>
                         {isSuperAdmin && (
@@ -1897,8 +2051,13 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
                             config: {
                               ...step.config,
                               agent_id: value === "none" ? null : value,
-                              // Remove old api_configuration_id for backward compatibility
                               api_configuration_id: null,
+                              api_url: null,
+                              api_method: null,
+                              api_headers: null,
+                              api_params: null,
+                              api_data: null,
+                              api_path: null,
                             },
                           });
                         }}
@@ -1918,6 +2077,7 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
                         </Alert>
                       )}
                     </div>
+                    )}
 
                     <div className="space-y-2">
                       <Label htmlFor="condition">Condition</Label>
@@ -1931,13 +2091,13 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
                       <p className="text-xs text-muted-foreground">
                         Describe the decision criteria for the agent to evaluate
                       </p>
-                      {step.config.outputs && step.config.outputs.length > 0 && (
+                      {outputs.length > 0 && (
                         <div className="mt-2 p-2 bg-muted/50 rounded-md border border-border">
                           <p className="text-xs font-medium text-muted-foreground mb-1.5">
                             Available options:
                           </p>
                           <div className="flex flex-wrap gap-1.5">
-                            {step.config.outputs.map((output: string, index: number) => (
+                            {outputs.map((output: string, index: number) => (
                               <Badge
                                 key={index}
                                 variant="outline"
@@ -1950,320 +2110,6 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
                         </div>
                       )}
                     </div>
-
-                    {useCustomConfig && !step.config.agent_id && (
-                      <>
-                        <div className="space-y-2">
-                          <Label htmlFor="agent-api-url">API URL</Label>
-                          <Input
-                            id="agent-api-url"
-                            value={step.config.api_url || ""}
-                            onChange={(e) => handleConfigChange("api_url", e.target.value)}
-                            placeholder="https://api.example.com/endpoint"
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label htmlFor="agent-api-method">HTTP Method</Label>
-                          <Select
-                            value={step.config.api_method || "POST"}
-                            onValueChange={(value) => handleConfigChange("api_method", value)}
-                          >
-                            <SelectTrigger id="agent-api-method">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="GET">GET</SelectItem>
-                              <SelectItem value="POST">POST</SelectItem>
-                              <SelectItem value="PUT">PUT</SelectItem>
-                              <SelectItem value="PATCH">PATCH</SelectItem>
-                              <SelectItem value="DELETE">DELETE</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-
-                        <div className="space-y-2">
-                          <div className="flex items-center justify-between">
-                            <Label>Headers</Label>
-                            <Button size="sm" variant="outline" onClick={() => handleAddKeyValue("headers")}>
-                              <Plus className="h-4 w-4 mr-1" />
-                              Add
-                            </Button>
-                          </div>
-                          <div className="space-y-2">
-                            {headers.map((header, index) => (
-                              <div key={index} className="flex gap-2">
-                                <Input
-                                  placeholder="Key"
-                                  value={header.key}
-                                  onChange={(e) => handleUpdateKeyValue("headers", index, "key", e.target.value)}
-                                />
-                                <Input
-                                  placeholder="Value"
-                                  value={header.value}
-                                  onChange={(e) => handleUpdateKeyValue("headers", index, "value", e.target.value)}
-                                />
-                                <Button
-                                  size="icon"
-                                  variant="ghost"
-                                  onClick={() => handleDeleteKeyValue("headers", index)}
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                </Button>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-
-                        <div className="space-y-2">
-                          <div className="flex items-center justify-between">
-                            <Label>Params</Label>
-                            <Button size="sm" variant="outline" onClick={() => handleAddKeyValue("params")}>
-                              <Plus className="h-4 w-4 mr-1" />
-                              Add
-                            </Button>
-                          </div>
-                          <div className="space-y-3">
-                            {params.map((param, index) => (
-                              <div key={index} className="space-y-2 p-3 border border-border rounded-md">
-                                <Input
-                                  placeholder="Key"
-                                  value={param.key}
-                                  onChange={(e) => handleUpdateKeyValue("params", index, "key", e.target.value)}
-                                />
-                                <div className="flex gap-2">
-                                  <Select
-                                    value={param.mode || "static"}
-                                    onValueChange={(value) => handleUpdateKeyValue("params", index, "mode", value)}
-                                  >
-                                    <SelectTrigger className="w-32">
-                                      <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      <SelectItem value="static">Static</SelectItem>
-                                      <SelectItem value="bind">Bind Data</SelectItem>
-                                    </SelectContent>
-                                  </Select>
-                                  {param.mode === "bind" ? (
-                                    <div className="flex-1 flex gap-1">
-                                      <Input
-                                        placeholder="Select data to bind"
-                                        value={param.value.startsWith("{{") ? dataStructureItems.find(i => param.value === `{{${i.id}}}`)?.name || "Not found" : ""}
-                                        disabled
-                                        className="flex-1"
-                                      />
-                                      <Popover>
-                                        <PopoverTrigger asChild>
-                                          <Button size="icon" variant="outline">
-                                            <Link2 className="h-4 w-4" />
-                                          </Button>
-                                        </PopoverTrigger>
-                                        <PopoverContent className="w-80">
-                                          <div className="space-y-2">
-                                            <Label className="text-xs font-medium">Bind to Data Structure Item</Label>
-                                            <div className="max-h-60 overflow-y-auto space-y-1">
-                                              {dataStructureItems.map((item) => (
-                                                <Button
-                                                  key={item.id}
-                                                  variant="ghost"
-                                                  size="sm"
-                                                  className="w-full justify-start text-xs"
-                                                  onClick={() => handleUpdateKeyValue("params", index, "value", `{{${item.id}}}`)}
-                                                >
-                                                  <div className="flex flex-col items-start">
-                                                    <span className="font-medium">{item.name}</span>
-                                                    <span className="text-muted-foreground">{item.data_structure_name}</span>
-                                                  </div>
-                                                </Button>
-                                              ))}
-                                              {dataStructureItems.length === 0 && (
-                                                <p className="text-xs text-muted-foreground p-2">No data structures linked to this workflow</p>
-                                              )}
-                                            </div>
-                                          </div>
-                                        </PopoverContent>
-                                      </Popover>
-                                    </div>
-                                  ) : (
-                                    <Input
-                                      placeholder="Static value"
-                                      value={param.value}
-                                      onChange={(e) => handleUpdateKeyValue("params", index, "value", e.target.value)}
-                                      className="flex-1"
-                                    />
-                                  )}
-                                  <Button
-                                    size="icon"
-                                    variant="ghost"
-                                    onClick={() => handleDeleteKeyValue("params", index)}
-                                  >
-                                    <Trash2 className="h-4 w-4" />
-                                  </Button>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-
-                        <div className="space-y-2">
-                          <div className="flex items-center justify-between">
-                            <Label>Data</Label>
-                            <Button size="sm" variant="outline" onClick={() => handleAddKeyValue("data")}>
-                              <Plus className="h-4 w-4 mr-1" />
-                              Add
-                            </Button>
-                          </div>
-                          <div className="space-y-3">
-                            {data.map((item, index) => (
-                              <div key={index} className="space-y-2 p-3 border border-border rounded-md">
-                                <Input
-                                  placeholder="Key"
-                                  value={item.key}
-                                  onChange={(e) => handleUpdateKeyValue("data", index, "key", e.target.value)}
-                                />
-                                <div className="flex gap-2">
-                                  <Select
-                                    value={item.mode || "static"}
-                                    onValueChange={(value) => handleUpdateKeyValue("data", index, "mode", value)}
-                                  >
-                                    <SelectTrigger className="w-32">
-                                      <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      <SelectItem value="static">Static</SelectItem>
-                                      <SelectItem value="bind">Bind Data</SelectItem>
-                                    </SelectContent>
-                                  </Select>
-                                  {item.mode === "bind" ? (
-                                    <div className="flex-1 flex gap-1">
-                                      <Input
-                                        placeholder="Select data to bind"
-                                        value={item.value.startsWith("{{") ? dataStructureItems.find(i => item.value === `{{${i.id}}}`)?.name || "Not found" : ""}
-                                        disabled
-                                        className="flex-1"
-                                      />
-                                      <Popover>
-                                        <PopoverTrigger asChild>
-                                          <Button size="icon" variant="outline">
-                                            <Link2 className="h-4 w-4" />
-                                          </Button>
-                                        </PopoverTrigger>
-                                        <PopoverContent className="w-80">
-                                          <div className="space-y-2">
-                                            <Label className="text-xs font-medium">Bind to Data Structure Item</Label>
-                                            <div className="max-h-60 overflow-y-auto space-y-1">
-                                              {dataStructureItems.map((dsItem) => (
-                                                <Button
-                                                  key={dsItem.id}
-                                                  variant="ghost"
-                                                  size="sm"
-                                                  className="w-full justify-start text-xs"
-                                                  onClick={() => handleUpdateKeyValue("data", index, "value", `{{${dsItem.id}}}`)}
-                                                >
-                                                  <div className="flex flex-col items-start">
-                                                    <span className="font-medium">{dsItem.name}</span>
-                                                    <span className="text-muted-foreground">{dsItem.data_structure_name}</span>
-                                                  </div>
-                                                </Button>
-                                              ))}
-                                              {dataStructureItems.length === 0 && (
-                                                <p className="text-xs text-muted-foreground p-2">No data structures linked to this workflow</p>
-                                              )}
-                                            </div>
-                                          </div>
-                                        </PopoverContent>
-                                      </Popover>
-                                    </div>
-                                  ) : (
-                                    <Input
-                                      placeholder="Static value"
-                                      value={item.value}
-                                      onChange={(e) => handleUpdateKeyValue("data", index, "value", e.target.value)}
-                                      className="flex-1"
-                                    />
-                                  )}
-                                  <Button
-                                    size="icon"
-                                    variant="ghost"
-                                    onClick={() => handleDeleteKeyValue("data", index)}
-                                  >
-                                    <Trash2 className="h-4 w-4" />
-                                  </Button>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      </>
-                    )}
-
-                    {!useCustomConfig && selectedConfigId !== "none" && !step.config.agent_id && (
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between">
-                          <Label>Request Data (Static Only)</Label>
-                          <Button size="sm" variant="outline" onClick={() => handleAddKeyValue("data")}>
-                            <Plus className="h-4 w-4 mr-1" />
-                            Add
-                          </Button>
-                        </div>
-                        <div className="space-y-2">
-                          {data.map((item, index) => (
-                            <div key={index} className="flex gap-2">
-                              <Input
-                                placeholder="Key"
-                                value={item.key}
-                                onChange={(e) => {
-                                  const updated = [...data];
-                                  updated[index] = { ...updated[index], key: e.target.value, mode: "static" as const };
-                                  setData(updated);
-                                  onUpdateStep({
-                                    ...step,
-                                    config: {
-                                      ...step.config,
-                                      api_data: JSON.stringify(updated.map(d => ({
-                                        key: d.key,
-                                        value: d.value,
-                                        mode: "static"
-                                      })))
-                                    }
-                                  });
-                                }}
-                              />
-                              <Input
-                                placeholder="Value"
-                                value={item.mode === "static" ? item.value : ""}
-                                onChange={(e) => {
-                                  // Force static mode when configuration is selected
-                                  const updated = [...data];
-                                  updated[index] = { ...updated[index], value: e.target.value, mode: "static" as const };
-                                  setData(updated);
-                                  onUpdateStep({
-                                    ...step,
-                                    config: {
-                                      ...step.config,
-                                      api_data: JSON.stringify(updated.map(d => ({
-                                        key: d.key,
-                                        value: d.value,
-                                        mode: "static"
-                                      })))
-                                    }
-                                  });
-                                }}
-                              />
-                              <Button
-                                size="icon"
-                                variant="ghost"
-                                onClick={() => handleDeleteKeyValue("data", index)}
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          ))}
-                        </div>
-                        <p className="text-xs text-muted-foreground">
-                          Only static values are allowed when using a saved configuration. Headers and query parameters are managed in the configuration.
-                        </p>
-                      </div>
-                    )}
                   </>
                 )}
               </>

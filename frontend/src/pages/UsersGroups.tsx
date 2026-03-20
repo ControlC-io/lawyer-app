@@ -1,5 +1,5 @@
 import { useMemo, useState, useEffect } from "react";
-import { Plus, Pencil, Trash2, Search, ChevronLeft, ChevronRight, Loader2, UserMinus, Shield } from "lucide-react";
+import { Plus, Pencil, Trash2, Search, ChevronLeft, ChevronRight, Loader2, UserMinus, Shield, Key } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -43,7 +43,7 @@ type GroupMember = {
 
 export default function UsersGroups() {
   const companyId = useCompanyId();
-  const { user, isCompanyAdmin } = useAuth();
+  const { user, isCompanyAdmin, isSuperAdmin } = useAuth();
   const { t } = useLanguage();
   const { roles, permissionGroups, createRole, updateRole, deleteRole, assignUserRole } = useRoles();
   const [groups, setGroups] = useState<GroupItem[]>([]);
@@ -61,6 +61,11 @@ export default function UsersGroups() {
   const [selectedGroupFilter, setSelectedGroupFilter] = useState<string>("");
   const [userToRemove, setUserToRemove] = useState<UserItem | null>(null);
   const [isRemovingUser, setIsRemovingUser] = useState(false);
+  const [userToReset, setUserToReset] = useState<UserItem | null>(null);
+  const [resetDialogOpen, setResetDialogOpen] = useState(false);
+  const [resetNewPassword, setResetNewPassword] = useState("");
+  const [resetConfirmPassword, setResetConfirmPassword] = useState("");
+  const [isResettingPassword, setIsResettingPassword] = useState(false);
 
   // Groups tab state
   const [groupQuery, setGroupQuery] = useState("");
@@ -327,6 +332,53 @@ export default function UsersGroups() {
     }
   };
 
+  const openResetPasswordDialog = (u: UserItem) => {
+    setUserToReset(u);
+    setResetNewPassword("");
+    setResetConfirmPassword("");
+    setResetDialogOpen(true);
+  };
+
+  const resetUserPassword = async () => {
+    if (!companyId || !userToReset) return;
+
+    if (!resetNewPassword || !resetConfirmPassword) {
+      toast.error(t("settings.passwordFieldsRequired") || "All password fields are required");
+      return;
+    }
+
+    if (resetNewPassword.length < 6) {
+      toast.error(t("settings.passwordMinLength") || "Password must be at least 6 characters long");
+      return;
+    }
+
+    if (resetNewPassword !== resetConfirmPassword) {
+      toast.error(t("settings.passwordsDoNotMatch") || "New passwords do not match");
+      return;
+    }
+
+    setIsResettingPassword(true);
+    try {
+      await api.post(`/api/companies/${companyId}/users/${userToReset.id}/reset-password`, {
+        password: resetNewPassword,
+      });
+      toast.success(t("usersGroups.resetPasswordSuccess") || "Password updated successfully");
+      setResetDialogOpen(false);
+      setUserToReset(null);
+      setResetNewPassword("");
+      setResetConfirmPassword("");
+    } catch (error: any) {
+      toast.error(
+        error?.message ||
+          t("usersGroups.resetPasswordError") ||
+          "Failed to reset password"
+      );
+      console.error(error);
+    } finally {
+      setIsResettingPassword(false);
+    }
+  };
+
   // Reset pagination when search changes
   const handleUserSearchChange = (value: string) => {
     setUserQuery(value);
@@ -416,6 +468,7 @@ export default function UsersGroups() {
                   {paginatedUsers.map((u) => {
                     const userGroups = getUserGroups(u.id);
                     const canBeRemoved = isCompanyAdmin && u.role !== "company_admin" && u.id !== user?.id;
+                    const canResetPassword = isSuperAdmin && u.id !== user?.id;
                     
                     return (
                       <TableRow key={u.id}>
@@ -468,17 +521,30 @@ export default function UsersGroups() {
                         </TableCell>
                         {isCompanyAdmin && (
                           <TableCell className="text-right">
-                            {canBeRemoved && (
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => setUserToRemove(u)}
-                                className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                                title={t("usersGroups.removeFromOrganization") as string}
-                              >
-                                <UserMinus className="h-4 w-4" />
-                              </Button>
-                            )}
+                            <div className="flex items-center justify-end gap-2">
+                              {canResetPassword && (
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => openResetPasswordDialog(u)}
+                                  className="text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                                  title={t("usersGroups.resetPassword") as string}
+                                >
+                                  <Key className="h-4 w-4" />
+                                </Button>
+                              )}
+                              {canBeRemoved && (
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => setUserToRemove(u)}
+                                  className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                                  title={t("usersGroups.removeFromOrganization") as string}
+                                >
+                                  <UserMinus className="h-4 w-4" />
+                                </Button>
+                              )}
+                            </div>
                           </TableCell>
                         )}
                       </TableRow>
@@ -889,6 +955,82 @@ export default function UsersGroups() {
             <Button onClick={handleInvite} disabled={inviting || !inviteEmail}>
               {inviting && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
               Send Invitation
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Reset Password Dialog */}
+      <Dialog
+        open={resetDialogOpen}
+        onOpenChange={(open) => {
+          setResetDialogOpen(open);
+          if (!open) {
+            setUserToReset(null);
+            setResetNewPassword("");
+            setResetConfirmPassword("");
+            setIsResettingPassword(false);
+          }
+        }}
+      >
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{t("usersGroups.resetPasswordTitle") || "Reset password"}</DialogTitle>
+            <DialogDescription>
+              {t("usersGroups.resetPasswordDescription") || "Set a new password for this user."}
+              <br />
+              <strong>{userToReset?.full_name || userToReset?.email}</strong>
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label htmlFor="reset-new-password">
+                {t("settings.newPassword") || "New Password"}
+              </Label>
+              <Input
+                id="reset-new-password"
+                type="password"
+                value={resetNewPassword}
+                onChange={(e) => setResetNewPassword(e.target.value)}
+                placeholder={t("settings.newPasswordPlaceholder") as string}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="reset-confirm-new-password">
+                {t("settings.confirmPassword") || "Confirm New Password"}
+              </Label>
+              <Input
+                id="reset-confirm-new-password"
+                type="password"
+                value={resetConfirmPassword}
+                onChange={(e) => setResetConfirmPassword(e.target.value)}
+                placeholder={t("settings.confirmPasswordPlaceholder") as string}
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setResetDialogOpen(false)}
+              disabled={isResettingPassword}
+            >
+              {t("common.cancel") || "Cancel"}
+            </Button>
+            <Button
+              onClick={resetUserPassword}
+              disabled={isResettingPassword || !userToReset}
+            >
+              {isResettingPassword ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  {t("common.loading") || "Loading"}
+                </>
+              ) : (
+                t("usersGroups.resetPassword") || "Reset password"
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>

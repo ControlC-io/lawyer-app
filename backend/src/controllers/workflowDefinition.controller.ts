@@ -2,6 +2,7 @@ import { Response } from 'express';
 import { AuthRequest, ALL_COMPANIES, companyFilter } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 import { workflowService } from '../services/workflow.service';
+import { ExecutionStatus } from '@prisma/client';
 
 async function ensureCompanyAccess(req: AuthRequest, companyId: string, requireAdmin = false) {
   if (req.company && !req.user) {
@@ -432,6 +433,7 @@ export const workflowDefinitionController = {
         const actionType = step.action_type || 'manual';
         const decisionNodeType = step.decision_node_type || 'Human';
         const config = (step.config ?? {}) as Record<string, any>;
+        const isAgentDecision = stepType === 'decision' && ['Agent', 'Agent_Human'].includes(decisionNodeType);
         const isExternalForm = stepType === 'edit_form' && config.allow_external_assignment === true;
 
         const requiresAssignment =
@@ -444,6 +446,32 @@ export const workflowDefinitionController = {
             error: 'Invalid step assignment',
             details: `Step "${step.name || 'Unnamed step'}" requires a user or group assignment`,
           });
+        }
+
+        if (isAgentDecision) {
+          const hasAgentSource = Boolean(config.agent_id);
+          const hasIntegrationSource = Boolean(config.api_configuration_id);
+          const hasManualWebhookConfig =
+            Boolean(config.api_url) ||
+            Boolean(config.api_method) ||
+            Boolean(config.api_headers) ||
+            Boolean(config.api_params) ||
+            Boolean(config.api_data) ||
+            Boolean(config.api_path);
+
+          if (hasAgentSource === hasIntegrationSource) {
+            return res.status(400).json({
+              error: 'Invalid decision configuration',
+              details: `Step "${step.name || 'Unnamed step'}" must use exactly one webhook source: shared agent or company integration`,
+            });
+          }
+
+          if (hasManualWebhookConfig) {
+            return res.status(400).json({
+              error: 'Invalid decision configuration',
+              details: `Step "${step.name || 'Unnamed step'}" cannot include manual webhook settings for Agent decision types`,
+            });
+          }
         }
       }
 
@@ -459,6 +487,16 @@ export const workflowDefinitionController = {
         await prisma.workflowExecution.updateMany({
           where: { current_step_id: { in: toDelete } },
           data: { current_step_id: null },
+        });
+        // Remove connections first so workflow_steps deletion does not violate FK constraints.
+        await prisma.workflowConnection.deleteMany({
+          where: {
+            workflow_id: workflowId,
+            OR: [
+              { source_step_id: { in: toDelete } },
+              { target_step_id: { in: toDelete } },
+            ],
+          },
         });
         // Execution steps and logs reference workflow steps; clear/delete in dependency order
         const executionStepIds = await prisma.workflowExecutionStep.findMany({
@@ -560,6 +598,180 @@ export const workflowDefinitionController = {
       return res.json(list);
     } catch (error) {
       console.error('putConnections error:', error);
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
+  /**
+   * GET /api/companies/:companyId/workflows/:workflowId/steps/:stepId/execution-usage
+   * Returns how many executions referenced this workflow step.
+   */
+  async getStepExecutionUsage(req: AuthRequest, res: Response) {
+    try {
+      const { companyId, workflowId, stepId } = req.params;
+      if (!companyId || !workflowId || !stepId) {
+        return res.status(400).json({ error: 'Missing company ID, workflow ID or step ID' });
+      }
+
+      const access = await ensureCompanyAccess(req, companyId);
+      if (access.error) return res.status(access.error.status).json(access.error.body);
+
+      const step = await prisma.workflowStep.findFirst({
+        where: { id: stepId, workflow_id: workflowId },
+        select: { id: true },
+      });
+      if (!step) {
+        return res.status(404).json({ error: 'Step not found', details: 'Step not found or access denied' });
+      }
+
+      const executionStepCount = await prisma.workflowExecutionStep.count({
+        where: { step_id: stepId },
+      });
+
+      const executionIdRows = await prisma.workflowExecutionStep.findMany({
+        where: { step_id: stepId },
+        select: { execution_id: true },
+        distinct: ['execution_id'],
+      });
+      const executionIds = executionIdRows.map((r) => r.execution_id);
+      const executionCount = executionIds.length;
+
+      const activeExecutionCount = await prisma.workflowExecution.count({
+        where: { workflow_id: workflowId, current_step_id: stepId },
+      });
+
+      const pastStatuses: ExecutionStatus[] = ['completed', 'failed', 'paused'];
+      const pastExecutionIds =
+        executionIds.length > 0
+          ? await prisma.workflowExecution.findMany({
+              where: {
+                id: { in: executionIds },
+                workflow_id: workflowId,
+                status: { in: pastStatuses },
+              },
+              select: { id: true },
+            })
+          : [];
+
+      const pastExecutionCount = pastExecutionIds.length;
+
+      const pastExecutionStepCount =
+        pastExecutionIds.length > 0
+          ? await prisma.workflowExecutionStep.count({
+              where: {
+                step_id: stepId,
+                execution_id: { in: pastExecutionIds.map((e) => e.id) },
+              },
+            })
+          : 0;
+
+      return res.json({
+        execution_step_count: executionStepCount,
+        execution_count: executionCount,
+        active_execution_count: activeExecutionCount,
+        past_execution_count: pastExecutionCount,
+        past_execution_step_count: pastExecutionStepCount,
+      });
+    } catch (error) {
+      console.error('getStepExecutionUsage error:', error);
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
+  /**
+   * DELETE /api/companies/:companyId/workflows/:workflowId/steps/:stepId
+   * Deletes a step, its connections, and its historical execution steps.
+   *
+   * Query param:
+   * - deletePastExecutions=true (required when past executions exist)
+   */
+  async deleteStep(req: AuthRequest, res: Response) {
+    try {
+      const { companyId, workflowId, stepId } = req.params;
+      if (!companyId || !workflowId || !stepId) {
+        return res.status(400).json({ error: 'Missing company ID, workflow ID or step ID' });
+      }
+
+      const deletePastExecutions = String(req.query.deletePastExecutions ?? '').toLowerCase() === 'true';
+
+      const access = await ensureCompanyAccess(req, companyId);
+      if (access.error) return res.status(access.error.status).json(access.error.body);
+
+      const step = await prisma.workflowStep.findFirst({
+        where: { id: stepId, workflow_id: workflowId },
+        select: { id: true },
+      });
+      if (!step) {
+        return res.status(404).json({ error: 'Step not found', details: 'Step not found or access denied' });
+      }
+
+      const executionIdRows = await prisma.workflowExecutionStep.findMany({
+        where: { step_id: stepId },
+        select: { execution_id: true },
+        distinct: ['execution_id'],
+      });
+      const executionIds = executionIdRows.map((r) => r.execution_id);
+
+      const pastStatuses: ExecutionStatus[] = ['completed', 'failed', 'paused'];
+      const pastExecutionIds =
+        executionIds.length > 0
+          ? await prisma.workflowExecution.findMany({
+              where: {
+                id: { in: executionIds },
+                workflow_id: workflowId,
+                status: { in: pastStatuses },
+              },
+              select: { id: true },
+            })
+          : [];
+
+      const pastExecutionCount = pastExecutionIds.length;
+      if (pastExecutionCount > 0 && !deletePastExecutions) {
+        return res.status(409).json({
+          error: 'Past executions exist',
+          details: `This step is referenced by ${pastExecutionCount} past execution(s). Re-run delete with deletePastExecutions=true to confirm.`,
+          past_execution_count: pastExecutionCount,
+        });
+      }
+
+      await prisma.$transaction(async (tx) => {
+        // Remove connections first so workflow_steps deletion does not violate FK constraints.
+        await tx.workflowConnection.deleteMany({
+          where: {
+            workflow_id: workflowId,
+            OR: [{ source_step_id: stepId }, { target_step_id: stepId }],
+          },
+        });
+
+        // Clear any executions currently pointing at this step.
+        await tx.workflowExecution.updateMany({
+          where: { workflow_id: workflowId, current_step_id: stepId },
+          data: { current_step_id: null },
+        });
+
+        // Clear log references and delete the execution-step rows.
+        const executionStepIds = await tx.workflowExecutionStep.findMany({
+          where: { step_id: stepId },
+          select: { id: true },
+        });
+        const executionStepIdList = executionStepIds.map((r) => r.id);
+
+        if (executionStepIdList.length > 0) {
+          await tx.workflowExecutionLog.updateMany({
+            where: { step_id: { in: executionStepIdList } },
+            data: { step_id: null },
+          });
+          await tx.workflowExecutionStep.deleteMany({ where: { step_id: stepId } });
+        }
+
+        await tx.workflowStep.deleteMany({
+          where: { id: stepId, workflow_id: workflowId },
+        });
+      });
+
+      return res.status(204).send();
+    } catch (error) {
+      console.error('deleteStep error:', error);
       return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
     }
   },

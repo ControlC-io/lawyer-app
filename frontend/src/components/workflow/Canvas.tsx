@@ -3,6 +3,7 @@ import { WorkflowStep, WorkflowConnection } from "@/pages/WorkflowEditor";
 import { WorkflowNode } from "./WorkflowNode";
 import { ConnectionDialog } from "./ConnectionDialog";
 import { CanvasComment, CanvasCommentData } from "./CanvasComment";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
 interface CanvasProps {
   steps: WorkflowStep[];
@@ -167,9 +168,9 @@ const getOutputPosition = (step: WorkflowStep, outputName: string, center: { x: 
   const halfWidth = getStepHalfWidth(step.step_type);
 
   if (step.step_type === "decision" || step.step_type === "edit_form") {
-    const outputs = step.config.outputs ||
-      (step.step_type === "edit_form" ? ["Submit", "Cancel"] :
-        ["Yes", "No"]);
+    const outputs = step.config.outputs?.length
+      ? step.config.outputs
+      : (step.step_type === "edit_form" ? ["Submit", "Cancel"] : ["Yes", "No"]);
     const index = outputs.indexOf(outputName);
     const totalOutputs = outputs.length;
 
@@ -693,6 +694,12 @@ export function Canvas({
     onUpdateComments([...comments, newComment]);
   };
 
+  const panBy = (dxPx: number, dyPx: number) => {
+    // `pan` is in screen pixels (it's applied via translate(...) before scale(zoom)),
+    // so we pan by screen pixels to match mouse-drag behavior.
+    setPan((prev) => ({ x: prev.x + dxPx, y: prev.y + dyPx }));
+  };
+
   const handleUpdateComment = (updatedComment: CanvasCommentData) => {
     if (!onUpdateComments) return;
     onUpdateComments(
@@ -778,10 +785,84 @@ export function Canvas({
         )}
       </div>
 
-      {/* Pan hint - only show in edit mode */}
-      {!readOnly && (
-        <div className="absolute top-4 left-4 bg-background/90 border border-border rounded-lg px-3 py-2 text-sm z-50">
-          Space + Left Click to pan
+      {/* Pan navigation buttons (left of other shortcuts) */}
+      {!readOnly && onUpdateComments && (
+        <div className="absolute top-4 left-4 z-50">
+          <div className="grid grid-cols-3 grid-rows-3 gap-2 w-max">
+            {/* Up */}
+            <div className="col-start-2 row-start-1" />
+            <button
+              onClick={() => {
+                const panStepWorld = 220;
+                const stepPx = Math.max(60, Math.min(220, panStepWorld * zoom));
+                panBy(0, stepPx);
+              }}
+              className="col-start-2 row-start-1 w-10 h-10 bg-background border border-border rounded-lg shadow-lg hover:bg-accent transition-colors flex items-center justify-center text-lg font-bold"
+              title="Pan Up"
+              aria-label="Pan Up"
+            >
+              ↑
+            </button>
+            {/* Left */}
+            <button
+              onClick={() => {
+                const panStepWorld = 220;
+                const stepPx = Math.max(60, Math.min(220, panStepWorld * zoom));
+                panBy(stepPx, 0);
+              }}
+              className="col-start-1 row-start-2 w-10 h-10 bg-background border border-border rounded-lg shadow-lg hover:bg-accent transition-colors flex items-center justify-center text-lg font-bold"
+              title="Pan Left"
+              aria-label="Pan Left"
+            >
+              ←
+            </button>
+            {/* Help (i) */}
+            <Popover>
+              <PopoverTrigger asChild>
+                <button
+                  className="col-start-2 row-start-2 w-10 h-10 bg-background border border-border rounded-lg shadow-lg hover:bg-accent transition-colors flex items-center justify-center text-sm font-bold text-muted-foreground"
+                  aria-label="Pan help"
+                  title="Pan help"
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  i
+                </button>
+              </PopoverTrigger>
+              <PopoverContent className="w-72">
+                <div className="text-sm">
+                  <div className="font-medium mb-1">Panning</div>
+                  <div>Space + Left Click to pan</div>
+                </div>
+              </PopoverContent>
+            </Popover>
+            {/* Right */}
+            <button
+              onClick={() => {
+                const panStepWorld = 220;
+                const stepPx = Math.max(60, Math.min(220, panStepWorld * zoom));
+                panBy(-stepPx, 0);
+              }}
+              className="col-start-3 row-start-2 w-10 h-10 bg-background border border-border rounded-lg shadow-lg hover:bg-accent transition-colors flex items-center justify-center text-lg font-bold"
+              title="Pan Right"
+              aria-label="Pan Right"
+            >
+              →
+            </button>
+            {/* Down */}
+            <button
+              onClick={() => {
+                const panStepWorld = 220;
+                const stepPx = Math.max(60, Math.min(220, panStepWorld * zoom));
+                panBy(0, -stepPx);
+              }}
+              className="col-start-2 row-start-3 w-10 h-10 bg-background border border-border rounded-lg shadow-lg hover:bg-accent transition-colors flex items-center justify-center text-lg font-bold"
+              title="Pan Down"
+              aria-label="Pan Down"
+            >
+              ↓
+            </button>
+          </div>
         </div>
       )}
 

@@ -88,9 +88,9 @@ export function WorkflowNode({
 }: WorkflowNodeProps) {
   const style = nodeStyles[step.step_type];
   const outputs = step.step_type === "decision"
-    ? (step.config.outputs || ["Yes", "No"])
+    ? (step.config.outputs?.length ? step.config.outputs : ["Yes", "No"])
     : step.step_type === "edit_form"
-      ? (step.config.outputs || ["Submit", "Cancel"])
+      ? (step.config.outputs?.length ? step.config.outputs : ["Submit", "Cancel"])
       : ["default"];
 
   // Ensure positions are valid numbers for CSS (API may send Prisma Decimals as strings)
@@ -148,7 +148,7 @@ export function WorkflowNode({
             <Bot className="h-3.5 w-3.5" />
           </div>
         );
-      } else if (decisionType === "Agent + Human") {
+      } else if (decisionType === "Agent_Human") {
         return (
           <div className="flex items-center gap-0.5" title="Agent + Human decision">
             <Bot className="h-3 w-3" />

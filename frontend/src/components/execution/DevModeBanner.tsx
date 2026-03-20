@@ -66,7 +66,7 @@ export const DevModeBanner = ({
     const isAutomaticAction = stepType === 'action' && actionType === 'automatic';
     const isAgentAction = stepType === 'action' && actionType === 'agent';
     const isAgentDecision = stepType === 'decision' && decisionNodeType === 'Agent';
-    const isAgentPlusHumanDecision = stepType === 'decision' && decisionNodeType === 'Agent + Human';
+    const isAgentPlusHumanDecision = stepType === 'decision' && decisionNodeType === 'Agent_Human';
     const showDevMode = isAutomaticAction || isAgentAction || isAgentDecision || isAgentPlusHumanDecision;
 
     if (!showDevMode) {
@@ -158,7 +158,7 @@ export const DevModeBanner = ({
                     apiData = [];
                 }
 
-                const isAgentDecision = stepType === 'decision' && (decisionNodeType === 'Agent' || decisionNodeType === 'Agent + Human');
+                const isAgentDecision = stepType === 'decision' && (decisionNodeType === 'Agent' || decisionNodeType === 'Agent_Human');
 
                 let requestBody: any;
 
@@ -445,7 +445,7 @@ export const DevModeBanner = ({
                         execution_step_id: executionStepId,
                         ...resolvedData,
                     };
-                    const isAgentDecision = stepType === 'decision' && (decisionNodeType === 'Agent' || decisionNodeType === 'Agent + Human');
+                    const isAgentDecision = stepType === 'decision' && (decisionNodeType === 'Agent' || decisionNodeType === 'Agent_Human');
                     if (isAgentDecision) {
                         requestBody.condition = stepConfig?.condition || '';
                         requestBody.outputs = Array.isArray(stepConfig?.outputs) ? stepConfig.outputs : (stepConfig?.outputs ? [stepConfig.outputs] : []);

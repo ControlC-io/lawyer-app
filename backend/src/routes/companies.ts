@@ -59,6 +59,11 @@ router.get(
   '/:companyId/users',
   asyncHandler(usersController.getCompanyUsers)
 );
+router.post(
+  '/:companyId/users/:userId/reset-password',
+  requireSuperAdmin,
+  asyncHandler(companiesController.resetUserPassword)
+);
 /** Super admin only: add existing user (by email) to company */
 router.post(
   '/:companyId/users/link',

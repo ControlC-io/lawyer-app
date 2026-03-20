@@ -929,14 +929,14 @@ export const ExecutionDataPanel = ({
   const isAutomaticAction = runningStep.workflow_steps?.step_type === 'action' && runningStep.workflow_steps?.action_type === 'automatic';
   const isAutomaticFileStep = runningStep.workflow_steps?.step_type === 'file' && runningStep.workflow_steps?.action_type === 'automatic';
   const isAgentAction = runningStep.workflow_steps?.action_type === 'agent';
-  // Agent decision steps (not Agent + Human) are fully automatic - user cannot make decision
+  // Agent decision steps (not Agent_Human) are fully automatic - user cannot make decision
   const isAgentDecision = isDecisionStep && runningStep.workflow_steps?.decision_node_type === 'Agent';
-  // Agent + Human decision steps: agent makes decision first, then human confirms
-  const isAgentPlusHumanDecision = isDecisionStep && runningStep.workflow_steps?.decision_node_type === 'Agent + Human';
+  // Agent_Human decision steps: agent makes decision first, then human confirms
+  const isAgentPlusHumanDecision = isDecisionStep && runningStep.workflow_steps?.decision_node_type === 'Agent_Human';
   const stepData = (runningStep.step_data || {}) as any;
   const agentDecisionChoice = stepData.agent_decision_choice;
   const agentDecisionReason = stepData.agent_decision_reason;
-  // For Agent + Human, wait for agent decision before allowing human interaction
+  // For Agent_Human, wait for agent decision before allowing human interaction
   const isWaitingForAgentDecision = isAgentPlusHumanDecision && !agentDecisionChoice;
   const isApiProcessedAction = isAutomaticAction || isAgentAction || isAutomaticFileStep || isAgentDecision || isWaitingForAgentDecision;
   const outgoingConnections = (connections || []).filter((c: any) => c.source_step_id === runningStep.workflow_steps?.id);
@@ -1619,21 +1619,6 @@ export const ExecutionDataPanel = ({
               </DialogContent>
             </Dialog>}
 
-            {/* In an automatic step, if the user is the assignee (human), show Done to close the step */}
-            {(isAutomaticAction || isAutomaticFileStep) && canCompleteStep && (
-              <Button
-                size="sm"
-                onClick={() => {
-                  navigation.completeStepMutation.mutate({ stepExecutionId: runningStep.id });
-                }}
-                disabled={navigation.completeStepMutation.isPending}
-              >
-                {navigation.completeStepMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                Done
-                <ArrowRight className="ml-2 h-4 w-4" />
-              </Button>
-            )}
-
             {!isApiProcessedAction && (
               <>
                 {/* Form Actions - Agent Actions that can be triggered from the form */}
@@ -2123,7 +2108,7 @@ export const ExecutionDataPanel = ({
             </div>
           </div>
         )}
-        {/* Agent Decision Display for Agent + Human steps */}
+        {/* Agent Decision Display for Agent_Human steps */}
         {isAgentPlusHumanDecision && agentDecisionChoice && (
           <div className="px-2 sm:px-3 pb-2 sm:pb-3 pt-0 border-t border-border/50">
             <div className="space-y-2">
@@ -2170,7 +2155,7 @@ export const ExecutionDataPanel = ({
       <CardHeader className="pb-2 sm:pb-3 px-2 sm:px-3 md:px-4 lg:px-6 min-w-0 max-w-full">
         <CardTitle className="text-sm sm:text-base md:text-lg break-words min-w-0 max-w-full">Current Data</CardTitle>
         <CardDescription className="text-xs sm:text-sm break-words min-w-0 max-w-full">
-          {runningStep && (isApiProcessedAction || runningStep.workflow_steps?.step_type === "decision" && (runningStep.workflow_steps?.decision_node_type === "Agent" || runningStep.workflow_steps?.decision_node_type === "Agent + Human")) ? "Read-only view - This step is being processed automatically" : "Review all data associated with this execution"}
+          {runningStep && (isApiProcessedAction || runningStep.workflow_steps?.step_type === "decision" && (runningStep.workflow_steps?.decision_node_type === "Agent" || runningStep.workflow_steps?.decision_node_type === "Agent_Human")) ? "Read-only view - This step is being processed automatically" : "Review all data associated with this execution"}
         </CardDescription>
       </CardHeader>
       <CardContent>

@@ -14,6 +14,8 @@ router.post('/', requirePermission('workflows.manage'), asyncHandler(workflowDef
 /** Nested routes (must be before /:workflowId so they match first) */
 router.put('/:workflowId/steps', requirePermission('workflows.manage'), asyncHandler(workflowDefinitionController.putSteps));
 router.put('/:workflowId/connections', requirePermission('workflows.manage'), asyncHandler(workflowDefinitionController.putConnections));
+router.get('/:workflowId/steps/:stepId/execution-usage', requirePermission('workflows.manage'), asyncHandler(workflowDefinitionController.getStepExecutionUsage));
+router.delete('/:workflowId/steps/:stepId', requirePermission('workflows.manage'), asyncHandler(workflowDefinitionController.deleteStep));
 router.get('/:workflowId/statuses', asyncHandler(workflowDefinitionController.listStatuses));
 router.post('/:workflowId/statuses', requirePermission('workflows.manage'), asyncHandler(workflowDefinitionController.createStatus));
 router.patch('/:workflowId/statuses/:statusId', requirePermission('workflows.manage'), asyncHandler(workflowDefinitionController.updateStatus));

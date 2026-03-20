@@ -437,6 +437,12 @@
     "failedToLoad": "Failed to load workflow",
     "workflowSaved": "Workflow saved successfully",
     "failedToSave": "Failed to save workflow",
+    "unconnectedPortsWarningTitle": "Some step inputs/outputs are not connected",
+    "unconnectedPortsWarningDescription": "Connect the missing links, or save anyway. You can safely fix the graph later.",
+    "unconnectedPortsWarningCount": "{{count}} unconnected step port(s)",
+    "unconnectedPortsInputLabel": "Input",
+    "unconnectedPortsOutputLabel": "Output",
+    "saveWorkflowAnyway": "Save anyway",
     "general": "General",
     "dataStructure": "Data Structure",
     "status": "Status",
@@ -536,6 +542,8 @@
     "failedToSetDefault": "Failed to set default status",
     "noWorkflowSelected": "No workflow selected",
     "statusNameRequired": "Status name is required",
+    "deleteStepPastExecutionsConfirm": "This step is referenced by {{count}} past execution(s). Deleting it will also remove those historical execution steps. Continue?",
+    "failedToDeleteStep": "Failed to delete step",
     "cannotAddFileTypes": "Cannot add file, multiple files, signature, or array types as sub-items of an array"
   },
   "workflowExecutions": {
@@ -565,7 +573,12 @@
     "removeUserConfirm": "Are you sure you want to remove this user from the organization?",
     "removeUserSuccess": "User removed from organization successfully",
     "failedToRemoveUser": "Failed to remove user from organization",
-    "removeFromOrganization": "Remove from Organization"
+    "removeFromOrganization": "Remove from Organization",
+    "resetPassword": "Reset password",
+    "resetPasswordTitle": "Reset password",
+    "resetPasswordDescription": "Set a new password for this user.",
+    "resetPasswordSuccess": "Password updated successfully",
+    "resetPasswordError": "Failed to reset password"
   },
   "noOrganization": {
     "title": "No Organization Found",

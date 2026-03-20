@@ -89,9 +89,12 @@ export const workflowController = {
    * Process an automatic step (was: process-automatic-step)
    */
   async processAutomaticStep(req: AuthRequest, res: Response) {
-    try {
-      const { executionId, stepId } = req.params;
+    const { executionId, stepId } = req.params;
+    let executionStep: any | null = null;
+    let workflowStep: any | null = null;
+    let shouldAutoCompleteActionStep = false;
 
+    try {
       if (!executionId || !stepId) {
         return res.status(400).json({
           error: 'Missing required fields',
@@ -100,7 +103,7 @@ export const workflowController = {
       }
 
       // Fetch execution step with workflow step details
-      const executionStep = await prisma.workflowExecutionStep.findFirst({
+      executionStep = await prisma.workflowExecutionStep.findFirst({
         where: {
           id: stepId,
           execution_id: executionId,
@@ -140,15 +143,19 @@ export const workflowController = {
         return res.status(403).json({ error: 'Company does not match execution' });
       }
 
-      const workflowStep = executionStep.step;
+      workflowStep = executionStep.step;
 
       // Check if automatic/agent step
-      const isAutomaticAction = workflowStep.step_type === 'action' && workflowStep.action_type === 'automatic';
-      const isAgentAction = workflowStep.step_type === 'action' && workflowStep.action_type === 'agent';
+      const isAutomaticAction =
+        workflowStep.step_type === 'action' && workflowStep.action_type === 'automatic';
+      const isAgentAction =
+        workflowStep.step_type === 'action' && workflowStep.action_type === 'agent';
       const isAgentDecision =
         workflowStep.step_type === 'decision' &&
         (workflowStep.decision_node_type === 'Agent' || workflowStep.decision_node_type === 'Agent_Human' ||
           (workflowStep.decision_node_type && workflowStep.decision_node_type.toLowerCase() === 'agent'));
+
+      shouldAutoCompleteActionStep = workflowStep.step_type === 'action' && (isAutomaticAction || isAgentAction);
 
       if (!isAutomaticAction && !isAgentDecision && !isAgentAction) {
         return res.json({
@@ -159,6 +166,14 @@ export const workflowController = {
 
       // Extract API configuration
       const config = (workflowStep.config as any) || {};
+      const hasAgentSource = Boolean(config.agent_id);
+      const hasIntegrationSource = Boolean(config.api_configuration_id);
+      if (isAgentDecision && hasAgentSource === hasIntegrationSource) {
+        return res.status(400).json({
+          error: 'Invalid configuration',
+          details: 'Agent decision steps must use exactly one webhook source',
+        });
+      }
       let apiUrl = config.api_url;
       let apiMethod = config.api_method || 'POST';
       let apiHeaders: any[] = [];
@@ -208,6 +223,12 @@ export const workflowController = {
           ? JSON.parse(config.api_data)
           : (config.api_data || []);
       } else {
+        if (isAgentDecision) {
+          return res.status(400).json({
+            error: 'Invalid configuration',
+            details: 'Agent decision steps cannot use manual webhook configuration',
+          });
+        }
         // Custom configuration
         apiHeaders = typeof config.api_headers === 'string'
           ? JSON.parse(config.api_headers)
@@ -341,6 +362,39 @@ export const workflowController = {
       // Call external API
       const result = await aiService.callAgentEndpoint(apiUrl, apiMethod, headersObj, requestBody);
 
+      // For action steps (automatic + agent), complete and advance immediately after processing.
+      // Decision steps keep the existing human/agent-confirmation flow.
+      if (shouldAutoCompleteActionStep && executionStep?.status === 'running') {
+        const executionDataSnapshot = await workflowService.getExecutionDataSnapshot(executionId);
+        const triggeredSteps = await (async () => {
+          await prisma.workflowExecutionStep.update({
+            where: { id: stepId },
+            data: {
+              status: 'completed',
+              completed_at: new Date(),
+              // Persist snapshot plus automation metadata for debugging/tracing.
+              step_data: {
+                ...executionDataSnapshot,
+                _automation: {
+                  processed_at: new Date().toISOString(),
+                  success: result.success,
+                  response: result.data ?? result.error,
+                },
+              },
+            },
+          });
+
+          return workflowService.advanceWorkflow(executionId, executionStep.step_id, executionStep.company_id!);
+        })();
+
+        return res.json({
+          success: result.success,
+          message: triggeredSteps.length > 0 ? 'Step completed and workflow advanced' : 'Step completed',
+          triggered_steps: triggeredSteps,
+          execution_status: triggeredSteps.length > 0 ? 'running' : 'completed',
+        });
+      }
+
       return res.json({
         success: result.success,
         message: result.success ? 'API call completed successfully' : 'API call failed',
@@ -348,6 +402,44 @@ export const workflowController = {
       });
     } catch (error) {
       console.error('Error processing automatic step:', error);
+      // Best-effort: if this is an auto-processing action step, don't stall the workflow due to UI removal.
+      if (shouldAutoCompleteActionStep && executionStep?.status === 'running') {
+        try {
+          const executionDataSnapshot = await workflowService.getExecutionDataSnapshot(executionId);
+          await prisma.workflowExecutionStep.update({
+            where: { id: stepId },
+            data: {
+              status: 'completed',
+              completed_at: new Date(),
+              step_data: {
+                ...executionDataSnapshot,
+                _automation: {
+                  processed_at: new Date().toISOString(),
+                  success: false,
+                  error: error instanceof Error ? error.message : 'Unknown error',
+                },
+              },
+            },
+          });
+
+          const triggeredSteps = await workflowService.advanceWorkflow(
+            executionId,
+            executionStep.step_id,
+            executionStep.company_id!
+          );
+
+          return res.json({
+            success: false,
+            message: triggeredSteps.length > 0 ? 'Step completed and workflow advanced' : 'Step completed',
+            triggered_steps: triggeredSteps,
+            execution_status: triggeredSteps.length > 0 ? 'running' : 'completed',
+          });
+        } catch (completionError) {
+          // Fall through to the generic response.
+          console.error('Auto-completion after error failed:', completionError);
+        }
+      }
+
       return res.status(200).json({
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error',

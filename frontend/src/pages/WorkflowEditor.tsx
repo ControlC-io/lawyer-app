@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { ArrowLeft, Save, Search, X, Settings, Plus, Edit, Trash2, GripVertical, ChevronRight, ChevronDown, Star, Link2, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -7,6 +7,7 @@ import { Canvas } from "@/components/workflow/Canvas";
 import { Toolbar } from "@/components/workflow/Toolbar";
 import { PropertiesPanel } from "@/components/workflow/PropertiesPanel";
 import { CanvasCommentData } from "@/components/workflow/CanvasComment";
+import { DecisionOutputsDialog } from "@/components/workflow/DecisionOutputsDialog";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -35,7 +36,8 @@ export interface WorkflowStep {
   position_y: number;
   config: any;
   action_type?: "manual" | "automatic" | "agent";
-  decision_node_type?: "Human" | "Agent" | "Agent + Human";
+  // Must match Prisma enum values (see backend/prisma/schema.prisma)
+  decision_node_type?: "Human" | "Agent" | "Agent_Human";
 }
 
 export interface WorkflowConnection {
@@ -162,6 +164,17 @@ export default function WorkflowEditor() {
   // Settings dialog state
   const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<"general" | "data-structure" | "status">("general");
+  const [decisionOutputsDialogOpen, setDecisionOutputsDialogOpen] = useState(false);
+  type UnconnectedPortWarning = {
+    stepId: string;
+    stepName: string;
+    portType: "input" | "output";
+    outputName?: string;
+  };
+
+  const [unconnectedPortsDialogOpen, setUnconnectedPortsDialogOpen] = useState(false);
+  const [unconnectedPorts, setUnconnectedPorts] = useState<UnconnectedPortWarning[]>([]);
+  const [isSavingWorkflow, setIsSavingWorkflow] = useState(false);
   // When opening data structure from form editor: restore step panel on settings close and show Form tab
   const [returnToStepIdAfterSettingsClose, setReturnToStepIdAfterSettingsClose] = useState<string | null>(null);
   const [returnToFormTab, setReturnToFormTab] = useState(false);
@@ -181,6 +194,10 @@ export default function WorkflowEditor() {
   const [workflowStatuses, setWorkflowStatuses] = useState<WorkflowStatus[]>([]);
   const [defaultStatusId, setDefaultStatusId] = useState<string | null>(null);
   const [apiConfigurations, setApiConfigurations] = useState<Array<{ id: string; name: string }>>([]);
+
+  // Step IDs that exist in DB (from the last successful `fetchWorkflow` load).
+  // New steps created in the editor before saving will not be in this set.
+  const persistedStepIdsRef = useRef<Set<string>>(new Set());
   
   // Field inline state (no modal: add/edit directly in list)
   const [addingNewFieldParentId, setAddingNewFieldParentId] = useState<string | null | undefined>(undefined);
@@ -424,6 +441,7 @@ export default function WorkflowEditor() {
           },
         };
       }) as WorkflowStep[];
+      persistedStepIdsRef.current = new Set(loadedSteps.map((s) => s.id));
 
       const connectionsData = workflowData?.connections || [];
       const loadedConnections = connectionsData.map((conn: any) => ({
@@ -505,12 +523,75 @@ export default function WorkflowEditor() {
     }
   };
 
-  const handleSave = async () => {
+  const getExpectedOutputsForStep = (step: WorkflowStep): string[] => {
+    // Keep in sync with `WorkflowNode` output handle rendering.
+    if (step.step_type === "decision") {
+      const outputs = step.config?.outputs?.length ? step.config.outputs : ["Yes", "No"];
+      return Array.isArray(outputs) ? outputs : ["Yes", "No"];
+    }
+
+    if (step.step_type === "edit_form") {
+      const outputs = step.config?.outputs?.length ? step.config.outputs : ["Submit", "Cancel"];
+      return Array.isArray(outputs) ? outputs : ["Submit", "Cancel"];
+    }
+
+    // Start/action/file nodes have a single `default` output handle.
+    if (step.step_type === "end") return [];
+    return ["default"];
+  };
+
+  const getUnconnectedPortsWarnings = (): UnconnectedPortWarning[] => {
+    const warnings: UnconnectedPortWarning[] = [];
+
+    const hasIncoming = (targetStepId: string) => connections.some((c) => c.target_step_id === targetStepId);
+    const normalizeOutputName = (outputName: string | undefined | null) => outputName || "default";
+
+    for (const step of steps) {
+      const stepName = step.name || step.id;
+
+      // Input handle exists for every step except `start`.
+      if (step.step_type !== "start") {
+        if (!hasIncoming(step.id)) {
+          warnings.push({
+            stepId: step.id,
+            stepName,
+            portType: "input",
+          });
+        }
+      }
+
+      // Output handles exist for every step except `end`.
+      if (step.step_type !== "end") {
+        const expectedOutputs = Array.from(new Set(getExpectedOutputsForStep(step)));
+        for (const outputName of expectedOutputs) {
+          const hasOutgoing = connections.some(
+            (c) =>
+              c.source_step_id === step.id &&
+              normalizeOutputName(c.output_name) === normalizeOutputName(outputName)
+          );
+          if (!hasOutgoing) {
+            warnings.push({
+              stepId: step.id,
+              stepName,
+              portType: "output",
+              outputName,
+            });
+          }
+        }
+      }
+    }
+
+    return warnings;
+  };
+
+  const performSaveWorkflow = async () => {
     try {
       if (!companyId) {
         toast.error("Company not set. Please contact administrator.");
         return;
       }
+
+      setIsSavingWorkflow(true);
 
       const stepsPayload = steps.map((step) => ({
         id: step.id,
@@ -553,10 +634,28 @@ export default function WorkflowEditor() {
     } catch (error: any) {
       console.error("Error saving workflow:", error);
       toast.error(`${t("workflowEditor.failedToSave")}: ${error.message || 'Unknown error'}`);
+    } finally {
+      setIsSavingWorkflow(false);
     }
   };
 
-  const handleAddStep = (stepType: WorkflowStep["step_type"]) => {
+  const handleSave = async () => {
+    const warnings = getUnconnectedPortsWarnings();
+    if (warnings.length > 0) {
+      setUnconnectedPorts(warnings);
+      setUnconnectedPortsDialogOpen(true);
+      return;
+    }
+
+    await performSaveWorkflow();
+  };
+
+  const handleSaveAnyway = async () => {
+    setUnconnectedPortsDialogOpen(false);
+    await performSaveWorkflow();
+  };
+
+  const addStep = (stepType: WorkflowStep["step_type"], decisionOutputs?: string[]) => {
     // Map step types to their display names
     const stepNameMap: Record<WorkflowStep["step_type"], string> = {
       start: "Start",
@@ -566,17 +665,44 @@ export default function WorkflowEditor() {
       edit_form: "Form",
       file: "File",
     };
-    
+
+    const baseConfig = workflow?.default_status_id ? { status_id: workflow.default_status_id } : {};
+
+    const stepConfig =
+      stepType === "decision" && decisionOutputs && decisionOutputs.length >= 2
+        ? (() => {
+            const output_styles: Record<string, "primary" | "secondary"> = {};
+            decisionOutputs.forEach((output, idx) => {
+              output_styles[output] = idx === 0 ? "primary" : "secondary";
+            });
+            return { ...baseConfig, outputs: decisionOutputs, output_styles };
+          })()
+        : baseConfig;
+
     const newStep: WorkflowStep = {
       id: crypto.randomUUID(),
       step_type: stepType,
-      name: stepNameMap[stepType] || stepType.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' '),
+      name:
+        stepNameMap[stepType] ||
+        stepType
+          .split("_")
+          .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+          .join(" "),
       position_x: 100 + Math.random() * 200,
       position_y: 100 + Math.random() * 200,
-      config: workflow?.default_status_id ? { status_id: workflow.default_status_id } : {},
+      config: stepConfig,
     };
+
     setSteps([...steps, newStep]);
     setSelectedStep(newStep);
+  };
+
+  const handleAddStep = (stepType: WorkflowStep["step_type"]) => {
+    if (stepType === "decision") {
+      setDecisionOutputsDialogOpen(true);
+      return;
+    }
+    addStep(stepType);
   };
 
   const handleUpdateStep = (updatedStep: WorkflowStep) => {
@@ -599,13 +725,45 @@ export default function WorkflowEditor() {
   };
 
   const handleDeleteStep = (stepId: string) => {
-    setSteps(steps.filter((step) => step.id !== stepId));
-    setConnections(connections.filter(
-      (conn) => conn.source_step_id !== stepId && conn.target_step_id !== stepId
-    ));
-    if (selectedStep?.id === stepId) {
-      setSelectedStep(null);
-    }
+    void (async () => {
+      if (!companyId) return;
+
+      // If the step hasn't been persisted yet, delete it locally only.
+      // (e.g. user creates a node and immediately clicks the trash icon before saving)
+      if (!persistedStepIdsRef.current.has(stepId)) {
+        setSteps((prev) => prev.filter((step) => step.id !== stepId));
+        setConnections((prev) =>
+          prev.filter((conn) => conn.source_step_id !== stepId && conn.target_step_id !== stepId)
+        );
+        setSelectedStep((prev) => (prev?.id === stepId ? null : prev));
+        return;
+      }
+
+      try {
+        const usage = await api.get<{ past_execution_count?: number }>(
+          `/api/companies/${companyId}/workflows/${id}/steps/${stepId}/execution-usage`
+        );
+
+        const pastExecutionCount = usage?.past_execution_count ?? 0;
+        if (pastExecutionCount > 0) {
+          const ok = confirm(t("workflowEditor.deleteStepPastExecutionsConfirm", { count: pastExecutionCount }) as string);
+          if (!ok) return;
+        }
+
+        await api.delete(
+          `/api/companies/${companyId}/workflows/${id}/steps/${stepId}?deletePastExecutions=${pastExecutionCount > 0}`
+        );
+
+        setSteps((prev) => prev.filter((step) => step.id !== stepId));
+        setConnections((prev) =>
+          prev.filter((conn) => conn.source_step_id !== stepId && conn.target_step_id !== stepId)
+        );
+        setSelectedStep((prev) => (prev?.id === stepId ? null : prev));
+      } catch (error: any) {
+        console.error("Error deleting step:", error);
+        toast.error(error?.message || t("workflowEditor.failedToDeleteStep"));
+      }
+    })();
   };
 
   const handleDuplicateStep = (stepId: string) => {
@@ -1721,7 +1879,7 @@ export default function WorkflowEditor() {
             <Settings className="h-4 w-4" />
             {t("workflowEditor.settings")}
           </Button>
-          <Button onClick={handleSave} className="gap-2">
+          <Button onClick={handleSave} disabled={isSavingWorkflow} className="gap-2">
             <Save className="h-4 w-4" />
             {t("workflowEditor.saveWorkflow")}
           </Button>
@@ -1749,6 +1907,73 @@ export default function WorkflowEditor() {
           />
         </div>
       </div>
+
+      <DecisionOutputsDialog
+        open={decisionOutputsDialogOpen}
+        initialOutputs={["Yes", "No"]}
+        onCancel={() => setDecisionOutputsDialogOpen(false)}
+        onConfirm={(outputs) => {
+          addStep("decision", outputs);
+          setDecisionOutputsDialogOpen(false);
+        }}
+      />
+
+      {/* Unconnected ports warning (user can override). */}
+      <Dialog
+        open={unconnectedPortsDialogOpen}
+        onOpenChange={(open) => {
+          setUnconnectedPortsDialogOpen(open);
+          if (!open) setUnconnectedPorts([]);
+        }}
+      >
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>{t("workflowEditor.unconnectedPortsWarningTitle")}</DialogTitle>
+            <DialogDescription>
+              {t("workflowEditor.unconnectedPortsWarningDescription")}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3">
+            <div className="text-sm text-muted-foreground">
+              {t("workflowEditor.unconnectedPortsWarningCount", { count: unconnectedPorts.length })}
+            </div>
+
+            <ul className="list-disc pl-6 space-y-1">
+              {unconnectedPorts.map((w) => (
+                <li key={`${w.stepId}-${w.portType}-${w.outputName ?? "input"}`}>
+                  <span className="font-medium">{w.stepName}</span>
+                  {w.portType === "input" ? (
+                    <>
+                      {": "}
+                      {t("workflowEditor.unconnectedPortsInputLabel")}
+                    </>
+                  ) : (
+                    <>
+                      {": "}
+                      {t("workflowEditor.unconnectedPortsOutputLabel")} {w.outputName}
+                    </>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          <DialogFooter className="gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setUnconnectedPortsDialogOpen(false)}
+              disabled={isSavingWorkflow}
+            >
+              {t("common.cancel")}
+            </Button>
+            <Button type="button" onClick={handleSaveAnyway} disabled={isSavingWorkflow}>
+              {t("workflowEditor.saveWorkflowAnyway")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog
         open={!!selectedStep}

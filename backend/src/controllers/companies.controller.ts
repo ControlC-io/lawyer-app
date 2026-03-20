@@ -5,6 +5,7 @@ import { prisma } from '../lib/prisma';
 import { canUserAccessFolder, getUserGroupIdsInCompany } from '../lib/folderAccess';
 import { getAccessibleFileIds, canUserAccessFileByMetadata } from '../lib/documentAccess';
 import { storageService } from '../services/storage.service';
+import bcrypt from 'bcryptjs';
 
 
 /**
@@ -942,6 +943,58 @@ export const companiesController = {
       return res.status(204).send();
     } catch (error) {
       console.error('removeUserFromCompany error:', error);
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
+  /**
+   * POST /api/companies/:companyId/users/:userId/reset-password
+   * Reset a user's password (super admin)
+   */
+  async resetUserPassword(req: AuthRequest, res: Response) {
+    try {
+      const { companyId, userId: targetUserId } = req.params;
+      const { password } = req.body || {};
+
+      if (!companyId || !targetUserId) {
+        return res.status(400).json({ error: 'Missing company ID or user ID' });
+      }
+
+      if (!password || typeof password !== 'string') {
+        return res.status(400).json({ error: 'Missing required fields', details: 'password is required' });
+      }
+
+      if (password.length < 6) {
+        return res.status(400).json({ error: 'Password must be at least 6 characters' });
+      }
+
+      if (!req.user?.super_admin) {
+        return res.status(403).json({ error: 'Forbidden', details: 'Super admin only' });
+      }
+
+      const targetMembership = await prisma.userCompany.findFirst({
+        where: { user_id: targetUserId, company_id: companyId },
+        select: { user_id: true },
+      });
+
+      if (!targetMembership) {
+        return res.status(404).json({ error: 'User not found', details: 'The user does not belong to this company' });
+      }
+
+      const hashedPassword = await bcrypt.hash(password, 10);
+
+      const result = await prisma.user.updateMany({
+        where: { id: targetUserId },
+        data: { encrypted_password: hashedPassword },
+      });
+
+      if (result.count === 0) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+
+      return res.json({ success: true });
+    } catch (error) {
+      console.error('resetUserPassword error:', error);
       return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
     }
   },
