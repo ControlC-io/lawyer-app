@@ -9,6 +9,16 @@ import { PropertiesPanel } from "@/components/workflow/PropertiesPanel";
 import { CanvasCommentData } from "@/components/workflow/CanvasComment";
 import { DecisionOutputsDialog } from "@/components/workflow/DecisionOutputsDialog";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -232,6 +242,13 @@ export default function WorkflowEditor() {
   const [draggedStatusId, setDraggedStatusId] = useState<string | null>(null);
   const [dragOverStatusIndex, setDragOverStatusIndex] = useState<number | null>(null);
 
+  const [unsavedChangesDialogOpen, setUnsavedChangesDialogOpen] = useState(false);
+  const [workflowLoadMode, setWorkflowLoadMode] = useState<"saved" | "fresh" | null>(null);
+
+  // Persist to sessionStorage only after user makes changes.
+  const hasEditorUserEditsRef = useRef(false);
+  const hasSettingsUserEditsRef = useRef(false);
+
   // Storage keys for persisting state
   const settingsStorageKey = id ? `workflow-settings-${id}` : null;
   const editorStorageKey = id ? `workflow-editor-${id}` : null;
@@ -316,6 +333,7 @@ export default function WorkflowEditor() {
   // Save state whenever form data changes
   useEffect(() => {
     if (settingsDialogOpen && settingsStorageKey) {
+      if (!hasSettingsUserEditsRef.current) return;
       try {
         const stateToSave = {
           formData,
@@ -356,6 +374,7 @@ export default function WorkflowEditor() {
   // Save editor state whenever it changes
   useEffect(() => {
     if (editorStorageKey && !loading) {
+      if (!hasEditorUserEditsRef.current) return;
       try {
         const stateToSave = {
           steps,
@@ -398,19 +417,48 @@ export default function WorkflowEditor() {
   }, [settingsStorageKey, editorStorageKey]);
 
   useEffect(() => {
-    if (id) {
-      fetchWorkflow();
-      fetchCategories();
-      fetchUsers();
-      fetchGroups();
-      fetchApiConfigurations();
-    }
-  }, [id, companyId]);
+    if (!id || !companyId) return;
 
-  const fetchWorkflow = async () => {
+    // Reset editor state while we decide whether to restore or discard local changes.
+    setLoading(true);
+    setWorkflow(null);
+    setSteps([]);
+    setConnections([]);
+    setComments([]);
+    setSelectedStep(null);
+    setSearchQuery("");
+    setWorkflowLoadMode(null);
+    setUnsavedChangesDialogOpen(false);
+    hasEditorUserEditsRef.current = false;
+    hasSettingsUserEditsRef.current = false;
+
+    fetchCategories();
+    fetchUsers();
+    fetchGroups();
+    fetchApiConfigurations();
+
+    const hasSettingsChanges = settingsStorageKey && sessionStorage.getItem(settingsStorageKey) !== null;
+    const hasEditorChanges = editorStorageKey && sessionStorage.getItem(editorStorageKey) !== null;
+
+    if (hasSettingsChanges || hasEditorChanges) {
+      setUnsavedChangesDialogOpen(true);
+      return;
+    }
+
+    setWorkflowLoadMode("fresh");
+  }, [id, companyId, settingsStorageKey, editorStorageKey]);
+
+  useEffect(() => {
+    if (!id || !companyId) return;
+    if (!workflowLoadMode) return;
+    fetchWorkflow({ useSavedState: workflowLoadMode === "saved" });
+  }, [id, companyId, workflowLoadMode]);
+
+  const fetchWorkflow = async (options?: { useSavedState?: boolean }) => {
     if (!companyId) return;
     try {
-      const savedEditorState = loadEditorState();
+      const useSavedState = options?.useSavedState ?? true;
+      const savedEditorState = useSavedState ? loadEditorState() : null;
 
       const workflowData = await api.get<any>(`/api/companies/${companyId}/workflows/${id}`);
       setWorkflow(workflowData as Workflow);
@@ -454,6 +502,7 @@ export default function WorkflowEditor() {
 
       // Restore saved state if available, otherwise use loaded data
       if (savedEditorState) {
+        hasEditorUserEditsRef.current = true;
         // Restore steps (merge saved positions/configs with loaded data to preserve IDs)
         const restoredSteps = savedEditorState.steps.map((savedStep: WorkflowStep) => {
           const loadedStep = loadedSteps.find(ls => ls.id === savedStep.id);
@@ -510,6 +559,7 @@ export default function WorkflowEditor() {
         
         toast.info("Unsaved changes have been restored");
       } else {
+        hasEditorUserEditsRef.current = false;
         // No saved state, use loaded data
         setSteps(loadedSteps);
         setConnections(loadedConnections);
@@ -625,6 +675,7 @@ export default function WorkflowEditor() {
       console.log("Workflow saved successfully");
       
       // Clear saved editor state after successful save
+      hasEditorUserEditsRef.current = false;
       clearEditorState();
       
       toast.success(t("workflowEditor.workflowSaved"));
@@ -693,6 +744,7 @@ export default function WorkflowEditor() {
       config: stepConfig,
     };
 
+    hasEditorUserEditsRef.current = true;
     setSteps([...steps, newStep]);
     setSelectedStep(newStep);
   };
@@ -706,6 +758,7 @@ export default function WorkflowEditor() {
   };
 
   const handleUpdateStep = (updatedStep: WorkflowStep) => {
+    hasEditorUserEditsRef.current = true;
     // Update step in collection
     setSteps(steps.map((step) => (step.id === updatedStep.id ? updatedStep : step)));
 
@@ -731,6 +784,7 @@ export default function WorkflowEditor() {
       // If the step hasn't been persisted yet, delete it locally only.
       // (e.g. user creates a node and immediately clicks the trash icon before saving)
       if (!persistedStepIdsRef.current.has(stepId)) {
+        hasEditorUserEditsRef.current = true;
         setSteps((prev) => prev.filter((step) => step.id !== stepId));
         setConnections((prev) =>
           prev.filter((conn) => conn.source_step_id !== stepId && conn.target_step_id !== stepId)
@@ -754,6 +808,7 @@ export default function WorkflowEditor() {
           `/api/companies/${companyId}/workflows/${id}/steps/${stepId}?deletePastExecutions=${pastExecutionCount > 0}`
         );
 
+        hasEditorUserEditsRef.current = true;
         setSteps((prev) => prev.filter((step) => step.id !== stepId));
         setConnections((prev) =>
           prev.filter((conn) => conn.source_step_id !== stepId && conn.target_step_id !== stepId)
@@ -780,6 +835,7 @@ export default function WorkflowEditor() {
       action_type: stepToDuplicate.action_type,
       decision_node_type: stepToDuplicate.decision_node_type,
     };
+    hasEditorUserEditsRef.current = true;
     setSteps([...steps, duplicatedStep]);
     setSelectedStep(duplicatedStep);
   };
@@ -792,20 +848,24 @@ export default function WorkflowEditor() {
       output_name: outputName,
       config: { color: "#2a5ce5", style: "solid" },
     };
+    hasEditorUserEditsRef.current = true;
     setConnections([...connections, newConnection]);
   };
 
   const handleUpdateConnection = (connectionId: string, config: { color: string; style: "solid" | "dashed" }) => {
+    hasEditorUserEditsRef.current = true;
     setConnections(connections.map((conn) =>
       conn.id === connectionId ? { ...conn, config } : conn
     ));
   };
 
   const handleDeleteConnection = (connectionId: string) => {
+    hasEditorUserEditsRef.current = true;
     setConnections(connections.filter((conn) => conn.id !== connectionId));
   };
 
   const handleOutputRenamed = (stepId: string, oldName: string, newName: string) => {
+    hasEditorUserEditsRef.current = true;
     setConnections(prevConnections =>
       prevConnections.map(conn => {
         if (conn.source_step_id === stepId && conn.output_name === oldName) {
@@ -907,6 +967,7 @@ export default function WorkflowEditor() {
       const savedState = loadSettingsState();
       
       if (savedState) {
+        hasSettingsUserEditsRef.current = true;
         // Restore from saved state
         setFormData(savedState.formData);
         setDataStructureFields(savedState.dataStructureFields);
@@ -924,6 +985,7 @@ export default function WorkflowEditor() {
         // Show a toast to inform user that unsaved changes were restored
         toast.info("Unsaved changes have been restored");
       } else {
+        hasSettingsUserEditsRef.current = false;
         const workflowDataTyped = await api.get<any>(
           `/api/companies/${companyId}/workflows/${id}`
         );
@@ -1046,6 +1108,7 @@ export default function WorkflowEditor() {
       });
 
       // Clear saved state after successful save
+      hasSettingsUserEditsRef.current = false;
       clearSettingsState();
 
       toast.success(t("workflowEditor.workflowSettingsSaved"));
@@ -1521,9 +1584,42 @@ export default function WorkflowEditor() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-full">
-        <div className="text-muted-foreground">{t("workflowEditor.loadingWorkflow")}</div>
-      </div>
+      <>
+        <div className="flex items-center justify-center h-full">
+          <div className="text-muted-foreground">{t("workflowEditor.loadingWorkflow")}</div>
+        </div>
+
+        <AlertDialog open={unsavedChangesDialogOpen} onOpenChange={setUnsavedChangesDialogOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>{t("workflowEditor.unsavedChangesDialogTitle")}</AlertDialogTitle>
+              <AlertDialogDescription>{t("workflowEditor.unsavedChangesDialogDescription")}</AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel
+                onClick={() => {
+                  setUnsavedChangesDialogOpen(false);
+                  setWorkflowLoadMode("saved");
+                }}
+              >
+                {t("workflowEditor.unsavedChangesDialogKeep")}
+              </AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => {
+                  clearSettingsState();
+                  clearEditorState();
+                  hasEditorUserEditsRef.current = false;
+                  hasSettingsUserEditsRef.current = false;
+                  setUnsavedChangesDialogOpen(false);
+                  setWorkflowLoadMode("fresh");
+                }}
+              >
+                {t("workflowEditor.unsavedChangesDialogDiscard")}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </>
     );
   }
 

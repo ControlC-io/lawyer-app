@@ -23,6 +23,9 @@ app.get('/api/health', async (req: Request, res: Response) => {
         enabled: !!process.env.OCR_API_KEY,
         provider: process.env.OCR_PROVIDER || 'mistral',
       },
+      pdfSplit: {
+        geminiConfigured: !!process.env.GEMINI_API_KEY,
+      },
     });
   } catch (error) {
     res.status(500).json({
@@ -32,6 +35,9 @@ app.get('/api/health', async (req: Request, res: Response) => {
       ocr: {
         enabled: !!process.env.OCR_API_KEY,
         provider: process.env.OCR_PROVIDER || 'mistral',
+      },
+      pdfSplit: {
+        geminiConfigured: !!process.env.GEMINI_API_KEY,
       },
       message: (error as Error).message
     });

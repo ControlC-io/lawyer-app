@@ -385,12 +385,72 @@ export const ExternalForm = () => {
                     onUpload={handleFileUpload}
                     onViewFile={handleViewFile}
                     signedUrl={signedUrl}
-                    // Basic props
                     disabled={submitting}
                     required={evaluateFieldRules(fieldId, "required", renderFieldRules, currentValues, false)}
                     labelPosition={labelPosition}
-                // We might need to mock or omit some complex props like dynamicOptions for external view for now
-                // unless we expose those APIs publicly too
+                    fieldConfig={fieldConfig}
+                    getSignedUrl={generateSignedUrl}
+                    childFields={allFields}
+                    renderChild={(childField, childValue, onChildChange, hideLabel, requiredChild, readonly) => {
+                        const isRequired =
+                            requiredChild !== undefined ? requiredChild : (childField.required || false);
+                        const isDisabled = submitting || !!readonly;
+                        const childFieldType = childField.field_type || childField.type;
+                        const isFileChild = childFieldType === "file";
+                        const isSignatureChild = childFieldType === "signature";
+                        const childFilePath =
+                            (isFileChild || isSignatureChild) && childValue
+                                ? typeof childValue === "string"
+                                    ? childValue
+                                    : childValue?.value
+                                : null;
+
+                        const uploadForChild = async (file: File) => {
+                            const uploadResult = await uploadFile(file);
+                            if (!uploadResult) return;
+                            if (uploadResult.signedUrl) {
+                                setSignedUrls((prev) => ({
+                                    ...prev,
+                                    [uploadResult.path]: uploadResult.signedUrl!,
+                                }));
+                            }
+                            onChildChange({
+                                value: uploadResult.path,
+                                original_name: uploadResult.original_name || file.name,
+                            });
+                            return uploadResult.signedUrl;
+                        };
+
+                        return (
+                            <FieldRenderer
+                                field={childField}
+                                value={childValue}
+                                onChange={onChildChange}
+                                disabled={isDisabled}
+                                required={isRequired}
+                                labelPosition={hideLabel ? "hidden" : "top"}
+                                onUpload={isFileChild || isSignatureChild ? uploadForChild : undefined}
+                                onViewFile={handleViewFile}
+                                onDelete={
+                                    isFileChild || isSignatureChild
+                                        ? async (filePath: string) => {
+                                              setSignedUrls((prev) => {
+                                                  const next = { ...prev };
+                                                  delete next[filePath];
+                                                  return next;
+                                              });
+                                              onChildChange(null);
+                                          }
+                                        : undefined
+                                }
+                                signedUrl={
+                                    (isFileChild || isSignatureChild) && childFilePath
+                                        ? signedUrls[childFilePath]
+                                        : signedUrls[childField.id]
+                                }
+                            />
+                        );
+                    }}
                 />
                 {errors[fieldId] && (
                     <p className="text-sm text-red-500">{errors[fieldId]}</p>
@@ -536,21 +596,23 @@ export const ExternalForm = () => {
                                 </div>
                             )}
 
-                            <div className="pt-4">
-                                <Button
-                                    className="w-full"
-                                    size="lg"
-                                    onClick={handleSubmit}
-                                    disabled={submitting}
-                                    aria-label="Submit"
-                                >
-                                    {submitting ? (
-                                        <Loader2 className="h-5 w-5 animate-spin" />
-                                    ) : (
-                                        <Send className="h-5 w-5" />
-                                    )}
-                                </Button>
-                            </div>
+                            {(formPages.length <= 1 || formPageIndex >= formPages.length - 1) && (
+                                <div className="pt-4">
+                                    <Button
+                                        className="w-full"
+                                        size="lg"
+                                        onClick={handleSubmit}
+                                        disabled={submitting}
+                                        aria-label="Submit"
+                                    >
+                                        {submitting ? (
+                                            <Loader2 className="h-5 w-5 animate-spin" />
+                                        ) : (
+                                            <Send className="h-5 w-5" />
+                                        )}
+                                    </Button>
+                                </div>
+                            )}
                         </CardContent>
                     </Card>
                 </div>

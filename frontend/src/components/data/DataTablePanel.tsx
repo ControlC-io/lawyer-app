@@ -410,9 +410,11 @@ export function DataTablePanel({ tableId, onBack }: DataTablePanelProps) {
           <div className="rounded-lg border border-dashed p-6 text-center text-muted-foreground text-sm">
             <p className="font-medium">{t("data.noColumns")}</p>
             <p className="text-xs mt-1">{t("data.noColumnsDescription")}</p>
-            <Button variant="outline" size="sm" className="mt-3" onClick={() => setAddFieldOpen(true)}>
-              {t("data.addField")}
-            </Button>
+            <div className="mt-3 flex flex-col sm:flex-row items-stretch sm:items-center justify-center gap-2">
+              <Button variant="outline" size="sm" onClick={() => setAddFieldOpen(true)}>
+                {t("data.addField")}
+              </Button>
+            </div>
           </div>
         ) : (
           <div

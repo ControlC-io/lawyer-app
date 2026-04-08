@@ -340,6 +340,19 @@ export default function CompanyPortal() {
     return buildCurrentValues(formData);
   }, [formData]);
 
+  const uploadFileToPortal = async (file: File) => {
+    if (!workflowDetail || !slug) return null;
+    const fd = new FormData();
+    fd.append("file", file);
+    const uploadResult = await api.postFormData<{ path: string; original_name?: string }>(
+      `/api/portal/${slug}/workflows/${workflowDetail.workflow.id}/upload`,
+      fd,
+      { skipAuth: true }
+    );
+    const signedUrl = await generateSignedUrl(uploadResult.path);
+    return { ...uploadResult, signedUrl };
+  };
+
   const renderField = (fieldId: string, labelPosition: "top" | "side" = "top") => {
     const fieldDef = allFields.find((f: any) => f.id === fieldId);
     if (!fieldDef) return null;
@@ -349,19 +362,13 @@ export default function CompanyPortal() {
 
     const handleFileUpload = async (file: File) => {
       try {
-        const fd = new FormData();
-        fd.append("file", file);
-        const uploadResult = await api.postFormData<{ path: string; original_name?: string }>(
-          `/api/portal/${slug}/workflows/${workflowDetail.workflow.id}/upload`,
-          fd,
-          { skipAuth: true }
-        );
-        const signedUrl = await generateSignedUrl(uploadResult.path);
+        const result = await uploadFileToPortal(file);
+        if (!result) return;
         setFormData((prev) => ({
           ...prev,
-          [fieldId]: { value: uploadResult.path, original_name: uploadResult.original_name || file.name },
+          [fieldId]: { value: result.path, original_name: result.original_name || file.name },
         }));
-        if (signedUrl) setSignedUrls((prev) => ({ ...prev, [fieldId]: signedUrl }));
+        if (result.signedUrl) setSignedUrls((prev) => ({ ...prev, [fieldId]: result.signedUrl! }));
       } catch (err: any) {
         toast({
           title: "Upload Failed",
@@ -393,6 +400,75 @@ export default function CompanyPortal() {
           required={evaluateFieldRules(fieldId, "required", fieldRules, currentValues, false)}
           labelPosition={labelPosition}
           primaryColor={primaryColor}
+          fieldConfig={fieldConfig}
+          getSignedUrl={generateSignedUrl}
+          childFields={allFields}
+          renderChild={(childField, childValue, onChildChange, hideLabel, requiredChild, readonly) => {
+            const isRequired =
+              requiredChild !== undefined ? requiredChild : (childField.required || false);
+            const isDisabled = submitting || !!readonly;
+            const childFieldType = childField.field_type || childField.type;
+            const isFileChild = childFieldType === "file";
+            const isSignatureChild = childFieldType === "signature";
+            const childFilePath =
+              (isFileChild || isSignatureChild) && childValue
+                ? typeof childValue === "string"
+                  ? childValue
+                  : childValue?.value
+                : null;
+
+            const uploadForChild = async (file: File) => {
+              try {
+                const result = await uploadFileToPortal(file);
+                if (!result) return;
+                if (result.signedUrl) {
+                  setSignedUrls((prev) => ({ ...prev, [result.path]: result.signedUrl! }));
+                }
+                onChildChange({
+                  value: result.path,
+                  original_name: result.original_name || file.name,
+                });
+                return result.signedUrl;
+              } catch (err: any) {
+                toast({
+                  title: "Upload Failed",
+                  description: err.message || "Failed to upload file",
+                  variant: "destructive",
+                });
+              }
+            };
+
+            return (
+              <FieldRenderer
+                field={childField}
+                value={childValue}
+                onChange={onChildChange}
+                disabled={isDisabled}
+                required={isRequired}
+                labelPosition={hideLabel ? "hidden" : "top"}
+                primaryColor={primaryColor}
+                onUpload={isFileChild || isSignatureChild ? uploadForChild : undefined}
+                onViewFile={handleViewFile}
+                onDelete={
+                  isFileChild || isSignatureChild
+                    ? async (filePath: string) => {
+                        setSignedUrls((prev) => {
+                          const next = { ...prev };
+                          delete next[filePath];
+                          return next;
+                        });
+                        onChildChange(null);
+                      }
+                    : undefined
+                }
+                signedUrl={
+                  (isFileChild || isSignatureChild) && childFilePath
+                    ? signedUrls[childFilePath]
+                    : signedUrls[childField.id]
+                }
+              />
+            );
+          }}
         />
         {errors[fieldId] && <p className="text-sm text-red-500">{errors[fieldId]}</p>}
       </div>
@@ -670,21 +746,23 @@ export default function CompanyPortal() {
                   </div>
                 )}
 
-                <div className="pt-4">
-                  <Button
-                    className="w-full portal-submit-btn"
-                    size="lg"
-                    onClick={handleSubmit}
-                    disabled={submitting}
-                    aria-label="Submit"
-                  >
-                    {submitting ? (
-                      <Loader2 className="h-5 w-5 animate-spin" />
-                    ) : (
-                      <Send className="h-5 w-5" />
-                    )}
-                  </Button>
-                </div>
+                {(formPages.length <= 1 || formPageIndex >= formPages.length - 1) && (
+                  <div className="pt-4">
+                    <Button
+                      className="w-full portal-submit-btn"
+                      size="lg"
+                      onClick={handleSubmit}
+                      disabled={submitting}
+                      aria-label="Submit"
+                    >
+                      {submitting ? (
+                        <Loader2 className="h-5 w-5 animate-spin" />
+                      ) : (
+                        <Send className="h-5 w-5" />
+                      )}
+                    </Button>
+                  </div>
+                )}
               </CardContent>
             </Card>
           ) : (

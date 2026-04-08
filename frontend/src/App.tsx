@@ -8,6 +8,7 @@ import { AppSidebar } from "@/components/AppSidebar";
 import { Header } from "@/components/Header";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { LanguageProvider } from "@/contexts/LanguageContext";
+import { DocumentImportJobsProvider } from "@/contexts/DocumentImportJobsContext";
 import { ProtectedRoute, SuperAdminRoute, PermissionRoute } from "@/components/ProtectedRoute";
 import { ThemeProvider } from "next-themes";
 import Auth from "./pages/Auth";
@@ -17,6 +18,7 @@ import WorkflowExecutions from "./pages/WorkflowExecutions";
 import ExecutionDetail from "./pages/ExecutionDetail";
 import ExecutionData from "./pages/ExecutionData";
 import DocumentManagement from "./pages/DocumentManagement";
+import SplitPdfPage from "./pages/SplitPdfPage";
 import NotFound from "./pages/NotFound";
 import UsersGroups from "./pages/UsersGroups";
 import OrganizationSettings from "./pages/OrganizationSettings";
@@ -53,6 +55,7 @@ const App = () => (
               path="/*"
               element={
                 <ProtectedRoute>
+                  <DocumentImportJobsProvider>
                   <SidebarProvider>
                     <div className="flex h-screen w-full overflow-hidden" style={{ overflow: 'visible' }}>
                       <AppSidebar />
@@ -68,6 +71,7 @@ const App = () => (
                             <Route path="/workflows" element={<WorkflowList />} />
                             <Route path="/workflow/:id" element={<WorkflowEditor />} />
                             <Route path="/documents" element={<PermissionRoute permission="documents.view"><DocumentManagement /></PermissionRoute>} />
+                            <Route path="/documents/split-pdf" element={<PermissionRoute permission="documents.view"><SplitPdfPage /></PermissionRoute>} />
                             <Route path="/data/global-variables" element={<GlobalVariables />} />
                             <Route path="/data" element={<Data />} />
                             <Route path="/data/:tableId" element={<Data />} />
@@ -84,6 +88,7 @@ const App = () => (
                       </div>
                     </div>
                   </SidebarProvider>
+                  </DocumentImportJobsProvider>
                 </ProtectedRoute>
               }
             />

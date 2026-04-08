@@ -1,7 +1,15 @@
 import { Response } from 'express';
-import { Prisma } from '@prisma/client';
+import { FilesMetadataValueKind, Prisma } from '@prisma/client';
 import { AuthRequest, ALL_COMPANIES, companyFilter } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
+import {
+  assertEnumOptionsNotRemovedWhileInUse,
+  assertPredefinedListCoversExistingValues,
+  normalizeAllowedValuesInput,
+  parseAllowedValuesJson,
+  parseValueKindInput,
+  validateMetadataValueForKey,
+} from '../services/files-metadata-validation';
 import { canUserAccessFolder, getUserGroupIdsInCompany } from '../lib/folderAccess';
 import { getAccessibleFileIds, canUserAccessFileByMetadata } from '../lib/documentAccess';
 import { storageService } from '../services/storage.service';
@@ -510,7 +518,7 @@ export const companiesController = {
   async createFilesMetadataKey(req: AuthRequest, res: Response) {
     try {
       const { companyId } = req.params;
-      const { name } = req.body;
+      const { name, value_kind: bodyKind, allowed_values: bodyAllowed } = req.body;
 
       if (!companyId) {
         return res.status(400).json({ error: 'Missing company ID', details: 'companyId is required' });
@@ -521,10 +529,24 @@ export const companiesController = {
         return res.status(access.error.status).json(access.error.body);
       }
 
+      const valueKind = parseValueKindInput(bodyKind) ?? FilesMetadataValueKind.free_text;
+      const norm = normalizeAllowedValuesInput(bodyAllowed);
+      if (!norm.ok) {
+        return res.status(400).json({ error: 'Invalid metadata key', details: norm.message });
+      }
+      if (valueKind === FilesMetadataValueKind.predefined_list && norm.values.length === 0) {
+        return res.status(400).json({
+          error: 'Invalid metadata key',
+          details: 'predefined_list keys require at least one allowed value',
+        });
+      }
+
       const key = await prisma.filesMetadataKey.create({
         data: {
           company_id: companyId,
           name: typeof name === 'string' ? name.trim() || null : null,
+          value_kind: valueKind,
+          allowed_values: valueKind === FilesMetadataValueKind.predefined_list ? norm.values : [],
         },
       });
 
@@ -544,7 +566,7 @@ export const companiesController = {
   async updateFilesMetadataKey(req: AuthRequest, res: Response) {
     try {
       const { companyId, keyId } = req.params;
-      const { name } = req.body;
+      const { name, value_kind: bodyKind, allowed_values: bodyAllowed } = req.body;
 
       if (!companyId || !keyId) {
         return res.status(400).json({ error: 'Missing company ID or key ID', details: 'companyId and keyId are required' });
@@ -555,14 +577,68 @@ export const companiesController = {
         return res.status(access.error.status).json(access.error.body);
       }
 
-      const key = await prisma.filesMetadataKey.updateMany({
+      const existing = await prisma.filesMetadataKey.findFirst({
         where: { id: keyId, company_id: companyId },
-        data: { name: typeof name === 'string' ? name.trim() || null : undefined },
       });
-
-      if (key.count === 0) {
+      if (!existing) {
         return res.status(404).json({ error: 'Metadata key not found', details: 'Key not found or access denied' });
       }
+
+      let nextKind: FilesMetadataValueKind = existing.value_kind;
+      if (bodyKind !== undefined) {
+        const parsed = parseValueKindInput(bodyKind);
+        if (!parsed) {
+          return res.status(400).json({ error: 'Invalid value_kind', details: 'Must be free_text or predefined_list' });
+        }
+        nextKind = parsed;
+      }
+
+      let nextAllowed: string[] = parseAllowedValuesJson(existing.allowed_values);
+      if (bodyAllowed !== undefined) {
+        const norm = normalizeAllowedValuesInput(bodyAllowed);
+        if (!norm.ok) {
+          return res.status(400).json({ error: 'Invalid allowed_values', details: norm.message });
+        }
+        nextAllowed = norm.values;
+      }
+
+      if (nextKind === FilesMetadataValueKind.predefined_list && nextAllowed.length === 0) {
+        return res.status(400).json({
+          error: 'Invalid metadata key',
+          details: 'predefined_list keys require at least one allowed value',
+        });
+      }
+
+      const prevKind = existing.value_kind;
+      const prevAllowed = parseAllowedValuesJson(existing.allowed_values);
+
+      if (prevKind === FilesMetadataValueKind.predefined_list && nextKind === FilesMetadataValueKind.predefined_list) {
+        const removalCheck = await assertEnumOptionsNotRemovedWhileInUse(companyId, keyId, prevAllowed, nextAllowed);
+        if (!removalCheck.ok) {
+          return res.status(409).json({ error: 'Conflict', details: removalCheck.message });
+        }
+      }
+
+      if (prevKind === FilesMetadataValueKind.free_text && nextKind === FilesMetadataValueKind.predefined_list) {
+        const cover = await assertPredefinedListCoversExistingValues(companyId, keyId, nextAllowed);
+        if (!cover.ok) {
+          return res.status(409).json({ error: 'Conflict', details: cover.message });
+        }
+      }
+
+      const data: Prisma.FilesMetadataKeyUpdateInput = {};
+      if (typeof name === 'string') data.name = name.trim() || null;
+      data.value_kind = nextKind;
+      if (nextKind === FilesMetadataValueKind.predefined_list) {
+        data.allowed_values = nextAllowed;
+      } else {
+        data.allowed_values = [];
+      }
+
+      await prisma.filesMetadataKey.update({
+        where: { id: keyId },
+        data,
+      });
 
       const updated = await prisma.filesMetadataKey.findUnique({
         where: { id: keyId },
@@ -626,27 +702,53 @@ export const companiesController = {
       if (!file) return res.status(404).json({ error: 'File not found' });
 
       const list = Array.isArray(entries) ? entries.filter((e) => e && typeof e.key === 'string' && e.key.trim() !== '') : [];
+      const keys = await prisma.filesMetadataKey.findMany({
+        where: { company_id: companyId },
+        select: { id: true, name: true, value_kind: true, allowed_values: true },
+      });
       const keyMap = new Map<string, string>();
-      const keys = await prisma.filesMetadataKey.findMany({ where: { company_id: companyId }, select: { id: true, name: true } });
-      keys.forEach((k) => { if (k.name) keyMap.set(k.name, k.id); });
-
-      await prisma.filesMetadataValue.deleteMany({ where: { files_id: fileId, company_id: companyId } });
+      const keyById = new Map<string, { value_kind: FilesMetadataValueKind; allowed_values: Prisma.JsonValue }>();
+      keys.forEach((k) => {
+        if (k.name) keyMap.set(k.name, k.id);
+        keyById.set(k.id, { value_kind: k.value_kind, allowed_values: k.allowed_values });
+      });
 
       for (const entry of list) {
         let keyId = keyMap.get(entry.key.trim());
         if (!keyId) {
           const created = await prisma.filesMetadataKey.create({
-            data: { company_id: companyId, name: entry.key.trim() },
-            select: { id: true, name: true },
+            data: {
+              company_id: companyId,
+              name: entry.key.trim(),
+              value_kind: FilesMetadataValueKind.free_text,
+              allowed_values: [],
+            },
+            select: { id: true, name: true, value_kind: true, allowed_values: true },
           });
           keyId = created.id;
           if (created.name) keyMap.set(created.name, created.id);
+          keyById.set(created.id, { value_kind: created.value_kind, allowed_values: created.allowed_values });
         }
+        const row = keyById.get(keyId);
+        if (!row) {
+          return res.status(500).json({ error: 'Internal error', details: 'Could not resolve metadata key' });
+        }
+        const val = typeof entry.value === 'string' ? entry.value : String(entry.value ?? '');
+        const v = validateMetadataValueForKey(row, val);
+        if (!v.ok) {
+          return res.status(v.status).json({ error: v.error, details: v.details });
+        }
+      }
+
+      await prisma.filesMetadataValue.deleteMany({ where: { files_id: fileId, company_id: companyId } });
+
+      for (const entry of list) {
+        const keyId = keyMap.get(entry.key.trim())!;
         await prisma.filesMetadataValue.create({
           data: {
             files_id: fileId,
             metadata_id: keyId,
-            value: typeof entry.value === 'string' ? entry.value : String(entry.value),
+            value: typeof entry.value === 'string' ? entry.value.trim() : String(entry.value).trim(),
             company_id: companyId,
           },
         });

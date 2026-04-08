@@ -1,6 +1,8 @@
+import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { storageService } from './storage.service';
 import { getOcrProvider } from './ocr/index';
+import { runPendingMetadataExtractionAfterOcr } from './metadata-from-ocr-extraction.service';
 
 const SUPPORTED_MIME_TYPES = [
   'application/pdf',
@@ -13,13 +15,26 @@ const SUPPORTED_MIME_TYPES = [
 
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50 MB
 
+function hasPendingMetadataExtract(pending: unknown): boolean {
+  return Array.isArray(pending) && pending.length > 0;
+}
+
 export async function processDocumentOcr(fileId: string): Promise<void> {
   const file = await prisma.file.findUnique({
     where: { id: fileId },
-    select: { id: true, name: true, storage_path: true, mime_type: true, size_bytes: true },
+    select: {
+      id: true,
+      name: true,
+      storage_path: true,
+      mime_type: true,
+      size_bytes: true,
+      ocr_pending_metadata_key_ids: true,
+    },
   });
 
   if (!file) throw new Error('File not found');
+
+  const pendingExtract = hasPendingMetadataExtract(file.ocr_pending_metadata_key_ids);
 
   // Check mime type
   if (!file.mime_type || !SUPPORTED_MIME_TYPES.includes(file.mime_type)) {
@@ -28,6 +43,13 @@ export async function processDocumentOcr(fileId: string): Promise<void> {
       data: {
         ocr_status: 'failed',
         ocr_error: `Unsupported file type: ${file.mime_type || 'unknown'}. Supported: PDF, PNG, JPG, TIFF, WebP.`,
+        ...(pendingExtract
+          ? {
+              ocr_pending_metadata_key_ids: Prisma.DbNull,
+              metadata_ai_extract_status: 'failed',
+              metadata_ai_extract_error: 'OCR skipped: unsupported file type',
+            }
+          : {}),
       },
     });
     return;
@@ -41,6 +63,13 @@ export async function processDocumentOcr(fileId: string): Promise<void> {
       data: {
         ocr_status: 'failed',
         ocr_error: 'File exceeds 50 MB OCR limit.',
+        ...(pendingExtract
+          ? {
+              ocr_pending_metadata_key_ids: Prisma.DbNull,
+              metadata_ai_extract_status: 'failed',
+              metadata_ai_extract_error: 'OCR skipped: file too large',
+            }
+          : {}),
       },
     });
     return;
@@ -80,12 +109,21 @@ export async function processDocumentOcr(fileId: string): Promise<void> {
         ocr_error: null,
       },
     });
+
+    await runPendingMetadataExtractionAfterOcr(fileId);
   } catch (error) {
     await prisma.file.update({
       where: { id: fileId },
       data: {
         ocr_status: 'failed',
         ocr_error: error instanceof Error ? error.message : 'Unknown OCR error',
+        ...(pendingExtract
+          ? {
+              ocr_pending_metadata_key_ids: Prisma.DbNull,
+              metadata_ai_extract_status: 'failed',
+              metadata_ai_extract_error: 'OCR failed before metadata extraction could run',
+            }
+          : {}),
       },
     });
   }

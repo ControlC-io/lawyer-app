@@ -1,4 +1,5 @@
 import fetch from 'node-fetch';
+import { joinOcrMarkdownPages } from './join-pages';
 import type { OcrProvider, OcrResult } from './types';
 
 const RETRY_DELAYS = [1000, 3000, 9000];
@@ -45,7 +46,7 @@ export class MistralOcrProvider implements OcrProvider {
 
         if (response.ok) {
           const data = await response.json() as { pages: Array<{ index: number; markdown: string }> };
-          const markdown = data.pages.map((p) => p.markdown).join('\n\n---\n\n');
+          const markdown = joinOcrMarkdownPages(data.pages);
           return { markdown, pagesProcessed: data.pages.length, provider: 'mistral', model };
         }
 

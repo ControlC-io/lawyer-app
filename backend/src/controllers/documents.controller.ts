@@ -1,8 +1,18 @@
 import { Response } from 'express';
+import { FilesMetadataValueKind, Prisma } from '@prisma/client';
 import { AuthRequest, ALL_COMPANIES, companyFilter } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 import { getAccessibleFileIds, getAccessibleFileIdsWithLevels, buildVirtualTree, getAllowedMetadataValues, canUserAccessFileByMetadata } from '../lib/documentAccess';
 import { getUserGroupIdsInCompany } from '../lib/folderAccess';
+import {
+  assertMetadataValueAllowed,
+  parseAllowedValuesJson,
+  validateMetadataValueForKey,
+} from '../services/files-metadata-validation';
+import {
+  extractAndApplyMetadataFromOcr,
+  type ExtractMetadataFromOcrHttpError,
+} from '../services/metadata-from-ocr-extraction.service';
 
 async function ensureCompanyAccess(req: AuthRequest, companyId: string) {
   if (req.company && !req.user) {
@@ -27,6 +37,62 @@ async function ensureCompanyAccess(req: AuthRequest, companyId: string) {
     return { error: { status: 403, body: { error: 'Forbidden', details: 'You do not have access to this company' } } };
   }
   return { userCompany };
+}
+
+function sanitizeFlatFileName(original: string): string {
+  return original
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9._-]/g, '_')
+    .replace(/_{2,}/g, '_')
+    .replace(/^_+|_+$/g, '') || 'file';
+}
+
+async function assertFlatDocumentWriteAccess(
+  req: AuthRequest,
+  companyId: string,
+  res: Response,
+): Promise<boolean> {
+  const access = await ensureCompanyAccess(req, companyId);
+  if (access.error) {
+    res.status(access.error.status).json(access.error.body);
+    return false;
+  }
+
+  const userId = req.user?.id ?? null;
+  const isCompanyAdmin = access.userCompany?.role === 'company_admin' || !!req.user?.super_admin;
+  if (!userId && !isCompanyAdmin) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return false;
+  }
+  if (!isCompanyAdmin) {
+    if (!userId) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return false;
+    }
+    const userGroupIds = await getUserGroupIdsInCompany(userId, companyId);
+    const rules = await prisma.documentPermissionRule.findMany({
+      where: {
+        company_id: companyId,
+        permission_type: 'write',
+        assignments: {
+          some: {
+            OR: [
+              { user_id: userId },
+              ...(userGroupIds.length > 0 ? [{ group_id: { in: userGroupIds } }] : []),
+            ],
+          },
+        },
+      },
+      select: { id: true },
+      take: 1,
+    });
+    if (rules.length === 0) {
+      res.status(403).json({ error: 'Forbidden', details: 'No write access rules assigned to you' });
+      return false;
+    }
+  }
+  return true;
 }
 
 export const documentsController = {
@@ -342,7 +408,21 @@ export const documentsController = {
       });
     }
 
-    if (accessibleIds.length === 0) return res.json({ tree: [], keyOrder: [], totalFiles: 0 });
+    let treeConfig: { key_order: unknown; hide_key_labels: boolean } | null = null;
+    if (companyId !== ALL_COMPANIES && userId) {
+      treeConfig = await prisma.userDocumentTreeConfig.findUnique({
+        where: { user_id_company_id: { user_id: userId, company_id: companyId } },
+      });
+    }
+
+    if (accessibleIds.length === 0) {
+      return res.json({
+        tree: [],
+        keyOrder: [],
+        totalFiles: 0,
+        hide_key_labels: treeConfig?.hide_key_labels ?? false,
+      });
+    }
 
     // Get files
     const files = await prisma.file.findMany({
@@ -376,13 +456,6 @@ export const documentsController = {
       metadata[m.files_id][m.metadata_id].push(m.value);
     }
 
-    // Get user's tree config (skip for 'all' since compound key requires real UUID)
-    const treeConfig = companyId !== ALL_COMPANIES
-      ? await prisma.userDocumentTreeConfig.findUnique({
-          where: { user_id_company_id: { user_id: userId, company_id: companyId } },
-        })
-      : null;
-
     const keyIds: string[] = Array.isArray(treeConfig?.key_order) ? (treeConfig.key_order as string[]) : [];
 
     // Only keep keys that actually appear on accessible files
@@ -402,7 +475,12 @@ export const documentsController = {
 
     const tree = buildVirtualTree(files, metadata, keyOrder);
 
-    return res.json({ tree, keyOrder, totalFiles: files.length });
+    return res.json({
+      tree,
+      keyOrder,
+      totalFiles: files.length,
+      hide_key_labels: treeConfig?.hide_key_labels ?? false,
+    });
   },
 
   // ─── Tree Config ───
@@ -416,18 +494,18 @@ export const documentsController = {
     if (!userId && !(access.userCompany?.role === 'company_admin')) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
-    if (!userId) return res.json({ key_order: [] }); // API key: no per-user config
+    if (!userId) return res.json({ key_order: [], hide_key_labels: false }); // API key: no per-user config
 
     const config = await prisma.userDocumentTreeConfig.findUnique({
       where: { user_id_company_id: { user_id: userId, company_id: companyId } },
     });
 
-    return res.json(config || { key_order: [] });
+    return res.json(config || { key_order: [], hide_key_labels: false });
   },
 
   async updateTreeConfig(req: AuthRequest, res: Response) {
     const { companyId } = req.params;
-    const { key_order } = req.body || {};
+    const { key_order, hide_key_labels } = req.body || {};
     const access = await ensureCompanyAccess(req, companyId);
     if (access.error) return res.status(access.error.status).json(access.error.body);
 
@@ -440,13 +518,21 @@ export const documentsController = {
       return res.status(400).json({ error: 'key_order must be an array of metadata key IDs' });
     }
 
+    if (hide_key_labels !== undefined && typeof hide_key_labels !== 'boolean') {
+      return res.status(400).json({ error: 'hide_key_labels must be a boolean when provided' });
+    }
+
     const config = await prisma.userDocumentTreeConfig.upsert({
       where: { user_id_company_id: { user_id: userId, company_id: companyId } },
-      update: { key_order },
+      update: {
+        key_order,
+        ...(typeof hide_key_labels === 'boolean' ? { hide_key_labels } : {}),
+      },
       create: {
         user_id: userId,
         company_id: companyId,
         key_order,
+        hide_key_labels: typeof hide_key_labels === 'boolean' ? hide_key_labels : false,
       },
     });
 
@@ -488,83 +574,155 @@ export const documentsController = {
       }
     }
 
-    const file = (req as AuthRequest & { file?: Express.Multer.File }).file;
-    if (!file) return res.status(400).json({ error: 'No file provided' });
+    const uploaded = (req as AuthRequest & { files?: Express.Multer.File[] }).files;
+    if (!uploaded || !Array.isArray(uploaded) || uploaded.length === 0) {
+      return res.status(400).json({ error: 'No file provided' });
+    }
+    if (uploaded.length > 25) {
+      return res.status(400).json({ error: 'At most 25 files per upload' });
+    }
 
-    const { storageService: storage } = await import('../services/storage.service');
-
-    const sanitized = file.originalname
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .replace(/[^a-zA-Z0-9._-]/g, '_')
-      .replace(/_{2,}/g, '_')
-      .replace(/^_+|_+$/g, '') || 'file';
-
-    const storagePath = `companies/${companyId}/flat/${Date.now()}_${sanitized}`;
-
-    await storage.getClient().putObject(
-      'documents',
-      storagePath,
-      file.buffer,
-      file.size,
-      { 'Content-Type': file.mimetype },
-    );
-
-    const dbFile = await prisma.file.create({
-      data: {
-        company_id: companyId,
-        name: file.originalname,
-        storage_path: storagePath,
-        mime_type: file.mimetype,
-        size_bytes: BigInt(file.size),
-        uploaded_by: userId,
-        folder_id: null,
-      },
-    });
-
-    // Apply metadata from query params if provided
     const metadataParam = req.body?.metadata;
-    if (metadataParam) {
+    let parsedMetadata: Array<{ key_id: string; value: string }> | null = null;
+    if (metadataParam !== undefined && metadataParam !== null && metadataParam !== '') {
       try {
         const entries: Array<{ key_id: string; value: string }> = typeof metadataParam === 'string'
           ? JSON.parse(metadataParam)
           : metadataParam;
-        if (Array.isArray(entries)) {
-          for (const entry of entries) {
-            if (entry.key_id && typeof entry.value === 'string') {
-              await prisma.filesMetadataValue.create({
-                data: {
-                  files_id: dbFile.id,
-                  metadata_id: entry.key_id,
-                  value: entry.value,
-                  company_id: companyId,
-                },
-              });
+        if (!Array.isArray(entries)) {
+          return res.status(400).json({ error: 'metadata must be a JSON array' });
+        }
+        for (const entry of entries) {
+          if (entry?.key_id && typeof entry.value === 'string') {
+            const check = await assertMetadataValueAllowed(companyId, entry.key_id, entry.value);
+            if (!check.ok) {
+              return res.status(check.status).json({ error: check.error, details: check.details });
             }
           }
         }
+        parsedMetadata = entries.filter((e) => e?.key_id && typeof e.value === 'string');
       } catch {
-        // ignore invalid metadata
+        return res.status(400).json({ error: 'Invalid metadata JSON' });
       }
     }
 
-    // Trigger OCR if requested
-    if (req.body?.ocr === 'true') {
-      const { processDocumentOcr } = await import('../services/ocr.service');
-      await prisma.file.update({
-        where: { id: dbFile.id },
-        data: { ocr_status: 'pending' },
+    const { storageService: storage } = await import('../services/storage.service');
+    const ocrRequested = req.body?.ocr === 'true';
+    const { processDocumentOcr } = await import('../services/ocr.service');
+
+    let pendingExtractKeyIds: string[] | null = null;
+    if (ocrRequested) {
+      const rawExtract = req.body?.extractMetadataKeyIds;
+      if (rawExtract !== undefined && rawExtract !== null && rawExtract !== '') {
+        try {
+          const parsed: unknown =
+            typeof rawExtract === 'string' ? JSON.parse(rawExtract) : rawExtract;
+          if (!Array.isArray(parsed)) {
+            return res.status(400).json({ error: 'extractMetadataKeyIds must be a JSON array' });
+          }
+          const ids = [...new Set(parsed.map((id: unknown) => String(id).trim()).filter(Boolean))];
+          if (ids.length === 0) {
+            return res.status(400).json({ error: 'extractMetadataKeyIds must contain at least one id' });
+          }
+          const keyRows = await prisma.filesMetadataKey.findMany({
+            where: { company_id: companyId, id: { in: ids } },
+            select: { id: true },
+          });
+          if (keyRows.length !== ids.length) {
+            return res.status(400).json({ error: 'One or more extractMetadataKeyIds are invalid for this company' });
+          }
+          pendingExtractKeyIds = ids;
+        } catch {
+          return res.status(400).json({ error: 'Invalid extractMetadataKeyIds JSON' });
+        }
+      }
+    }
+
+    const baseTs = Date.now();
+    const created: Array<{
+      id: string;
+      name: string;
+      storage_path: string;
+      mime_type: string;
+      size_bytes: number;
+      ocr_status: string | null;
+      metadata_ai_extract_status?: string | null;
+    }> = [];
+
+    for (let i = 0; i < uploaded.length; i++) {
+      const file = uploaded[i];
+      const sanitized = file.originalname
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-zA-Z0-9._-]/g, '_')
+        .replace(/_{2,}/g, '_')
+        .replace(/^_+|_+$/g, '') || 'file';
+
+      const storagePath = `companies/${companyId}/flat/${baseTs}_${i}_${sanitized}`;
+
+      await storage.getClient().putObject(
+        'documents',
+        storagePath,
+        file.buffer,
+        file.size,
+        { 'Content-Type': file.mimetype },
+      );
+
+      const dbFile = await prisma.file.create({
+        data: {
+          company_id: companyId,
+          name: file.originalname,
+          storage_path: storagePath,
+          mime_type: file.mimetype,
+          size_bytes: BigInt(file.size),
+          uploaded_by: userId,
+          folder_id: null,
+          ...(pendingExtractKeyIds && pendingExtractKeyIds.length > 0
+            ? {
+                ocr_pending_metadata_key_ids: pendingExtractKeyIds,
+                metadata_ai_extract_status: 'pending',
+              }
+            : {}),
+        },
       });
-      processDocumentOcr(dbFile.id).catch((err) => {
-        console.error(`OCR processing failed for file ${dbFile.id}:`, err);
+
+      if (parsedMetadata && parsedMetadata.length > 0) {
+        for (const entry of parsedMetadata) {
+          await prisma.filesMetadataValue.create({
+            data: {
+              files_id: dbFile.id,
+              metadata_id: entry.key_id,
+              value: entry.value.trim(),
+              company_id: companyId,
+            },
+          });
+        }
+      }
+
+      if (ocrRequested) {
+        await prisma.file.update({
+          where: { id: dbFile.id },
+          data: { ocr_status: 'pending' },
+        });
+        processDocumentOcr(dbFile.id).catch((err) => {
+          console.error(`OCR processing failed for file ${dbFile.id}:`, err);
+        });
+      }
+
+      created.push({
+        id: dbFile.id,
+        name: dbFile.name,
+        storage_path: dbFile.storage_path,
+        mime_type: dbFile.mime_type ?? 'application/octet-stream',
+        size_bytes: dbFile.size_bytes != null ? Number(dbFile.size_bytes) : 0,
+        ocr_status: ocrRequested ? 'pending' : null,
+        ...(pendingExtractKeyIds && pendingExtractKeyIds.length > 0
+          ? { metadata_ai_extract_status: 'pending' as const }
+          : {}),
       });
     }
 
-    return res.status(201).json({
-      ...dbFile,
-      size_bytes: dbFile.size_bytes != null ? Number(dbFile.size_bytes) : 0,
-      ocr_status: req.body?.ocr === 'true' ? 'pending' : null,
-    });
+    return res.status(201).json({ files: created });
   },
 
   // ─── Bulk Metadata Assignment ───
@@ -586,13 +744,44 @@ export const documentsController = {
       (e: unknown) => e && typeof e === 'object' && typeof (e as Record<string, unknown>).key === 'string',
     );
 
-    // Resolve key names to IDs
     const keyMap = new Map<string, string>();
-    const keys = await prisma.filesMetadataKey.findMany({
+    const keyRows = await prisma.filesMetadataKey.findMany({
       where: { company_id: companyId },
-      select: { id: true, name: true },
+      select: { id: true, name: true, value_kind: true, allowed_values: true },
     });
-    keys.forEach((k) => { if (k.name) keyMap.set(k.name, k.id); });
+    const keyById = new Map<string, { value_kind: FilesMetadataValueKind; allowed_values: Prisma.JsonValue }>();
+    keyRows.forEach((k) => {
+      if (k.name) keyMap.set(k.name, k.id);
+      keyById.set(k.id, { value_kind: k.value_kind, allowed_values: k.allowed_values });
+    });
+
+    for (const entry of validEntries) {
+      const e = entry as { key: string; value: string };
+      let keyId = keyMap.get(e.key.trim());
+      if (!keyId) {
+        const created = await prisma.filesMetadataKey.create({
+          data: {
+            company_id: companyId,
+            name: e.key.trim(),
+            value_kind: FilesMetadataValueKind.free_text,
+            allowed_values: [],
+          },
+          select: { id: true, name: true, value_kind: true, allowed_values: true },
+        });
+        keyId = created.id;
+        keyMap.set(e.key.trim(), keyId);
+        keyById.set(created.id, { value_kind: created.value_kind, allowed_values: created.allowed_values });
+      }
+      const row = keyById.get(keyId);
+      if (!row) {
+        return res.status(500).json({ error: 'Internal error', details: 'Could not resolve metadata key' });
+      }
+      const val = typeof e.value === 'string' ? e.value : String(e.value ?? '');
+      const v = validateMetadataValueForKey(row, val);
+      if (!v.ok) {
+        return res.status(v.status).json({ error: v.error, details: v.details });
+      }
+    }
 
     const userId = req.user?.id ?? '';
     const isCompanyAdmin = access.userCompany?.role === 'company_admin' || !!req.user?.super_admin;
@@ -632,40 +821,33 @@ export const documentsController = {
 
       for (const entry of validEntries) {
         const e = entry as { key: string; value: string };
-        let keyId = keyMap.get(e.key.trim());
-        if (!keyId) {
-          const created = await prisma.filesMetadataKey.create({
-            data: { company_id: companyId, name: e.key.trim() },
-          });
-          keyId = created.id;
-          keyMap.set(e.key.trim(), keyId);
-        }
+        const keyId = keyMap.get(e.key.trim())!;
+        const strVal = typeof e.value === 'string' ? e.value.trim() : String(e.value).trim();
 
         if (mode === 'replace') {
           await prisma.filesMetadataValue.create({
             data: {
               files_id: fileId,
               metadata_id: keyId,
-              value: typeof e.value === 'string' ? e.value : String(e.value),
+              value: strVal,
               company_id: companyId,
             },
           });
         } else {
-          // merge mode: upsert
           const existing = await prisma.filesMetadataValue.findFirst({
             where: { files_id: fileId, metadata_id: keyId },
           });
           if (existing) {
             await prisma.filesMetadataValue.update({
               where: { id: existing.id },
-              data: { value: typeof e.value === 'string' ? e.value : String(e.value) },
+              data: { value: strVal },
             });
           } else {
             await prisma.filesMetadataValue.create({
               data: {
                 files_id: fileId,
                 metadata_id: keyId,
-                value: typeof e.value === 'string' ? e.value : String(e.value),
+                value: strVal,
                 company_id: companyId,
               },
             });
@@ -675,5 +857,301 @@ export const documentsController = {
     }
 
     return res.json({ updated: validFileIds.length });
+  },
+
+  async splitPdfPropose(req: AuthRequest, res: Response) {
+    const { companyId } = req.params;
+    const { fileId, metadataKeyIds, namingInstructions, currentDate } = req.body || {};
+
+    if (!(await assertFlatDocumentWriteAccess(req, companyId, res))) return;
+
+    if (!fileId || typeof fileId !== 'string') {
+      return res.status(400).json({ error: 'fileId is required' });
+    }
+    if (!Array.isArray(metadataKeyIds) || metadataKeyIds.length === 0) {
+      return res.status(400).json({ error: 'metadataKeyIds must be a non-empty array' });
+    }
+    if (typeof namingInstructions !== 'string' || !namingInstructions.trim()) {
+      return res.status(400).json({ error: 'namingInstructions is required' });
+    }
+
+    const requestedIds = [...new Set(metadataKeyIds.map((id: unknown) => String(id).trim()).filter(Boolean))];
+    if (requestedIds.length === 0) {
+      return res.status(400).json({ error: 'metadataKeyIds must contain at least one valid id' });
+    }
+
+    const file = await prisma.file.findFirst({
+      where: { id: fileId, company_id: companyId },
+      select: {
+        id: true,
+        mime_type: true,
+        ocr_status: true,
+        ocr_markdown: true,
+        storage_path: true,
+      },
+    });
+    if (!file) return res.status(404).json({ error: 'File not found' });
+    if (file.mime_type !== 'application/pdf') {
+      return res.status(400).json({ error: 'file must be a PDF' });
+    }
+    if (file.ocr_status !== 'completed' || !file.ocr_markdown?.trim()) {
+      return res.status(400).json({ error: 'OCR must be completed before proposing a split' });
+    }
+
+    const dateStr =
+      typeof currentDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(currentDate)
+        ? currentDate
+        : new Date().toISOString().slice(0, 10);
+
+    try {
+      const dbKeys = await prisma.filesMetadataKey.findMany({
+        where: { company_id: companyId, id: { in: requestedIds } },
+      });
+      if (dbKeys.length !== requestedIds.length) {
+        return res.status(400).json({ error: 'One or more metadata keys are invalid for this company' });
+      }
+      const byId = new Map(dbKeys.map((k) => [k.id, k]));
+      const orderedKeys = requestedIds.map((id) => byId.get(id)!);
+
+      const { storageService } = await import('../services/storage.service');
+      const bucket = storageService.getDocumentsBucket();
+      const stream = await storageService.downloadFile(bucket, file.storage_path);
+      const chunks: Buffer[] = [];
+      for await (const chunk of stream) {
+        chunks.push(Buffer.from(chunk));
+      }
+      const pdfBuffer = Buffer.concat(chunks);
+      const { proposeSplitWithGemini, getPdfPageCount } = await import('../services/pdf-split.service');
+      const pageCount = await getPdfPageCount(pdfBuffer);
+
+      const metadataKeys = orderedKeys.map((k) => ({
+        id: k.id,
+        name: k.name,
+        valueKind: (k.value_kind === FilesMetadataValueKind.predefined_list
+          ? 'predefined_list'
+          : 'free_text') as 'free_text' | 'predefined_list',
+        allowedValues: parseAllowedValuesJson(k.allowed_values),
+      }));
+
+      const segments = await proposeSplitWithGemini({
+        ocrMarkdown: file.ocr_markdown,
+        metadataKeys,
+        namingInstructions: namingInstructions.trim(),
+        currentDate: dateStr,
+      });
+      return res.json({ segments, pageCount });
+    } catch (e) {
+      console.error('splitPdfPropose:', e);
+      return res.status(400).json({
+        error: e instanceof Error ? e.message : 'Failed to propose split',
+      });
+    }
+  },
+
+  async splitPdfApply(req: AuthRequest, res: Response) {
+    const { companyId } = req.params;
+    const { fileId, segments, keepOriginalFile, ocrCreatedFiles } = req.body || {};
+
+    if (!(await assertFlatDocumentWriteAccess(req, companyId, res))) return;
+
+    if (!fileId || typeof fileId !== 'string') {
+      return res.status(400).json({ error: 'fileId is required' });
+    }
+    if (!Array.isArray(segments) || segments.length === 0) {
+      return res.status(400).json({ error: 'segments must be a non-empty array' });
+    }
+    const keepSource = keepOriginalFile === true;
+    /** Queue OCR on each output PDF unless explicitly disabled (default: true). */
+    const runOcrOnCreated = ocrCreatedFiles !== false;
+
+    const userId = req.user?.id ?? null;
+
+    const { validateSegments, applyPdfSplit } = await import('../services/pdf-split.service');
+    let validated;
+    try {
+      validated = validateSegments(segments);
+    } catch (e) {
+      return res.status(400).json({ error: e instanceof Error ? e.message : 'Invalid segments' });
+    }
+
+    const companyMetaKeys = await prisma.filesMetadataKey.findMany({
+      where: { company_id: companyId },
+      select: { id: true, value_kind: true, allowed_values: true },
+    });
+    const companyMetaById = new Map(companyMetaKeys.map((k) => [k.id, k]));
+    for (const seg of validated) {
+      if (!seg.metadata) continue;
+      for (const keyId of Object.keys(seg.metadata)) {
+        const row = companyMetaById.get(keyId);
+        if (!row) {
+          return res.status(400).json({ error: `Unknown metadata key in segment: ${keyId}` });
+        }
+        const raw = seg.metadata[keyId];
+        const val = typeof raw === 'string' ? raw.trim() : String(raw).trim();
+        if (!val) continue;
+        const check = validateMetadataValueForKey(row, val);
+        if (!check.ok) {
+          return res.status(check.status).json({ error: check.error, details: check.details });
+        }
+      }
+    }
+
+    const file = await prisma.file.findFirst({
+      where: { id: fileId, company_id: companyId },
+      select: {
+        id: true,
+        mime_type: true,
+        storage_path: true,
+      },
+    });
+    if (!file) return res.status(404).json({ error: 'File not found' });
+    if (file.mime_type !== 'application/pdf') {
+      return res.status(400).json({ error: 'file must be a PDF' });
+    }
+
+    const { storageService } = await import('../services/storage.service');
+    const bucket = storageService.getDocumentsBucket();
+
+    let pdfBuffer: Buffer;
+    try {
+      const stream = await storageService.downloadFile(bucket, file.storage_path);
+      const chunks: Buffer[] = [];
+      for await (const chunk of stream) {
+        chunks.push(Buffer.from(chunk));
+      }
+      pdfBuffer = Buffer.concat(chunks);
+    } catch (e) {
+      console.error('splitPdfApply download:', e);
+      return res.status(500).json({ error: 'Failed to read source PDF' });
+    }
+
+    let parts: Array<{ buffer: Buffer; suggestedFileName: string }>;
+    try {
+      parts = await applyPdfSplit(pdfBuffer, validated);
+    } catch (e) {
+      return res.status(400).json({ error: e instanceof Error ? e.message : 'Failed to split PDF' });
+    }
+
+    const created: Array<{ id: string; name: string }> = [];
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i];
+      const storageBase = sanitizeFlatFileName(part.suggestedFileName.replace(/\.pdf$/i, ''));
+      const storagePath = `companies/${companyId}/flat/${Date.now()}_${i}_${storageBase}.pdf`;
+      const size = part.buffer.length;
+      await storageService.uploadFile(bucket, storagePath, part.buffer, 'application/pdf');
+      const dbFile = await prisma.file.create({
+        data: {
+          company_id: companyId,
+          name: part.suggestedFileName.length > 512 ? `${storageBase}.pdf` : part.suggestedFileName,
+          storage_path: storagePath,
+          mime_type: 'application/pdf',
+          size_bytes: BigInt(size),
+          uploaded_by: userId,
+          folder_id: null,
+        },
+      });
+      const meta = validated[i]?.metadata;
+      if (meta && companyMetaById.size > 0) {
+        for (const [keyId, rawVal] of Object.entries(meta)) {
+          if (!companyMetaById.has(keyId)) continue;
+          const strVal = typeof rawVal === 'string' ? rawVal.trim() : String(rawVal).trim();
+          if (!strVal) continue;
+          await prisma.filesMetadataValue.create({
+            data: {
+              files_id: dbFile.id,
+              metadata_id: keyId,
+              value: strVal,
+              company_id: companyId,
+            },
+          });
+        }
+      }
+      created.push({ id: dbFile.id, name: dbFile.name });
+    }
+
+    if (runOcrOnCreated && created.length > 0) {
+      const { processDocumentOcr } = await import('../services/ocr.service');
+      for (const row of created) {
+        await prisma.file.update({
+          where: { id: row.id },
+          data: { ocr_status: 'pending' },
+        });
+        processDocumentOcr(row.id).catch((err) => {
+          console.error(`OCR processing failed for split file ${row.id}:`, err);
+        });
+      }
+    }
+
+    let removedOriginal = false;
+    let originalRemoveFailed = false;
+    if (!keepSource) {
+      try {
+        try {
+          await storageService.deleteFile(bucket, file.storage_path);
+        } catch {
+          // Object may not exist in storage; proceed with DB cleanup
+        }
+        await prisma.workflowFile.deleteMany({ where: { file_id: fileId } });
+        await prisma.filesMetadataValue.deleteMany({ where: { files_id: fileId } });
+        await prisma.file.delete({ where: { id: fileId } });
+        removedOriginal = true;
+      } catch (e) {
+        console.error('splitPdfApply: failed to remove source file:', e);
+        originalRemoveFailed = true;
+      }
+    }
+
+    return res.status(201).json({
+      created,
+      removedOriginal,
+      ocrQueued: runOcrOnCreated && created.length > 0,
+      ...(originalRemoveFailed ? { warningCode: 'original_remove_failed' as const } : {}),
+    });
+  },
+
+  async extractMetadataFromOcr(req: AuthRequest, res: Response) {
+    const { companyId } = req.params;
+    const { fileId, metadataKeyIds, currentDate } = req.body || {};
+
+    if (!(await assertFlatDocumentWriteAccess(req, companyId, res))) return;
+
+    if (!fileId || typeof fileId !== 'string') {
+      return res.status(400).json({ error: 'fileId is required' });
+    }
+    if (!Array.isArray(metadataKeyIds) || metadataKeyIds.length === 0) {
+      return res.status(400).json({ error: 'metadataKeyIds must be a non-empty array' });
+    }
+
+    const requestedIds = [...new Set(metadataKeyIds.map((id: unknown) => String(id).trim()).filter(Boolean))];
+    if (requestedIds.length === 0) {
+      return res.status(400).json({ error: 'metadataKeyIds must contain at least one valid id' });
+    }
+
+    const dateStr =
+      typeof currentDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(currentDate)
+        ? currentDate
+        : new Date().toISOString().slice(0, 10);
+
+    try {
+      const result = await extractAndApplyMetadataFromOcr({
+        companyId,
+        fileId,
+        metadataKeyIds: requestedIds,
+        currentDate: dateStr,
+      });
+      return res.json({ values: result.values });
+    } catch (e) {
+      const http = e as ExtractMetadataFromOcrHttpError;
+      if (typeof http?.status === 'number' && typeof http?.error === 'string') {
+        return res.status(http.status).json({
+          error: http.error,
+          ...(http.details !== undefined ? { details: http.details } : {}),
+        });
+      }
+      console.error('extractMetadataFromOcr:', e);
+      return res.status(400).json({
+        error: e instanceof Error ? e.message : 'Failed to extract metadata',
+      });
+    }
   },
 };

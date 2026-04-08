@@ -186,7 +186,29 @@ router.get('/:companyId/documents/tree-config', requirePermission('documents.vie
 router.put('/:companyId/documents/tree-config', requirePermission('documents.view'), asyncHandler(documentsController.updateTreeConfig));
 
 // Flat upload (no folder required)
-router.post('/:companyId/documents/upload', filesController.uploadMiddleware, requirePermission('documents.view'), asyncHandler(documentsController.uploadFlatFile));
+router.post(
+  '/:companyId/documents/upload',
+  filesController.uploadFlatDocumentsMiddleware,
+  requirePermission('documents.view'),
+  asyncHandler(documentsController.uploadFlatFile),
+);
+
+router.post(
+  '/:companyId/documents/split-pdf/propose',
+  requirePermission('documents.view'),
+  asyncHandler(documentsController.splitPdfPropose),
+);
+router.post(
+  '/:companyId/documents/split-pdf/apply',
+  requirePermission('documents.view'),
+  asyncHandler(documentsController.splitPdfApply),
+);
+
+router.post(
+  '/:companyId/documents/extract-metadata-from-ocr',
+  requirePermission('documents.view'),
+  asyncHandler(documentsController.extractMetadataFromOcr),
+);
 
 // Bulk metadata assignment
 router.post('/:companyId/documents/bulk-metadata', requirePermission('documents.view'), asyncHandler(documentsController.bulkUpdateMetadata));

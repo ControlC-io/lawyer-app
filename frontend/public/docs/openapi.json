@@ -1,9 +1,9 @@
 {
   "openapi": "3.0.0",
   "info": {
-    "title": "Picobello API",
+    "title": "Floowly API",
     "version": "1.0.0",
-    "description": "API documentation for the Picobello backend services."
+    "description": "API documentation for the Floowly backend services."
   },
   "servers": [
     {
@@ -755,6 +755,98 @@
           },
           "404": {
             "description": "File not found"
+          }
+        }
+      }
+    },
+    "/files/{fileId}/ocr": {
+      "get": {
+        "summary": "Get OCR and AI metadata extraction status for a file",
+        "description": "Returns OCR status and markdown when available. When an upload requested post-OCR Gemini extraction,\n`metadataAiExtractStatus` and related fields reflect progress (`pending`, `processing`, `completed`, `failed`).\n",
+        "tags": [
+          "Files"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "fileId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OCR payload",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "ocrStatus"
+                  ],
+                  "properties": {
+                    "ocrStatus": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "ocrMarkdown": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "ocrProcessedAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "nullable": true
+                    },
+                    "ocrProvider": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "ocrModel": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "ocrError": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "ocrPendingMetadataKeyIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "format": "uuid"
+                      },
+                      "nullable": true
+                    },
+                    "metadataAiExtractStatus": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "metadataAiExtractError": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Access denied"
+          },
+          "404": {
+            "description": "File not found or OCR not started"
           }
         }
       }
@@ -2877,6 +2969,219 @@
         }
       }
     },
+    "/companies/{companyId}/documents/upload": {
+      "post": {
+        "summary": "Upload flat documents (no folder)",
+        "description": "Multipart upload with field `file` repeated 1–25 times. Optional JSON string field `metadata` (array of `{key_id, value}`) applied to each created file.\nSet `ocr` to the string `true` to queue OCR per file.\nWhen `ocr` is `true`, optional JSON string `extractMetadataKeyIds` (array of metadata key UUIDs) queues Gemini metadata extraction on the server after OCR completes (same as manual extract).\n",
+        "tags": [
+          "Companies"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "companyId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "file"
+                ],
+                "properties": {
+                  "file": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "binary"
+                    },
+                    "description": "One or more files (max 25), same field name repeated"
+                  },
+                  "metadata": {
+                    "type": "string",
+                    "description": "JSON array of { key_id, value }"
+                  },
+                  "ocr": {
+                    "type": "string",
+                    "enum": [
+                      "true",
+                      "false"
+                    ],
+                    "description": "When `true`, OCR is queued for each uploaded file"
+                  },
+                  "extractMetadataKeyIds": {
+                    "type": "string",
+                    "description": "JSON array of metadata key UUIDs; only used when `ocr` is `true`"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Files created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "files"
+                  ],
+                  "properties": {
+                    "files": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "name",
+                          "storage_path",
+                          "mime_type",
+                          "size_bytes",
+                          "ocr_status"
+                        ],
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "storage_path": {
+                            "type": "string"
+                          },
+                          "mime_type": {
+                            "type": "string"
+                          },
+                          "size_bytes": {
+                            "type": "integer"
+                          },
+                          "ocr_status": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "metadata_ai_extract_status": {
+                            "type": "string",
+                            "nullable": true,
+                            "description": "When set at upload with extract keys, tracks pending/processing/completed/failed"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input or no files"
+          },
+          "403": {
+            "description": "No write access"
+          }
+        }
+      }
+    },
+    "/companies/{companyId}/documents/extract-metadata-from-ocr": {
+      "post": {
+        "summary": "Extract metadata from OCR using Gemini",
+        "description": "Requires OCR completed (`ocr_status` completed and `ocr_markdown` present). Fills selected metadata keys using the same model as Split PDF.\n",
+        "tags": [
+          "Companies"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "companyId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "fileId",
+                  "metadataKeyIds"
+                ],
+                "properties": {
+                  "fileId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "metadataKeyIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "uuid"
+                    }
+                  },
+                  "currentDate": {
+                    "type": "string",
+                    "description": "Optional yyyy-mm-dd reference date for the model"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Applied non-empty values (keyed by metadata key id)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "values"
+                  ],
+                  "properties": {
+                    "values": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "OCR not ready, invalid keys, or validation failed"
+          },
+          "404": {
+            "description": "File not found"
+          }
+        }
+      }
+    },
     "/companies/{companyId}/files/{fileId}/metadata": {
       "put": {
         "summary": "Update file metadata",
@@ -2912,7 +3217,31 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "type": "object",
+                "required": [
+                  "entries"
+                ],
+                "properties": {
+                  "entries": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "key",
+                        "value"
+                      ],
+                      "properties": {
+                        "key": {
+                          "type": "string",
+                          "description": "Metadata key name"
+                        },
+                        "value": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
               }
             }
           }
@@ -2920,6 +3249,9 @@
         "responses": {
           "200": {
             "description": "Metadata updated"
+          },
+          "400": {
+            "description": "Invalid value for a predefined-list key"
           }
         }
       }
@@ -3724,7 +4056,25 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "value_kind": {
+                    "type": "string",
+                    "enum": [
+                      "free_text",
+                      "predefined_list"
+                    ]
+                  },
+                  "allowed_values": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
               }
             }
           }
@@ -3771,7 +4121,25 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "value_kind": {
+                    "type": "string",
+                    "enum": [
+                      "free_text",
+                      "predefined_list"
+                    ]
+                  },
+                  "allowed_values": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
               }
             }
           }
@@ -3779,6 +4147,9 @@
         "responses": {
           "200": {
             "description": "Metadata key updated"
+          },
+          "409": {
+            "description": "Conflict (e.g. removing an allowed value still in use on a file)"
           }
         }
       },
@@ -3822,7 +4193,7 @@
     "/companies/{companyId}/workflows": {
       "get": {
         "summary": "List workflows",
-        "description": "List workflows the user has permission to execute (public, or user/group permission). Optional filter by category.",
+        "description": "List workflows visible to the user based on workflow visibility scope and explicit visibility permissions. Optional filter by category.",
         "tags": [
           "Companies"
         ],
@@ -3884,7 +4255,34 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "visibility_scope": {
+                    "type": "string",
+                    "enum": [
+                      "all_company",
+                      "specific"
+                    ]
+                  },
+                  "start_permission_scope": {
+                    "type": "string",
+                    "enum": [
+                      "public",
+                      "specific"
+                    ]
+                  },
+                  "is_public": {
+                    "type": "boolean",
+                    "description": "Legacy compatibility flag. Mirrors start_permission_scope=public."
+                  }
+                }
               }
             }
           }
@@ -3899,7 +4297,7 @@
     "/companies/{companyId}/workflows/{workflowId}/start": {
       "post": {
         "summary": "Start workflow execution from UI",
-        "description": "Start a new execution for this workflow. Only is_active is checked (not api_enabled). JWT required.",
+        "description": "Start a new execution for this workflow. Requires workflow to be active and caller to satisfy the workflow start permission policy.",
         "tags": [
           "Companies"
         ],
@@ -4041,7 +4439,34 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "visibility_scope": {
+                    "type": "string",
+                    "enum": [
+                      "all_company",
+                      "specific"
+                    ]
+                  },
+                  "start_permission_scope": {
+                    "type": "string",
+                    "enum": [
+                      "public",
+                      "specific"
+                    ]
+                  },
+                  "is_public": {
+                    "type": "boolean",
+                    "description": "Legacy compatibility flag. Mirrors start_permission_scope=public."
+                  }
+                }
               }
             }
           }

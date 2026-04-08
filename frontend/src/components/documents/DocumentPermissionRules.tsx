@@ -9,10 +9,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { Trash2, Plus, Shield, UserPlus, Users, X } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { MetadataValueControl } from "@/components/documents/MetadataValueControl";
 
 interface MetadataKey {
   id: string;
   name: string;
+  value_kind: "free_text" | "predefined_list";
+  allowed_values?: unknown;
 }
 
 interface Condition {
@@ -303,15 +306,16 @@ export default function DocumentPermissionRules({ companyId }: Props) {
                         {metadataKeys.map((k) => <SelectItem key={k.id} value={k.id}>{k.name}</SelectItem>)}
                       </SelectContent>
                     </Select>
-                    <Input
+                    <MetadataValueControl
                       className="h-9 flex-1"
-                      placeholder="Value"
+                      metaKey={metadataKeys.find((k) => k.id === cond.key_id)}
                       value={cond.value}
-                      onChange={(e) => {
+                      onChange={(v) => {
                         const next = [...formConditions];
-                        next[i].value = e.target.value;
+                        next[i].value = v;
                         setFormConditions(next);
                       }}
+                      placeholder="Value"
                     />
                     <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => setFormConditions(formConditions.filter((_, j) => j !== i))}>
                       <X className="h-3 w-3" />

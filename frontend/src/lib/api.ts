@@ -86,6 +86,46 @@ export const api = {
     return handleResponse<T>(res);
   },
 
+  /** Multipart POST with upload progress (0–1) via XMLHttpRequest. */
+  postFormDataWithProgress<T>(
+    path: string,
+    formData: FormData,
+    options?: { apiKey?: string; skipAuth?: boolean; onUploadProgress?: (ratio: number) => void },
+  ): Promise<T> {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', `${BASE}${path}`);
+      if (!options?.skipAuth) {
+        const t = getToken();
+        if (t) xhr.setRequestHeader('Authorization', `Bearer ${t}`);
+      }
+      if (options?.apiKey) xhr.setRequestHeader('x-api-key', options.apiKey);
+      xhr.upload.onprogress = (ev) => {
+        if (ev.lengthComputable && ev.total > 0) {
+          options?.onUploadProgress?.(ev.loaded / ev.total);
+        }
+      };
+      xhr.onload = () => {
+        const text = xhr.responseText;
+        let data: T | ApiError;
+        try {
+          data = text ? (JSON.parse(text) as T) : ({} as T);
+        } catch {
+          reject(new Error(xhr.statusText || 'Invalid response'));
+          return;
+        }
+        if (xhr.status < 200 || xhr.status >= 300) {
+          const err = data as ApiError;
+          reject(new Error(err.details || err.error || xhr.statusText || 'Request failed'));
+          return;
+        }
+        resolve(data as T);
+      };
+      xhr.onerror = () => reject(new Error('Network error'));
+      xhr.send(formData);
+    });
+  },
+
   async put<T>(path: string, body?: unknown, options?: { apiKey?: string }): Promise<T> {
     const res = await fetch(`${BASE}${path}`, {
       method: 'PUT',

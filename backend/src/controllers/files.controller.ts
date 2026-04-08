@@ -1,6 +1,8 @@
 import { Response } from 'express';
+import { FilesMetadataValueKind, Prisma } from '@prisma/client';
 import { AuthRequest, resolveCompanyForRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
+import { validateMetadataValueForKey } from '../services/files-metadata-validation';
 import { canUserAccessFolder, getUserFolderPermissionLevel, getUserGroupIdsInCompany } from '../lib/folderAccess';
 import { canUserAccessFileByMetadata } from '../lib/documentAccess';
 import { getDocumentProxyUrl } from '../lib/documentUrl';
@@ -45,6 +47,9 @@ export const filesController = {
    * Multer middleware for file upload
    */
   uploadMiddleware: upload.single('file'),
+
+  /** Flat company documents upload: 1–25 files, field name `file` (repeatable). */
+  uploadFlatDocumentsMiddleware: upload.array('file', 25),
 
   /**
    * POST /api/workflows/executions/:executionId/files
@@ -612,17 +617,26 @@ export const filesController = {
 
       const allValues = (executionData.values || {}) as Record<string, any>;
 
+      const httpReply = (status: number, body: Record<string, unknown>) => {
+        const e = new Error('HTTP_REPLY') as Error & { httpStatus: number; httpBody: Record<string, unknown> };
+        e.httpStatus = status;
+        e.httpBody = body;
+        return e;
+      };
+
       // Pre-fetch metadata keys (shared for both paths)
       let keyMap = new Map<string, string>();
+      const keyById = new Map<string, { value_kind: FilesMetadataValueKind; allowed_values: Prisma.JsonValue }>();
       if (metadataConfig.length > 0) {
         const metadataKeys = await prisma.filesMetadataKey.findMany({
           where: { company_id: execution.company_id! },
-          select: { id: true, name: true },
+          select: { id: true, name: true, value_kind: true, allowed_values: true },
         });
         for (const key of metadataKeys) {
           if (key.name != null) {
             keyMap.set(key.name, key.id);
           }
+          keyById.set(key.id, { value_kind: key.value_kind, allowed_values: key.allowed_values });
         }
       }
 
@@ -685,6 +699,17 @@ export const filesController = {
 
           if (value !== null && value !== undefined) {
             metadataValues.push({ keyId, value: String(value) });
+          }
+        }
+
+        for (const m of metadataValues) {
+          const row = keyById.get(m.keyId);
+          if (!row) {
+            throw httpReply(400, { error: 'Invalid metadata key', details: 'Metadata key not found for workflow' });
+          }
+          const v = validateMetadataValueForKey(row, m.value);
+          if (!v.ok) {
+            throw httpReply(v.status, { error: v.error, details: v.details });
           }
         }
 
@@ -835,6 +860,10 @@ export const filesController = {
 
       return res.json({ success: true });
     } catch (error) {
+      const err = error as Error & { httpStatus?: number; httpBody?: Record<string, unknown> };
+      if (typeof err.httpStatus === 'number' && err.httpBody) {
+        return res.status(err.httpStatus).json(err.httpBody);
+      }
       console.error('Error processing file step:', error);
       return res.status(500).json({
         success: false,

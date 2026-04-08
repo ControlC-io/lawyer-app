@@ -62,6 +62,9 @@ export const ocrController = {
           ocr_provider: true,
           ocr_model: true,
           ocr_error: true,
+          ocr_pending_metadata_key_ids: true,
+          metadata_ai_extract_status: true,
+          metadata_ai_extract_error: true,
         },
       });
       if (!file) return res.status(404).json({ error: 'File not found' });
@@ -86,6 +89,9 @@ export const ocrController = {
         ocrProvider: file.ocr_provider,
         ocrModel: file.ocr_model,
         ocrError: file.ocr_error,
+        ocrPendingMetadataKeyIds: file.ocr_pending_metadata_key_ids,
+        metadataAiExtractStatus: file.metadata_ai_extract_status,
+        metadataAiExtractError: file.metadata_ai_extract_error,
       });
     } catch (error) {
       console.error('getOcr error:', error);

@@ -26,6 +26,7 @@ import { Folder } from "lucide-react";
 import { PermissionTargetPicker } from "./PermissionTargetPicker";
 import { InteractivePromptEditor } from "@/components/promptTemplate/InteractivePromptEditor";
 import type { PromptValues } from "@/lib/promptTemplate";
+import { MetadataValueControl, type FileMetadataKey } from "@/components/documents/MetadataValueControl";
 
 type KeyValuePair = { key: string; value: string; mode?: "static" | "bind" };
 
@@ -71,7 +72,7 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
   const [workflowStatuses, setWorkflowStatuses] = useState<Array<{ id: string; name: string; color: string; order: number }>>([]);
   const [agents, setAgents] = useState<Array<{ id: string; name: string; category_id: string | null }>>([]);
   const [agentCategories, setAgentCategories] = useState<Array<{ id: string; name: string; icon: string | null }>>([]);
-  const [metadataKeys, setMetadataKeys] = useState<Array<{ id: string; name: string }>>([]);
+  const [metadataKeys, setMetadataKeys] = useState<FileMetadataKey[]>([]);
   const [agentPromptTemplate, setAgentPromptTemplate] = useState<string>("");
   const [agentPromptTemplateLoading, setAgentPromptTemplateLoading] = useState(false);
   /** Cache of prompt templates per agent id, for form actions */
@@ -131,7 +132,7 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
         if (groupsList) setGroups(groupsList);
 
         if (step.step_type === "file") {
-          const metadataList = await api.get<Array<{ id: string; name: string }>>(
+          const metadataList = await api.get<FileMetadataKey[]>(
             `/api/companies/${companyId}/files-metadata-keys`
           );
           if (metadataList) setMetadataKeys(metadataList);
@@ -2197,7 +2198,9 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
                             <SelectValue placeholder="Select key" />
                           </SelectTrigger>
                           <SelectContent>
-                            {metadataKeys.map((k) => (
+                            {metadataKeys
+                              .filter((k): k is FileMetadataKey & { name: string } => !!k.name?.trim())
+                              .map((k) => (
                               <SelectItem key={k.id} value={k.name}>
                                 {k.name}
                               </SelectItem>
@@ -2283,10 +2286,11 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
                             </div>
                             );
                           })() : (
-                            <Input
+                            <MetadataValueControl
                               placeholder="Static value"
+                              metaKey={metadataKeys.find((k) => k.name === item.key)}
                               value={item.value}
-                              onChange={(e) => handleUpdateKeyValue("data", index, "value", e.target.value)}
+                              onChange={(v) => handleUpdateKeyValue("data", index, "value", v)}
                               className="flex-1"
                             />
                           )}

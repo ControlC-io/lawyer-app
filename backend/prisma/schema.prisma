@@ -37,6 +37,14 @@ enum LogType {
   @@schema("public")
 }
 
+enum FilesMetadataValueKind {
+  free_text
+  predefined_list
+
+  @@map("files_metadata_value_kind")
+  @@schema("public")
+}
+
 enum DecisionNodeType {
   Human
   Agent
@@ -313,6 +321,11 @@ model File {
   ocr_provider     String?
   ocr_model        String?
 
+  /// UUIDs of metadata keys to fill via Gemini after OCR completes (set at upload).
+  ocr_pending_metadata_key_ids Json?
+  metadata_ai_extract_status   String?
+  metadata_ai_extract_error      String?   @db.Text
+
   folder          Folder?              @relation(fields: [folder_id], references: [id])
   uploader        Profile?             @relation(fields: [uploaded_by], references: [id])
   company         Company?             @relation(fields: [company_id], references: [id])
@@ -324,12 +337,14 @@ model File {
 }
 
 model FilesMetadataKey {
-  id              String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id              String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   name            String?
-  company_id      String?              @db.Uuid
-  created_at      DateTime             @default(now()) @db.Timestamptz(6)
-  updated_at      DateTime             @default(now()) @db.Timestamptz(6)
-  company         Company?             @relation(fields: [company_id], references: [id])
+  company_id      String?                 @db.Uuid
+  value_kind      FilesMetadataValueKind  @default(free_text)
+  allowed_values  Json                    @default("[]")
+  created_at      DateTime                @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime                @default(now()) @db.Timestamptz(6)
+  company         Company?                @relation(fields: [company_id], references: [id])
   metadata_values FilesMetadataValue[]
 
   @@map("files_metadata_keys")
@@ -553,6 +568,7 @@ model UserDocumentTreeConfig {
   user_id   String   @db.Uuid
   company_id String  @db.Uuid
   key_order Json     @default("[]")
+  hide_key_labels Boolean @default(false)
   created_at DateTime @default(now()) @db.Timestamptz(6)
   updated_at DateTime @default(now()) @updatedAt @db.Timestamptz(6)
   user      Profile  @relation(fields: [user_id], references: [id])

@@ -172,13 +172,15 @@ export function registerDocumentTools(server: McpServer) {
 
   server.tool(
     'manage_metadata_keys',
-    'Create, update, or delete file metadata keys. Set action to "create", "update", or "delete".',
+    'Create, update, or delete file metadata keys. Set action to "create", "update", or "delete". For predefined lists use value_kind "predefined_list" with allowed_values.',
     {
       api_key: apiKeySchema,
       action: z.enum(['create', 'update', 'delete']).describe('Action to perform'),
       company_id: z.string().describe('Company ID'),
       key_id: z.string().optional().describe('Metadata key ID (required for update/delete)'),
       name: z.string().optional().describe('Metadata key name'),
+      value_kind: z.enum(['free_text', 'predefined_list']).optional().describe('Key value type'),
+      allowed_values: z.array(z.string()).optional().describe('Allowed options when value_kind is predefined_list'),
     },
     async ({ api_key, action, company_id, key_id, ...body }) => {
       try {
@@ -205,20 +207,20 @@ export function registerDocumentTools(server: McpServer) {
 
   server.tool(
     'update_file_metadata',
-    'Update metadata values on a file',
+    'Replace metadata on a file. Uses metadata key names (not IDs).',
     {
       api_key: apiKeySchema,
       company_id: z.string().describe('Company ID'),
       file_id: z.string().describe('File ID'),
-      metadata: z.array(z.object({
-        metadata_id: z.string().describe('Metadata key ID'),
+      entries: z.array(z.object({
+        key: z.string().describe('Metadata key name'),
         value: z.string().describe('Metadata value'),
-      })).describe('Array of metadata key-value pairs to set'),
+      })).describe('Entries to set (replaces all metadata on the file)'),
     },
-    async ({ api_key, company_id, file_id, metadata }) => {
+    async ({ api_key, company_id, file_id, entries }) => {
       try {
         const api = createApiClient(api_key);
-        const res = await api.put(`/companies/${company_id}/files/${file_id}/metadata`, { metadata });
+        const res = await api.put(`/companies/${company_id}/files/${file_id}/metadata`, { entries });
         return jsonResult(res.data);
       } catch (err) {
         return errorResult(err);
