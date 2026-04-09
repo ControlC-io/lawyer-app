@@ -799,13 +799,46 @@ export const workflowController = {
         // Build execution_data_array and execution_data_mapped
         const topLevelFields = dataStructure.fields.filter((f) => !(f as any).parent_item_id);
 
+        // Build child field ID -> name maps for array transformation
+        const childFieldIdToName: Record<string, Record<string, string>> = {};
+        for (const field of dataStructure.fields) {
+          if (field.field_type === 'array' && !(field as any).parent_item_id) {
+            const childFields = dataStructure.fields.filter((f: any) => f.parent_item_id === field.id);
+            childFieldIdToName[field.id] = {};
+            childFields.forEach((childField: any) => {
+              if (childField.id && childField.name) {
+                childFieldIdToName[field.id][childField.id] = childField.name;
+              }
+            });
+          }
+        }
+
+        const transformArrayItem = (item: any, arrayFieldId: string): any => {
+          if (!item || typeof item !== 'object') return item;
+          const idToNameMap = childFieldIdToName[arrayFieldId] || {};
+          const transformed: any = {};
+          if (item._id) transformed._id = item._id;
+          for (const [key, value] of Object.entries(item)) {
+            if (key === '_id') continue;
+            const fieldName = idToNameMap[key];
+            transformed[fieldName || key] = value;
+          }
+          return transformed;
+        };
+
         (execution as any).execution_data_array = topLevelFields.map((field: any) => {
           const fieldValue = (executionDataValues as any)[field.id];
+          let processedValue = fieldValue?.value ?? null;
+
+          if (field.field_type === 'array' && Array.isArray(processedValue)) {
+            processedValue = processedValue.map((item: any) => transformArrayItem(item, field.id));
+          }
+
           const result: any = {
             field_id: field.id,
             field_name: field.name,
             field_type: field.field_type,
-            value: fieldValue?.value ?? null,
+            value: processedValue,
           };
 
           if (field.field_type === 'file' && fileSignedUrls[field.id]) {
@@ -818,7 +851,13 @@ export const workflowController = {
         (execution as any).execution_data_mapped = {};
         topLevelFields.forEach((field: any) => {
           const fieldValue = (executionDataValues as any)[field.id];
-          (execution as any).execution_data_mapped[field.name] = fieldValue?.value ?? null;
+          let value = fieldValue?.value ?? null;
+
+          if (field.field_type === 'array' && Array.isArray(value)) {
+            value = value.map((item: any) => transformArrayItem(item, field.id));
+          }
+
+          (execution as any).execution_data_mapped[field.name] = value;
 
           if (field.field_type === 'file' && fileSignedUrls[field.id]) {
             (execution as any).execution_data_mapped[`${field.name}_signed_url`] = fileSignedUrls[field.id];
