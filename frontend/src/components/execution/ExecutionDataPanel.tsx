@@ -1453,7 +1453,7 @@ export const ExecutionDataPanel = ({
     {/* Action Buttons Section */}
     <div className="sticky top-0 z-50 -mx-2 sm:-mx-3 md:-mx-4 lg:-mx-6 px-2 sm:px-3 md:px-4 lg:px-6 pt-2 sm:pt-3 md:pt-4 lg:pt-3 pb-2 sm:pb-3 md:pb-4 lg:pb-3 bg-background/95 backdrop-blur-md">
       <Card className="w-full min-w-0 max-w-full overflow-x-hidden bg-primary/5 border-primary/20 shadow-md">
-        <div className="p-2 sm:p-3 flex items-center justify-between gap-3">
+        <div className="p-2 sm:p-3 flex items-center justify-between gap-3 flex-wrap">
           <div className="flex-1 min-w-0 flex items-center gap-2">
             <h3 className="text-base sm:text-lg font-semibold truncate">
               {runningStep.workflow_steps?.name}
@@ -1502,7 +1502,7 @@ export const ExecutionDataPanel = ({
             )}
           </div>
 
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
             {aiValidationEnabled && !isApiProcessedAction && (
               <Button
                 size="sm"
@@ -2173,17 +2173,17 @@ export const ExecutionDataPanel = ({
           {runningStep && (isApiProcessedAction || runningStep.workflow_steps?.step_type === "decision" && (runningStep.workflow_steps?.decision_node_type === "Agent" || runningStep.workflow_steps?.decision_node_type === "Agent + Human")) ? "Read-only view - This step is being processed automatically" : "Review all data associated with this execution"}
         </CardDescription>
       </CardHeader>
-      <CardContent>
+      <CardContent className="pt-0 px-2 sm:px-3 md:px-4 lg:px-6 pb-2 sm:pb-3 md:pb-4 lg:pb-6 min-w-0 max-w-full overflow-x-auto">
         {/* Re-implement readonly view using FieldRenderer with disabled=true or custom view */}
         {/* For brevity, I'll reuse FieldRenderer with disabled={true} which is what the original code mostly did essentially */}
-        <div className="space-y-6">
+        <div className="space-y-6 w-full min-w-0 max-w-full">
           {executionDataStructures.map((eds: any) => {
             const ds: any = eds.data_structures;
             const fields: any[] = (ds?.fields ?? []) as any[];
             const values = eds.values as Record<string, any> || {};
             const cfg = runningStep?.workflow_steps?.config as any;
             const formFields = (cfg?.form_fields || {}) as Record<string, any>;
-            return <div key={eds.id} className="space-y-4">
+            return <div key={eds.id} className="space-y-4 min-w-0 max-w-full">
               <h3 className="text-lg font-semibold">{ds?.name}</h3>
               {fields.filter((f: any) => !f.parent_item_id).filter((field: any) => {
                 const fieldValue = values[field.id]?.value;
