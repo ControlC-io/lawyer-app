@@ -1449,7 +1449,7 @@ export const ExecutionDataPanel = ({
       </CardContent>
     </Card>;
   };
-  return <div className="space-y-6 pb-20 w-full min-w-0 max-w-full overflow-x-hidden">
+  return <div className="space-y-6 pb-20 w-full min-w-0 max-w-full">
     {/* Action Buttons Section */}
     <div className="sticky top-0 z-50 -mx-2 sm:-mx-3 md:-mx-4 lg:-mx-6 px-2 sm:px-3 md:px-4 lg:px-6 pt-2 sm:pt-3 md:pt-4 lg:pt-3 pb-2 sm:pb-3 md:pb-4 lg:pb-3 bg-background/95 backdrop-blur-md">
       <Card className="w-full min-w-0 max-w-full overflow-x-hidden bg-primary/5 border-primary/20 shadow-md">
