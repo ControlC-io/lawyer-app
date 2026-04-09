@@ -234,8 +234,8 @@ export const HistoricalStepView = ({
               : t("executionHistoricalStep.unknownDate")}
           </CardDescription>
         </CardHeader>
-        <CardContent className="px-2 sm:px-3 md:px-4 lg:px-6 pb-2 sm:pb-3 md:pb-4 lg:pb-6 min-w-0 max-w-full overflow-x-hidden">
-          <div className="space-y-6">
+        <CardContent className="px-2 sm:px-3 md:px-4 lg:px-6 pb-2 sm:pb-3 md:pb-4 lg:pb-6 min-w-0 max-w-full">
+          <div className="space-y-6 min-w-0 overflow-hidden">
             {isDecisionStep && (decisionChoice || decisionComment) && (
               <div className="p-4 bg-muted/50 rounded-lg border border-border space-y-3">
                 <h3 className="text-sm font-semibold">{t("executionHistoricalStep.decisionInformation")}</h3>
@@ -266,7 +266,7 @@ export const HistoricalStepView = ({
               const rootFields = fields.filter((f: any) => !f.parent_item_id);
 
               return (
-                <div key={eds.id} className="space-y-4">
+                <div key={eds.id} className="space-y-4 min-w-0 overflow-hidden">
                   <div>
                     <h3 className="text-lg font-semibold">{ds?.name || "Data Structure"}</h3>
                     {ds?.description && (
@@ -274,7 +274,7 @@ export const HistoricalStepView = ({
                     )}
                   </div>
 
-                  <div className="space-y-4">
+                  <div className="space-y-4 min-w-0 overflow-hidden">
                     {rootFields.map((field: any) => {
                       const fieldType = field.field_type || field.type;
                       const rawValue = stepData[field.id];
