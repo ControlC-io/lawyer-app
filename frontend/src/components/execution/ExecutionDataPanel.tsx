@@ -2158,17 +2158,17 @@ export const ExecutionDataPanel = ({
           {runningStep && (isApiProcessedAction || runningStep.workflow_steps?.step_type === "decision" && (runningStep.workflow_steps?.decision_node_type === "Agent" || runningStep.workflow_steps?.decision_node_type === "Agent_Human")) ? "Read-only view - This step is being processed automatically" : "Review all data associated with this execution"}
         </CardDescription>
       </CardHeader>
-      <CardContent className="pt-0 px-2 sm:px-3 md:px-4 lg:px-6 pb-2 sm:pb-3 md:pb-4 lg:pb-6 min-w-0 max-w-full overflow-x-auto">
+      <CardContent className="pt-0 px-2 sm:px-3 md:px-4 lg:px-6 pb-2 sm:pb-3 md:pb-4 lg:pb-6 min-w-0 max-w-full">
         {/* Re-implement readonly view using FieldRenderer with disabled=true or custom view */}
         {/* For brevity, I'll reuse FieldRenderer with disabled={true} which is what the original code mostly did essentially */}
-        <div className="space-y-6 w-full min-w-0 max-w-full">
+        <div className="space-y-6 w-full min-w-0 overflow-hidden">
           {executionDataStructures.map((eds: any) => {
             const ds: any = eds.data_structures;
             const fields: any[] = (ds?.fields ?? []) as any[];
             const values = eds.values as Record<string, any> || {};
             const cfg = runningStep?.workflow_steps?.config as any;
             const formFields = (cfg?.form_fields || {}) as Record<string, any>;
-            return <div key={eds.id} className="space-y-4 min-w-0 max-w-full">
+            return <div key={eds.id} className="space-y-4 min-w-0 overflow-hidden">
               <h3 className="text-lg font-semibold">{ds?.name}</h3>
               {fields.filter((f: any) => !f.parent_item_id).filter((field: any) => {
                 const fieldValue = values[field.id]?.value;
