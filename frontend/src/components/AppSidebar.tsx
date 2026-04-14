@@ -71,7 +71,6 @@ export function AppSidebar() {
   const { signOut, profile, loading, userCompanies, isSuperAdmin, isCompanyAdmin, hasPermission } = useAuth();
   const location = useLocation();
   const [startWorkflowDialogOpen, setStartWorkflowDialogOpen] = useState(false);
-  const [feedbackDialogOpen, setFeedbackDialogOpen] = useState(false);
   const { theme, setTheme } = useTheme();
   const isDark = theme === "dark";
   const { t, language } = useLanguage();
@@ -101,15 +100,6 @@ export function AppSidebar() {
               alt="Picobello" 
               className="h-8"
             />
-            {open && (
-              <Badge 
-                className="text-xs font-bold cursor-pointer bg-brand-gradient text-white hover:opacity-90 transition-all shadow-md hover:shadow-lg px-3 py-1"
-                onClick={() => setFeedbackDialogOpen(true)}
-                title="Click to send feedback"
-              >
-                BETA
-              </Badge>
-            )}
           </div>
         </SidebarHeader>
         <SidebarContent>
@@ -217,11 +207,7 @@ export function AppSidebar() {
         <StartWorkflowDialog open={startWorkflowDialogOpen} onOpenChange={setStartWorkflowDialogOpen} />
         <SidebarFooter className="border-t p-2">
           <div className="flex items-center justify-center gap-1">
-            <FeedbackDialog
-              isCollapsed
-              open={feedbackDialogOpen}
-              onOpenChange={setFeedbackDialogOpen}
-            />
+            <FeedbackDialog isCollapsed />
             <Popover>
               <PopoverTrigger asChild>
                 <Button variant="ghost" size="icon" className="h-9 w-9" title={t("sidebar.settings")}>

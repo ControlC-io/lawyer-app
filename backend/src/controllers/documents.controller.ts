@@ -324,7 +324,7 @@ export const documentsController = {
           f.size_bytes::text as size_bytes_str,
           f.created_at,
           f.company_id,
-          f.ocr_status AS "ocrStatus",
+          f.ocr_status AS "ocr_status",
           ts_rank(to_tsvector('simple', coalesce(f.ocr_markdown, '')), to_tsquery('simple', ${prefixQuery})) AS rank,
           ts_headline(
             'simple',
@@ -340,13 +340,36 @@ export const documentsController = {
         LIMIT 100
       ` as any[];
 
-      const results = searchResults.map((r: any) => ({
-        ...r,
-        size_bytes: r.size_bytes_str ? Number(r.size_bytes_str) : 0,
-        ocrSnippet: r.ocrSnippet,
-        ocrSearchRank: r.rank ? Number(r.rank) : 0,
-        accessLevel: writeFileIds.has(r.id) ? 'write' : 'read',
-      }));
+      const searchResultIds = searchResults.map((r: any) => r.id as string);
+      const filesWithMetadata = searchResultIds.length > 0
+        ? await prisma.file.findMany({
+            where: { id: { in: searchResultIds }, ...companyFilter(companyId) },
+            include: {
+              metadata_values: {
+                include: { metadata: { select: { id: true, name: true } } },
+              },
+            },
+          })
+        : [];
+      const filesById = new Map(filesWithMetadata.map((f) => [f.id, f]));
+
+      const results = searchResults.map((r: any) => {
+        const fileDetails = filesById.get(r.id);
+        return {
+          ...r,
+          ...(fileDetails ?? {}),
+          size_bytes: fileDetails
+            ? (fileDetails.size_bytes != null ? Number(fileDetails.size_bytes) : 0)
+            : (r.size_bytes_str ? Number(r.size_bytes_str) : 0),
+          metadata_values: fileDetails?.metadata_values ?? [],
+          ocr_status: fileDetails?.ocr_status ?? r.ocr_status ?? r.ocrStatus ?? null,
+          ocr_error: fileDetails?.ocr_error ?? null,
+          ocr_processed_at: fileDetails?.ocr_processed_at ?? null,
+          ocrSnippet: r.ocrSnippet,
+          ocrSearchRank: r.rank ? Number(r.rank) : 0,
+          accessLevel: writeFileIds.has(r.id) ? 'write' : 'read',
+        };
+      });
 
       return res.json({ files: results, hasWriteAccess: hasAnyWriteRule, searchActive: true });
     }
