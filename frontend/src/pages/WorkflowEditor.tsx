@@ -9,16 +9,6 @@ import { PropertiesPanel } from "@/components/workflow/PropertiesPanel";
 import { CanvasCommentData } from "@/components/workflow/CanvasComment";
 import { DecisionOutputsDialog } from "@/components/workflow/DecisionOutputsDialog";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -48,6 +38,79 @@ export interface WorkflowStep {
   action_type?: "manual" | "automatic" | "agent";
   // Must match Prisma enum values (see backend/prisma/schema.prisma)
   decision_node_type?: "Human" | "Agent" | "Agent_Human";
+}
+
+type ReminderMode = "none" | "repeat" | "schedule";
+
+function supportsStepNotifications(
+  stepType: WorkflowStep["step_type"],
+  actionType?: WorkflowStep["action_type"],
+  decisionNodeType?: WorkflowStep["decision_node_type"]
+): boolean {
+  if (stepType === "edit_form") return true;
+  if (stepType === "action") return (actionType || "manual") === "manual";
+  if (stepType === "decision") return ["Human", "Agent_Human"].includes(decisionNodeType || "Human");
+  return false;
+}
+
+function normalizeStepNotificationSettings(step: WorkflowStep): WorkflowStep {
+  const shouldApplyDefaults = supportsStepNotifications(step.step_type, step.action_type, step.decision_node_type);
+  if (!shouldApplyDefaults) return step;
+
+  const notificationsSource = (step.config?.notifications && typeof step.config.notifications === "object")
+    ? step.config.notifications
+    : {};
+  const assignmentSource = (notificationsSource.assignment && typeof notificationsSource.assignment === "object")
+    ? notificationsSource.assignment
+    : {};
+  const reminderSource = (notificationsSource.reminder && typeof notificationsSource.reminder === "object")
+    ? notificationsSource.reminder
+    : {};
+  const reminderMode: ReminderMode =
+    reminderSource.mode === "repeat"
+      ? "repeat"
+      : reminderSource.mode === "schedule" || reminderSource.mode === "once"
+        ? "schedule"
+        : "none";
+  const delayMinutes = Number.isFinite(Number(reminderSource.delay_minutes))
+    ? Math.max(1, Math.round(Number(reminderSource.delay_minutes)))
+    : 24 * 60;
+  const repeatEveryMinutes = Number.isFinite(Number(reminderSource.repeat_every_minutes))
+    ? Math.max(1, Math.round(Number(reminderSource.repeat_every_minutes)))
+    : 24 * 60;
+  const maxCount = Number.isFinite(Number(reminderSource.max_count))
+    ? Math.max(1, Math.round(Number(reminderSource.max_count)))
+    : undefined;
+  const scheduleMinutesRaw = Array.isArray(reminderSource.schedule_minutes)
+    ? reminderSource.schedule_minutes
+    : reminderSource.delay_minutes
+      ? [reminderSource.delay_minutes]
+      : [];
+  const scheduleMinutes = scheduleMinutesRaw
+    .map((entry: unknown) => Number(entry))
+    .filter((entry: number) => Number.isFinite(entry) && entry > 0)
+    .map((entry: number) => Math.round(entry))
+    .sort((a: number, b: number) => a - b)
+    .filter((entry: number, index: number, list: number[]) => index === 0 || entry !== list[index - 1]);
+
+  return {
+    ...step,
+    config: {
+      ...step.config,
+      notifications: {
+        assignment: {
+          enabled: assignmentSource.enabled !== false,
+        },
+        reminder: {
+          mode: reminderMode,
+          delay_minutes: delayMinutes,
+          repeat_every_minutes: repeatEveryMinutes,
+          max_count: maxCount,
+          schedule_minutes: scheduleMinutes.length > 0 ? scheduleMinutes : [24 * 60],
+        },
+      },
+    },
+  };
 }
 
 export interface WorkflowConnection {
@@ -242,9 +305,6 @@ export default function WorkflowEditor() {
   const [draggedStatusId, setDraggedStatusId] = useState<string | null>(null);
   const [dragOverStatusIndex, setDragOverStatusIndex] = useState<number | null>(null);
 
-  const [unsavedChangesDialogOpen, setUnsavedChangesDialogOpen] = useState(false);
-  const [workflowLoadMode, setWorkflowLoadMode] = useState<"saved" | "fresh" | null>(null);
-
   // Persist to sessionStorage only after user makes changes.
   const hasEditorUserEditsRef = useRef(false);
   const hasSettingsUserEditsRef = useRef(false);
@@ -299,11 +359,6 @@ export default function WorkflowEditor() {
     } catch (error) {
       console.error("Error clearing settings state:", error);
     }
-  };
-
-  // Check if there are unsaved changes
-  const hasUnsavedChanges = () => {
-    return settingsStorageKey && sessionStorage.getItem(settingsStorageKey) !== null;
   };
 
   // Load editor state from sessionStorage
@@ -419,7 +474,7 @@ export default function WorkflowEditor() {
   useEffect(() => {
     if (!id || !companyId) return;
 
-    // Reset editor state while we decide whether to restore or discard local changes.
+    // Reset editor state and then load workflow, restoring any local unsaved state automatically.
     setLoading(true);
     setWorkflow(null);
     setSteps([]);
@@ -427,8 +482,6 @@ export default function WorkflowEditor() {
     setComments([]);
     setSelectedStep(null);
     setSearchQuery("");
-    setWorkflowLoadMode(null);
-    setUnsavedChangesDialogOpen(false);
     hasEditorUserEditsRef.current = false;
     hasSettingsUserEditsRef.current = false;
 
@@ -436,23 +489,8 @@ export default function WorkflowEditor() {
     fetchUsers();
     fetchGroups();
     fetchApiConfigurations();
-
-    const hasSettingsChanges = settingsStorageKey && sessionStorage.getItem(settingsStorageKey) !== null;
-    const hasEditorChanges = editorStorageKey && sessionStorage.getItem(editorStorageKey) !== null;
-
-    if (hasSettingsChanges || hasEditorChanges) {
-      setUnsavedChangesDialogOpen(true);
-      return;
-    }
-
-    setWorkflowLoadMode("fresh");
+    fetchWorkflow({ useSavedState: true });
   }, [id, companyId, settingsStorageKey, editorStorageKey]);
-
-  useEffect(() => {
-    if (!id || !companyId) return;
-    if (!workflowLoadMode) return;
-    fetchWorkflow({ useSavedState: workflowLoadMode === "saved" });
-  }, [id, companyId, workflowLoadMode]);
 
   const fetchWorkflow = async (options?: { useSavedState?: boolean }) => {
     if (!companyId) return;
@@ -488,7 +526,7 @@ export default function WorkflowEditor() {
             assigned_to_group_id: step.assigned_to_group_id ?? stepConfig?.assigned_to_group_id,
           },
         };
-      }) as WorkflowStep[];
+      }).map((step) => normalizeStepNotificationSettings(step as WorkflowStep)) as WorkflowStep[];
       persistedStepIdsRef.current = new Set(loadedSteps.map((s) => s.id));
 
       const connectionsData = workflowData?.connections || [];
@@ -527,7 +565,7 @@ export default function WorkflowEditor() {
             position_x: isNaN(savedPosX) ? 0 : savedPosX,
             position_y: isNaN(savedPosY) ? 0 : savedPosY,
           };
-        });
+        }).map((step) => normalizeStepNotificationSettings(step));
         // Add any new steps from DB that weren't in saved state
         loadedSteps.forEach(loadedStep => {
           if (!restoredSteps.find(rs => rs.id === loadedStep.id)) {
@@ -730,7 +768,7 @@ export default function WorkflowEditor() {
           })()
         : baseConfig;
 
-    const newStep: WorkflowStep = {
+    const newStep: WorkflowStep = normalizeStepNotificationSettings({
       id: crypto.randomUUID(),
       step_type: stepType,
       name:
@@ -742,7 +780,7 @@ export default function WorkflowEditor() {
       position_x: 100 + Math.random() * 200,
       position_y: 100 + Math.random() * 200,
       config: stepConfig,
-    };
+    });
 
     hasEditorUserEditsRef.current = true;
     setSteps([...steps, newStep]);
@@ -758,21 +796,22 @@ export default function WorkflowEditor() {
   };
 
   const handleUpdateStep = (updatedStep: WorkflowStep) => {
+    const normalizedStep = normalizeStepNotificationSettings(updatedStep);
     hasEditorUserEditsRef.current = true;
     // Update step in collection
-    setSteps(steps.map((step) => (step.id === updatedStep.id ? updatedStep : step)));
+    setSteps(steps.map((step) => (step.id === normalizedStep.id ? normalizedStep : step)));
 
     // Update selectedStep if this is the selected step
-    if (selectedStep?.id === updatedStep.id) {
-      const prev = steps.find((s) => s.id === updatedStep.id);
+    if (selectedStep?.id === normalizedStep.id) {
+      const prev = steps.find((s) => s.id === normalizedStep.id);
       if (!prev) return;
 
-      const positionChanged = prev.position_x !== updatedStep.position_x || prev.position_y !== updatedStep.position_y;
-      const otherChanged = prev.name !== updatedStep.name || prev.step_type !== updatedStep.step_type || prev.action_type !== updatedStep.action_type || prev.decision_node_type !== updatedStep.decision_node_type || JSON.stringify(prev.config) !== JSON.stringify(updatedStep.config);
+      const positionChanged = prev.position_x !== normalizedStep.position_x || prev.position_y !== normalizedStep.position_y;
+      const otherChanged = prev.name !== normalizedStep.name || prev.step_type !== normalizedStep.step_type || prev.action_type !== normalizedStep.action_type || prev.decision_node_type !== normalizedStep.decision_node_type || JSON.stringify(prev.config) !== JSON.stringify(normalizedStep.config);
 
       // Always update selectedStep when action_type or decision_node_type changes, or when other properties change (but not just position)
-      if (prev.action_type !== updatedStep.action_type || prev.decision_node_type !== updatedStep.decision_node_type || (otherChanged && !positionChanged)) {
-        setSelectedStep(updatedStep);
+      if (prev.action_type !== normalizedStep.action_type || prev.decision_node_type !== normalizedStep.decision_node_type || (otherChanged && !positionChanged)) {
+        setSelectedStep(normalizedStep);
       }
     }
   };
@@ -825,7 +864,7 @@ export default function WorkflowEditor() {
     const stepToDuplicate = steps.find((step) => step.id === stepId);
     if (!stepToDuplicate) return;
 
-    const duplicatedStep: WorkflowStep = {
+    const duplicatedStep: WorkflowStep = normalizeStepNotificationSettings({
       id: crypto.randomUUID(),
       step_type: stepToDuplicate.step_type,
       name: `${stepToDuplicate.name} (copy)`,
@@ -834,7 +873,7 @@ export default function WorkflowEditor() {
       config: { ...stepToDuplicate.config },
       action_type: stepToDuplicate.action_type,
       decision_node_type: stepToDuplicate.decision_node_type,
-    };
+    });
     hasEditorUserEditsRef.current = true;
     setSteps([...steps, duplicatedStep]);
     setSelectedStep(duplicatedStep);
@@ -1584,42 +1623,9 @@ export default function WorkflowEditor() {
 
   if (loading) {
     return (
-      <>
-        <div className="flex items-center justify-center h-full">
-          <div className="text-muted-foreground">{t("workflowEditor.loadingWorkflow")}</div>
-        </div>
-
-        <AlertDialog open={unsavedChangesDialogOpen} onOpenChange={setUnsavedChangesDialogOpen}>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>{t("workflowEditor.unsavedChangesDialogTitle")}</AlertDialogTitle>
-              <AlertDialogDescription>{t("workflowEditor.unsavedChangesDialogDescription")}</AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel
-                onClick={() => {
-                  setUnsavedChangesDialogOpen(false);
-                  setWorkflowLoadMode("saved");
-                }}
-              >
-                {t("workflowEditor.unsavedChangesDialogKeep")}
-              </AlertDialogCancel>
-              <AlertDialogAction
-                onClick={() => {
-                  clearSettingsState();
-                  clearEditorState();
-                  hasEditorUserEditsRef.current = false;
-                  hasSettingsUserEditsRef.current = false;
-                  setUnsavedChangesDialogOpen(false);
-                  setWorkflowLoadMode("fresh");
-                }}
-              >
-                {t("workflowEditor.unsavedChangesDialogDiscard")}
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
-      </>
+      <div className="flex items-center justify-center h-full">
+        <div className="text-muted-foreground">{t("workflowEditor.loadingWorkflow")}</div>
+      </div>
     );
   }
 

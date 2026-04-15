@@ -1,4 +1,5 @@
-import { Bell, Check, ExternalLink } from "lucide-react";
+import { Bell, Check, ExternalLink, Trash2 } from "lucide-react";
+import type { MouseEvent } from "react";
 import { useNotifications, Notification } from "@/hooks/useNotifications";
 import {
   DropdownMenu,
@@ -18,7 +19,7 @@ import { useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
 
 export function NotificationBell() {
-  const { notifications, unreadCount, markAsRead, markAllAsRead } = useNotifications();
+  const { notifications, unreadCount, markAsRead, markAllAsRead, deleteNotification } = useNotifications();
   const { language, t } = useLanguage();
   const navigate = useNavigate();
   const dateLocale = language === "fr" ? fr : enUS;
@@ -29,6 +30,12 @@ export function NotificationBell() {
     if (notification.type === 'assignment' && notification.data?.execution_id) {
       navigate(`/executions/${notification.data.execution_id}`);
     }
+  };
+
+  const handleDeleteClick = (event: MouseEvent<HTMLButtonElement>, notificationId: string) => {
+    event.preventDefault();
+    event.stopPropagation();
+    deleteNotification(notificationId);
   };
 
   return (
@@ -80,14 +87,24 @@ export function NotificationBell() {
                 )}
                 onClick={() => handleNotificationClick(notification)}
               >
-                <div className="flex justify-between w-full mb-1">
+                <div className="flex justify-between items-start w-full mb-1 gap-2">
                   <span className="text-sm font-semibold">{notification.title}</span>
-                  <span className="text-[10px] text-muted-foreground whitespace-nowrap ml-2">
-                    {formatDistanceToNow(new Date(notification.created_at), {
-                      addSuffix: true,
-                      locale: dateLocale,
-                    })}
-                  </span>
+                  <div className="flex items-center gap-1">
+                    <span className="text-[10px] text-muted-foreground whitespace-nowrap">
+                      {formatDistanceToNow(new Date(notification.created_at), {
+                        addSuffix: true,
+                        locale: dateLocale,
+                      })}
+                    </span>
+                    <button
+                      type="button"
+                      aria-label={t("notifications.delete") || "Delete notification"}
+                      className="text-muted-foreground hover:text-foreground rounded p-1"
+                      onClick={(event) => handleDeleteClick(event, notification.id)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
                 </div>
                 <p className="text-xs text-muted-foreground line-clamp-2 mb-2">
                   {notification.message}

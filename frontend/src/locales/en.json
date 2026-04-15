@@ -432,6 +432,9 @@
     "saveWorkflow": "Save Workflow",
     "settings": "Settings",
     "searchSteps": "Search steps...",
+    "stepExplanationLabel": "Step explanation",
+    "stepExplanationPlaceholder": "Add optional instructions for the assignee...",
+    "stepExplanationDescription": "This rich-text note is shown to assignees during execution.",
     "match": "match",
     "matches": "matches",
     "loadingWorkflow": "Loading workflow...",
@@ -551,6 +554,24 @@
     "failedToDeleteStep": "Failed to delete step",
     "cannotAddFileTypes": "Cannot add file, multiple files, signature, or array types as sub-items of an array"
   },
+  "workflowEditorStepNotifications": {
+    "assignmentEnabled": "Send notification when this step starts",
+    "assignmentEnabledHint": "Uses the existing assignment recipients and channels for this step.",
+    "reminderMode": "Reminder",
+    "reminderModeNone": "No reminder",
+    "reminderModeRepeat": "Send repeated reminders until completed",
+    "reminderModeSchedule": "Send one-time reminders at specific times",
+    "firstReminderAfter": "First reminder after",
+    "repeatEvery": "Then repeat every",
+    "maxReminders": "Maximum reminders (optional)",
+    "maxRemindersPlaceholder": "No limit",
+    "maxRemindersHint": "Count includes the first delayed reminder.",
+    "multipleReminders": "One-time reminder schedule",
+    "multipleRemindersHint": "Add one or more reminders (for example: 1 day, then 3 days).",
+    "addReminder": "Add reminder",
+    "hours": "Hours",
+    "days": "Days"
+  },
   "workflowExecutions": {
     "title": "Workflow Executions",
     "subtitle": "Manage and track your workflow tasks",
@@ -626,7 +647,8 @@
     "title": "Notifications",
     "markAllRead": "Mark all as read",
     "empty": "No notifications",
-    "viewExecution": "View execution"
+    "viewExecution": "View execution",
+    "delete": "Delete notification"
   },
   "executionList": {
     "noExecutions": "No executions found",
@@ -681,7 +703,8 @@
     "failedToProcessFileStep": "Failed to process file step",
     "page": "Page",
     "previousPage": "Previous",
-    "nextPage": "Next"
+    "nextPage": "Next",
+    "stepExplanation": "Step explanation"
   },
   "executionFilters": {
     "allWorkflows": "All Workflows",
@@ -702,6 +725,7 @@
     "previousSteps": "Previous steps",
     "currentStep": "Current step",
     "notStarted": "Not started",
+    "closedBy": "Closed by:",
     "actionRequired": "Action required",
     "noStepsFound": "No completed or running steps found",
     "decisionLabel": "Decision:",
@@ -717,9 +741,14 @@
     "noDataStructure": "No data structure available",
     "historicalDataTitle": "Historical Data",
     "snapshotDescription": "This data snapshot was captured when the step completed on",
+    "openedAt": "Opened:",
+    "closedAt": "Closed:",
+    "closedBy": "Closed by:",
     "unknownDate": "unknown date",
+    "unknownCloser": "unknown user",
     "decisionInformation": "Decision Information",
-    "decisionChoice": "Decision Choice:"
+    "decisionChoice": "Decision Choice:",
+    "stepExplanation": "Step explanation"
   },
   "executionForm": {
     "pickDate": "Pick a date",
@@ -831,7 +860,34 @@
     "teamMembersDesc": "Users in your organization",
     "noName": "No name",
     "admin": "Admin",
-    "user": "User"
+    "user": "User",
+    "tabs": {
+      "api": "API",
+      "metadata": "Metadata",
+      "portal": "Portal",
+      "members": "Members",
+      "branding": "Branding"
+    },
+    "branding": {
+      "title": "Branding",
+      "description": "Customize your organization's appearance.",
+      "placeholder": "Branding settings will be added in a future step.",
+      "logoLabel": "Internal app logo",
+      "uploadLogo": "Upload logo",
+      "removeLogo": "Remove logo",
+      "uploadLogoDesc": "Used in the top-left sidebar for authenticated users. PNG, JPEG, SVG or WebP, max 2 MB.",
+      "useLogoUrl": "Or use a logo URL",
+      "logoPreview": "Logo preview",
+      "logoPreviewEmpty": "No logo",
+      "primaryColor": "Primary color",
+      "previewTitle": "Preview",
+      "previewSubtitle": "Applied to the internal app interface",
+      "previewButton": "Primary action",
+      "saveSettings": "Save branding",
+      "saved": "Branding saved",
+      "saveError": "Failed to save branding settings",
+      "logoUploadError": "Logo must be PNG, JPEG, SVG or WebP and 2 MB or less."
+    }
   },
   "apiConfigurations": {
     "title": "API Configurations",
@@ -1137,7 +1193,29 @@
     "moveCutLater": "Move cut one page later",
     "pdfPreview": "Original PDF",
     "previewLoading": "Loading preview…",
-    "previewError": "Could not load the PDF preview."
+    "previewError": "Could not load the PDF preview.",
+    "presetsLabel": "Shared presets",
+    "presetsHint": "Save and reuse company-level split configuration presets.",
+    "presetsLoading": "Loading presets…",
+    "presetsEmpty": "No presets saved yet.",
+    "presetSelectPlaceholder": "Select a preset",
+    "presetApply": "Apply preset",
+    "presetNamePlaceholder": "Preset name",
+    "presetSaveNew": "Save as new",
+    "presetUpdate": "Update preset",
+    "presetDelete": "Delete preset",
+    "presetClearSelection": "Clear selection",
+    "presetApplied": "Preset applied",
+    "presetAppliedWithMissingKeysTitle": "Preset applied with missing metadata",
+    "presetAppliedWithMissingKeysDescription": "{{count}} metadata key(s) from this preset no longer exist and were skipped.",
+    "presetNameRequired": "Enter a preset name.",
+    "presetConfigRequired": "Select metadata keys and add instructions before saving a preset.",
+    "presetCreated": "Preset created",
+    "presetUpdated": "Preset updated",
+    "presetDeleted": "Preset deleted",
+    "presetSaveFailed": "Could not save preset.",
+    "presetDeleteFailed": "Could not delete preset.",
+    "presetDeleteConfirm": "Delete this preset for the whole company?"
   },
   "metadataDocuments": {
     "treeHideKeyLabels": "Values only in the tree",
@@ -1180,6 +1258,17 @@
     "viewerModeSplit": "Split",
     "runOcr": "Run OCR",
     "rerunOcr": "Re-run OCR",
+    "ragieLinkedBadge": "Ragie",
+    "ragieUploadAction": "Upload to Ragie",
+    "ragieRemoveAction": "Remove from Ragie",
+    "ragieUploadSuccessTitle": "Uploaded to Ragie",
+    "ragieUploadSuccessDescription": "“{{name}}” is now available in Ragie.",
+    "ragieUploadFailedTitle": "Ragie upload failed",
+    "ragieUploadFailedDescription": "Could not upload this document to Ragie.",
+    "ragieRemoveSuccessTitle": "Removed from Ragie",
+    "ragieRemoveSuccessDescription": "“{{name}}” was removed from Ragie.",
+    "ragieRemoveFailedTitle": "Ragie removal failed",
+    "ragieRemoveFailedDescription": "Could not remove this document from Ragie.",
     "extractMetadata": "Extract metadata",
     "extractMetadataDialogTitle": "Extract metadata",
     "extractMetadataDialogDescription": "Choose the metadata keys to extract from OCR for “{{name}}”.",

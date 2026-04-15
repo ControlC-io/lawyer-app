@@ -10,7 +10,7 @@ jest.mock('../lib/prisma', () => ({
     workflowExecutionStep: { findUnique: jest.fn() },
     profileGroupMember: { findMany: jest.fn() },
     profile: { findMany: jest.fn() },
-    notification: { createMany: jest.fn() },
+    notification: { createMany: jest.fn(), deleteMany: jest.fn() },
   },
 }));
 
@@ -178,6 +178,40 @@ describe('Notifications Endpoints', () => {
       expect(response.status).toBe(200);
       expect(response.body.message).toContain('email notifications disabled');
       expect(emailService.sendAssignmentNotification).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('DELETE /api/notifications/:id', () => {
+    it('should return 401 when Authorization header is missing', async () => {
+      const response = await request(app)
+        .delete('/api/notifications/notif-1');
+
+      expect(response.status).toBe(401);
+      expect(prisma.notification.deleteMany).not.toHaveBeenCalled();
+    });
+
+    it('should return 404 when notification is not found', async () => {
+      (prisma.notification.deleteMany as jest.Mock).mockResolvedValue({ count: 0 });
+
+      const response = await request(app)
+        .delete('/api/notifications/notif-missing')
+        .set('Authorization', `Bearer ${mockToken}`);
+
+      expect(response.status).toBe(404);
+      expect(response.body.error).toBe('Notification not found');
+    });
+
+    it('should delete notification and return 204', async () => {
+      (prisma.notification.deleteMany as jest.Mock).mockResolvedValue({ count: 1 });
+
+      const response = await request(app)
+        .delete('/api/notifications/notif-123')
+        .set('Authorization', `Bearer ${mockToken}`);
+
+      expect(response.status).toBe(204);
+      expect(prisma.notification.deleteMany).toHaveBeenCalledWith({
+        where: { id: 'notif-123', user_id: mockUser.id },
+      });
     });
   });
 });

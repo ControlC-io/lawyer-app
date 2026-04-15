@@ -17,7 +17,7 @@ import { SearchResults } from "@/components/workflow/SearchResults";
 import { CategoryBreadcrumb } from "@/components/workflow/CategoryBreadcrumb";
 import { CategoryCard } from "@/components/workflow/CategoryCard";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Search, Workflow as WorkflowIcon } from "lucide-react";
+import { Folder, Search, Workflow as WorkflowIcon } from "lucide-react";
 import { renderIcon } from "@/lib/iconUtils";
 
 interface StartWorkflowDialogProps {
@@ -134,8 +134,8 @@ export function StartWorkflowDialog({ open, onOpenChange }: StartWorkflowDialogP
   });
 
   // Get icon component from name
-  const getIcon = (iconName: string | null) => {
-    return renderIcon(iconName, "h-6 w-6");
+  const getIcon = (iconName: string | null, className: string = "h-6 w-6") => {
+    return renderIcon(iconName, className);
   };
 
   // Filter workflows and categories based on search query
@@ -161,6 +161,33 @@ export function StartWorkflowDialog({ open, onOpenChange }: StartWorkflowDialogP
     const childCount = childCategories.reduce((acc, cat) => acc + getCategoryWorkflowCount(cat.id), 0);
     return directCount + childCount;
   };
+
+  const getCategoryPath = (categoryId: string): string => {
+    const path: string[] = [];
+    let current = categories.find((c) => c.id === categoryId);
+
+    while (current) {
+      path.unshift(current.name);
+      current = current.parent_category_id
+        ? categories.find((c) => c.id === current!.parent_category_id)
+        : undefined;
+    }
+
+    return path.join(" > ");
+  };
+
+  const workflowsByCategory = workflows.reduce((acc, workflow) => {
+    const key = workflow.category_id || "uncategorized";
+    if (!acc[key]) {
+      acc[key] = [];
+    }
+    acc[key].push(workflow);
+    return acc;
+  }, {} as Record<string, Workflow[]>);
+
+  const categorizedOverview = categories
+    .filter((category) => (workflowsByCategory[category.id] || []).length > 0)
+    .sort((a, b) => getCategoryPath(a.id).localeCompare(getCategoryPath(b.id)));
 
   const handleWorkflowClick = (workflowId: string) => {
     startExecutionMutation.mutate(workflowId);
@@ -223,8 +250,99 @@ export function StartWorkflowDialog({ open, onOpenChange }: StartWorkflowDialogP
                 />
               )}
 
+              {/* Global overview grouped by category */}
+              {currentCategoryId === null && (
+                <div className="space-y-4">
+                  {categorizedOverview.map((category) => {
+                    const categoryWorkflows = workflowsByCategory[category.id] || [];
+                    const CategoryIcon = getIcon(category.icon, "h-5 w-5");
+                    return (
+                      <div key={category.id} className="space-y-3">
+                        <div className="flex items-center gap-2">
+                          {CategoryIcon ? (
+                            <span className="flex-shrink-0 text-primary">{CategoryIcon}</span>
+                          ) : (
+                            <Folder className="h-5 w-5 flex-shrink-0 text-primary" />
+                          )}
+                          <h3 className="text-base md:text-lg font-semibold leading-tight">
+                            {getCategoryPath(category.id)}
+                          </h3>
+                          <span className="text-sm text-muted-foreground">
+                            ({categoryWorkflows.length})
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          {categoryWorkflows.map((workflow) => {
+                            const IconComponent = getIcon(workflow.icon);
+                            return (
+                              <Card
+                                key={workflow.id}
+                                className="hover:shadow-md transition-shadow cursor-pointer"
+                                onClick={() => handleWorkflowClick(workflow.id)}
+                              >
+                                <CardHeader className="p-4">
+                                  <CardTitle className="text-base flex items-center gap-3">
+                                    {IconComponent ? (
+                                      <span className="flex-shrink-0 text-primary">{IconComponent}</span>
+                                    ) : (
+                                      <WorkflowIcon className="h-6 w-6 flex-shrink-0 text-primary" />
+                                    )}
+                                    <span className="flex-1 min-w-0">{workflow.name}</span>
+                                  </CardTitle>
+                                  {workflow.description && (
+                                    <CardDescription className="mt-2">
+                                      {workflow.description}
+                                    </CardDescription>
+                                  )}
+                                </CardHeader>
+                              </Card>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  {(workflowsByCategory["uncategorized"] || []).length > 0 && (
+                    <div className="space-y-3">
+                      <h3 className="text-sm font-medium">
+                        Uncategorized ({workflowsByCategory["uncategorized"].length})
+                      </h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        {workflowsByCategory["uncategorized"].map((workflow) => {
+                          const IconComponent = getIcon(workflow.icon);
+                          return (
+                            <Card
+                              key={workflow.id}
+                              className="hover:shadow-md transition-shadow cursor-pointer"
+                              onClick={() => handleWorkflowClick(workflow.id)}
+                            >
+                              <CardHeader className="p-4">
+                                <CardTitle className="text-base flex items-center gap-3">
+                                  {IconComponent ? (
+                                    <span className="flex-shrink-0 text-primary">{IconComponent}</span>
+                                  ) : (
+                                    <WorkflowIcon className="h-6 w-6 flex-shrink-0 text-primary" />
+                                  )}
+                                  <span className="flex-1 min-w-0">{workflow.name}</span>
+                                </CardTitle>
+                                {workflow.description && (
+                                  <CardDescription className="mt-2">
+                                    {workflow.description}
+                                  </CardDescription>
+                                )}
+                              </CardHeader>
+                            </Card>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Subcategories */}
-              {subcategories.length > 0 && (
+              {currentCategoryId !== null && subcategories.length > 0 && (
                 <div>
                   <h3 className="text-sm font-medium mb-3">Categories</h3>
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -247,7 +365,7 @@ export function StartWorkflowDialog({ open, onOpenChange }: StartWorkflowDialogP
               )}
 
               {/* Workflows in current category */}
-              {filteredWorkflows.length > 0 && (
+              {currentCategoryId !== null && filteredWorkflows.length > 0 && (
                 <div>
                   <h3 className="text-sm font-medium mb-3">Workflows</h3>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -282,7 +400,10 @@ export function StartWorkflowDialog({ open, onOpenChange }: StartWorkflowDialogP
               )}
 
               {/* Empty State */}
-              {subcategories.length === 0 && filteredWorkflows.length === 0 && (
+              {((currentCategoryId !== null && subcategories.length === 0 && filteredWorkflows.length === 0) ||
+                (currentCategoryId === null &&
+                  categorizedOverview.length === 0 &&
+                  (workflowsByCategory["uncategorized"] || []).length === 0)) && (
                 <div className="text-center py-12 text-muted-foreground">
                   <WorkflowIcon className="h-12 w-12 mx-auto mb-4 opacity-50" />
                   <p className="text-lg font-medium">No workflows found</p>

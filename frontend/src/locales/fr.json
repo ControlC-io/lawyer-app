@@ -432,6 +432,9 @@
     "saveWorkflow": "Enregistrer le workflow",
     "settings": "Paramètres",
     "searchSteps": "Rechercher des étapes...",
+    "stepExplanationLabel": "Explication de l'étape",
+    "stepExplanationPlaceholder": "Ajoutez des consignes optionnelles pour l'assigné...",
+    "stepExplanationDescription": "Cette note enrichie est affichée aux assignés pendant l'exécution.",
     "match": "correspondance",
     "matches": "correspondances",
     "loadingWorkflow": "Chargement du workflow...",
@@ -551,6 +554,24 @@
     "failedToDeleteStep": "Échec de la suppression de l'étape",
     "cannotAddFileTypes": "Impossible d'ajouter des types de fichier, fichiers multiples, signature ou tableau comme sous-éléments d'un tableau"
   },
+  "workflowEditorStepNotifications": {
+    "assignmentEnabled": "Envoyer une notification au démarrage de cette étape",
+    "assignmentEnabledHint": "Utilise les destinataires et canaux d'assignation déjà configurés pour cette étape.",
+    "reminderMode": "Rappel",
+    "reminderModeNone": "Aucun rappel",
+    "reminderModeRepeat": "Envoyer des rappels répétés jusqu'à la fin",
+    "reminderModeSchedule": "Envoyer des rappels simples à des moments précis",
+    "firstReminderAfter": "Premier rappel après",
+    "repeatEvery": "Puis répéter toutes les",
+    "maxReminders": "Nombre maximum de rappels (optionnel)",
+    "maxRemindersPlaceholder": "Aucune limite",
+    "maxRemindersHint": "Le compte inclut le premier rappel différé.",
+    "multipleReminders": "Planning de rappels simples",
+    "multipleRemindersHint": "Ajoutez un ou plusieurs rappels (par exemple : 1 jour, puis 3 jours).",
+    "addReminder": "Ajouter un rappel",
+    "hours": "Heures",
+    "days": "Jours"
+  },
   "workflowExecutions": {
     "title": "Exécutions de workflows",
     "subtitle": "Gérez et suivez vos tâches de workflow",
@@ -626,7 +647,8 @@
     "title": "Notifications",
     "markAllRead": "Tout marquer comme lu",
     "empty": "Aucune notification",
-    "viewExecution": "Voir l'exécution"
+    "viewExecution": "Voir l'exécution",
+    "delete": "Supprimer la notification"
   },
   "executionList": {
     "noExecutions": "Aucune exécution trouvée",
@@ -681,7 +703,8 @@
     "failedToProcessFileStep": "Échec du traitement de l'étape fichier",
     "page": "Page",
     "previousPage": "Précédent",
-    "nextPage": "Suivant"
+    "nextPage": "Suivant",
+    "stepExplanation": "Explication de l'étape"
   },
   "executionFilters": {
     "allWorkflows": "Tous les workflows",
@@ -702,6 +725,7 @@
     "previousSteps": "Étapes précédentes",
     "currentStep": "Étape actuelle",
     "notStarted": "Non démarré",
+    "closedBy": "Fermée par :",
     "actionRequired": "Action requise",
     "noStepsFound": "Aucune étape terminée ou en cours",
     "decisionLabel": "Décision :",
@@ -717,9 +741,14 @@
     "noDataStructure": "Aucune structure de données disponible",
     "historicalDataTitle": "Données historiques",
     "snapshotDescription": "Cette capture a été enregistrée lorsque l'étape s'est terminée le",
+    "openedAt": "Ouverte :",
+    "closedAt": "Fermée :",
+    "closedBy": "Fermée par :",
     "unknownDate": "date inconnue",
+    "unknownCloser": "utilisateur inconnu",
     "decisionInformation": "Information de décision",
-    "decisionChoice": "Choix de décision :"
+    "decisionChoice": "Choix de décision :",
+    "stepExplanation": "Explication de l'étape"
   },
   "executionForm": {
     "pickDate": "Choisir une date",
@@ -831,7 +860,34 @@
     "teamMembersDesc": "Utilisateurs de votre organisation",
     "noName": "Sans nom",
     "admin": "Admin",
-    "user": "Utilisateur"
+    "user": "Utilisateur",
+    "tabs": {
+      "api": "API",
+      "metadata": "Métadonnées",
+      "portal": "Portail",
+      "members": "Membres",
+      "branding": "Identité visuelle"
+    },
+    "branding": {
+      "title": "Identité visuelle",
+      "description": "Personnalisez l'apparence de votre organisation.",
+      "placeholder": "Les paramètres d'identité visuelle seront ajoutés dans une prochaine étape.",
+      "logoLabel": "Logo de l'interface interne",
+      "uploadLogo": "Téléverser un logo",
+      "removeLogo": "Retirer le logo",
+      "uploadLogoDesc": "Utilisé en haut à gauche de la barre latérale pour les utilisateurs connectés. PNG, JPEG, SVG ou WebP, max 2 Mo.",
+      "useLogoUrl": "Ou utiliser une URL de logo",
+      "logoPreview": "Aperçu du logo",
+      "logoPreviewEmpty": "Pas de logo",
+      "primaryColor": "Couleur principale",
+      "previewTitle": "Aperçu",
+      "previewSubtitle": "Appliqué à l'interface interne",
+      "previewButton": "Action principale",
+      "saveSettings": "Enregistrer l'identité visuelle",
+      "saved": "Identité visuelle enregistrée",
+      "saveError": "Échec de l'enregistrement des paramètres d'identité visuelle",
+      "logoUploadError": "Le logo doit être au format PNG, JPEG, SVG ou WebP et ne pas dépasser 2 Mo."
+    }
   },
   "apiConfigurations": {
     "title": "Configurations API",
@@ -1137,7 +1193,29 @@
     "moveCutLater": "Déplacer la coupure d’une page vers la fin",
     "pdfPreview": "PDF d’origine",
     "previewLoading": "Chargement de l’aperçu…",
-    "previewError": "Impossible de charger l’aperçu du PDF."
+    "previewError": "Impossible de charger l’aperçu du PDF.",
+    "presetsLabel": "Préréglages partagés",
+    "presetsHint": "Enregistrez et réutilisez des configurations de découpage partagées à l’échelle de l’entreprise.",
+    "presetsLoading": "Chargement des préréglages…",
+    "presetsEmpty": "Aucun préréglage enregistré pour le moment.",
+    "presetSelectPlaceholder": "Sélectionner un préréglage",
+    "presetApply": "Appliquer le préréglage",
+    "presetNamePlaceholder": "Nom du préréglage",
+    "presetSaveNew": "Enregistrer comme nouveau",
+    "presetUpdate": "Mettre à jour le préréglage",
+    "presetDelete": "Supprimer le préréglage",
+    "presetClearSelection": "Effacer la sélection",
+    "presetApplied": "Préréglage appliqué",
+    "presetAppliedWithMissingKeysTitle": "Préréglage appliqué avec des métadonnées manquantes",
+    "presetAppliedWithMissingKeysDescription": "{{count}} clé(s) de métadonnées de ce préréglage n’existent plus et ont été ignorées.",
+    "presetNameRequired": "Saisissez un nom de préréglage.",
+    "presetConfigRequired": "Sélectionnez des clés de métadonnées et ajoutez des instructions avant d’enregistrer un préréglage.",
+    "presetCreated": "Préréglage créé",
+    "presetUpdated": "Préréglage mis à jour",
+    "presetDeleted": "Préréglage supprimé",
+    "presetSaveFailed": "Impossible d’enregistrer le préréglage.",
+    "presetDeleteFailed": "Impossible de supprimer le préréglage.",
+    "presetDeleteConfirm": "Supprimer ce préréglage pour toute l’entreprise ?"
   },
   "metadataDocuments": {
     "treeHideKeyLabels": "Valeurs seules dans l’arborescence",
@@ -1180,6 +1258,17 @@
     "viewerModeSplit": "Côte à côte",
     "runOcr": "Lancer l’OCR",
     "rerunOcr": "Relancer l’OCR",
+    "ragieLinkedBadge": "Ragie",
+    "ragieUploadAction": "Envoyer vers Ragie",
+    "ragieRemoveAction": "Retirer de Ragie",
+    "ragieUploadSuccessTitle": "Envoyé vers Ragie",
+    "ragieUploadSuccessDescription": "« {{name}} » est maintenant disponible dans Ragie.",
+    "ragieUploadFailedTitle": "Échec de l’envoi vers Ragie",
+    "ragieUploadFailedDescription": "Impossible d’envoyer ce document vers Ragie.",
+    "ragieRemoveSuccessTitle": "Retiré de Ragie",
+    "ragieRemoveSuccessDescription": "« {{name}} » a été retiré de Ragie.",
+    "ragieRemoveFailedTitle": "Échec du retrait de Ragie",
+    "ragieRemoveFailedDescription": "Impossible de retirer ce document de Ragie.",
     "extractMetadata": "Extraire les métadonnées",
     "extractMetadataDialogTitle": "Extraire les métadonnées",
     "extractMetadataDialogDescription": "Choisissez les métadonnées à extraire depuis l’OCR pour « {{name}} ».",

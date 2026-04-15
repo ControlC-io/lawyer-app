@@ -28,6 +28,17 @@ router.patch(
 );
 
 /**
+ * DELETE /api/notifications/:id
+ * Delete one notification for current user
+ * Auth: JWT
+ */
+router.delete(
+  '/:id',
+  authMiddleware,
+  asyncHandler(notificationsController.remove)
+);
+
+/**
  * POST /api/notifications/mark-all-read
  * Mark all as read for current user
  * Auth: JWT

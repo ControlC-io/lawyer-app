@@ -32,6 +32,8 @@ interface Execution {
   created_by: string | null;
   workflows: Workflow | null;
   current_step_name?: string;
+  current_step_names?: string[];
+  current_step_types?: Array<string | null>;
   name?: string | null;
 }
 
@@ -261,9 +263,14 @@ const WorkflowExecutions = () => {
     // Enrich with all current running step names and assignees
     filtered = filtered.map(e => {
       const steps = runningSteps?.filter(s => s.execution_id === e.id) || [];
-      const stepNames = steps
-        .map(s => s.workflow_steps?.name)
-        .filter((name): name is string => !!name);
+      const stepEntries = steps
+        .map((s) => ({
+          name: s.workflow_steps?.name,
+          type: s.workflow_steps?.step_type ?? null,
+        }))
+        .filter((entry): entry is { name: string; type: string | null } => !!entry.name);
+      const stepNames = stepEntries.map((entry) => entry.name);
+      const stepTypes = stepEntries.map((entry) => entry.type);
 
       // Collect assignees from all running steps
       const assignees: Array<{ type: 'user' | 'group'; name: string }> = [];
@@ -287,6 +294,7 @@ const WorkflowExecutions = () => {
         ...e,
         current_step_name: stepNames.length > 0 ? stepNames[0] : (e as any).current_step_name, // Keep for backward compatibility
         current_step_names: stepNames.length > 0 ? stepNames : (e as any).current_step_names,
+        current_step_types: stepTypes.length > 0 ? stepTypes : (e as any).current_step_types,
         // Keep server-provided assignees when step feed is intentionally scoped to current user
         assignees: assignees.length > 0 ? assignees : (e as any).assignees
       };

@@ -1,7 +1,6 @@
 import { Response } from 'express';
 import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
-import { emailService } from '../services/email.service';
 import { notificationService } from '../services/notification.service';
 
 export const notificationsController = {
@@ -90,6 +89,36 @@ export const notificationsController = {
   },
 
   /**
+   * DELETE /api/notifications/:id
+   * Delete one notification for current user (JWT)
+   */
+  async remove(req: AuthRequest, res: Response) {
+    try {
+      const userId = req.user?.id;
+      const { id } = req.params;
+      if (!userId) {
+        return res.status(401).json({ error: 'Unauthorized', details: 'Authentication required' });
+      }
+      if (!id) {
+        return res.status(400).json({ error: 'Missing notification ID' });
+      }
+
+      const result = await prisma.notification.deleteMany({
+        where: { id, user_id: userId },
+      });
+      if (result.count === 0) {
+        return res.status(404).json({ error: 'Notification not found', details: 'Notification not found or access denied' });
+      }
+      return res.status(204).send();
+    } catch (error) {
+      console.error('delete notification error:', error);
+      return res.status(500).json({
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  },
+
+  /**
    * POST /api/notifications/assignment
    * Send assignment notification (was: send-assignment-notification)
    */
@@ -103,125 +132,19 @@ export const notificationsController = {
         });
       }
 
-      // Fetch step and execution details
-      const stepInstance = await prisma.workflowExecutionStep.findUnique({
-        where: { id: execution_step_id },
-        include: {
-          execution: {
-            include: {
-              workflow: {
-                select: {
-                  id: true,
-                  name: true,
-                },
-              },
-            },
-          },
-          step: {
-            select: {
-              id: true,
-              name: true,
-            },
-          },
-        },
-      });
-
-      if (!stepInstance) {
+      const result = await notificationService.dispatchAssignmentForExecutionStep(execution_step_id);
+      if (!result.found) {
         return res.status(404).json({
           error: 'Step instance not found',
         });
       }
 
-      const workflowName = stepInstance.execution.workflow.name || 'Workflow';
-      const stepName = stepInstance.step.name || 'Next Step';
-      const executionId = stepInstance.execution_id;
-      const companyId = stepInstance.company_id!;
-
-      // Identify recipients
-      let recipientIds: string[] = [];
-
-      if (stepInstance.assigned_to_user_id) {
-        recipientIds.push(stepInstance.assigned_to_user_id);
-      }
-
-      if (stepInstance.assigned_to_group_id) {
-        const groupMembers = await prisma.profileGroupMember.findMany({
-          where: { group_id: stepInstance.assigned_to_group_id },
-          select: { profile_id: true },
-        });
-        recipientIds.push(...groupMembers.map((gm) => gm.profile_id!));
-      }
-
-      // Remove duplicates
-      recipientIds = [...new Set(recipientIds)];
-
-      if (recipientIds.length === 0) {
-        return res.json({
-          success: true,
-          message: 'No recipients assigned',
-        });
-      }
-
-      // Fetch recipient profiles
-      const profiles = await prisma.profile.findMany({
-        where: { id: { in: recipientIds } },
-        select: {
-          id: true,
-          email: true,
-          full_name: true,
-          notifications_enabled: true,
-        },
-      });
-
-      const eligibleRecipients = profiles.filter(
-        (p) => p.notifications_enabled !== false
-      );
-
-      // Create internal notifications for all recipients
-      const internalNotifications = recipientIds.map((recipientId) => ({
-        user_id: recipientId,
-        company_id: companyId,
-        title: 'New Task Assigned',
-        message: `A new step "${stepName}" has been assigned to you in the workflow "${workflowName}".`,
-        type: 'assignment',
-        data: {
-          execution_id: executionId,
-          step_id: stepInstance.step.id,
-          execution_step_id,
-        },
-      }));
-
-      if (internalNotifications.length > 0) {
-        await prisma.notification.createMany({
-          data: internalNotifications as any,
-        });
-      }
-
-      if (eligibleRecipients.length === 0) {
-        return res.json({
-          success: true,
-          message: 'Internal notifications created, but all recipients have email notifications disabled',
-        });
-      }
-
-      // Send emails to eligible recipients
-      for (const recipient of eligibleRecipients) {
-        try {
-          await emailService.sendAssignmentNotification(
-            recipient.email,
-            workflowName,
-            stepName,
-            executionId
-          );
-        } catch (error) {
-          console.error(`Error sending email to ${recipient.email}:`, error);
-          // Continue with other recipients
-        }
-      }
-
       return res.json({
         success: true,
-        recipients_emailed: eligibleRecipients.length,
+        message: result.message,
+        recipients_total: result.recipients_total,
+        recipients_notified: result.recipients_notified,
+        recipients_emailed: result.recipients_emailed,
       });
     } catch (error) {
       console.error('Notification error:', error);

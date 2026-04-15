@@ -13,6 +13,7 @@ import {
   extractAndApplyMetadataFromOcr,
   type ExtractMetadataFromOcrHttpError,
 } from '../services/metadata-from-ocr-extraction.service';
+import { ragieService, RagieServiceError } from '../services/ragie.service';
 
 async function ensureCompanyAccess(req: AuthRequest, companyId: string) {
   if (req.company && !req.user) {
@@ -93,6 +94,16 @@ async function assertFlatDocumentWriteAccess(
     }
   }
   return true;
+}
+
+function normalizeSplitPresetMetadataKeyIds(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return [...new Set(raw.map((id) => String(id ?? '').trim()).filter(Boolean))];
+}
+
+function splitPresetMetadataKeyIdsFromJson(raw: Prisma.JsonValue): string[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((id): id is string => typeof id === 'string').map((id) => id.trim()).filter(Boolean);
 }
 
 export const documentsController = {
@@ -748,6 +759,131 @@ export const documentsController = {
     return res.status(201).json({ files: created });
   },
 
+  async uploadFileToRagie(req: AuthRequest, res: Response) {
+    const { companyId, fileId } = req.params;
+    const access = await ensureCompanyAccess(req, companyId);
+    if (access.error) return res.status(access.error.status).json(access.error.body);
+
+    const file = await prisma.file.findFirst({
+      where: { id: fileId, company_id: companyId },
+      include: {
+        metadata_values: {
+          include: { metadata: { select: { name: true } } },
+        },
+      },
+    });
+    if (!file) return res.status(404).json({ error: 'File not found' });
+
+    const userId = req.user?.id ?? '';
+    const isCompanyAdmin = access.userCompany?.role === 'company_admin' || !!req.user?.super_admin;
+    if (!isCompanyAdmin) {
+      if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+      const userGroupIds = await getUserGroupIdsInCompany(userId, companyId);
+      const accessLevel = await canUserAccessFileByMetadata({ userId, companyId, fileId, isCompanyAdmin, userGroupIds });
+      if (accessLevel !== 'write') {
+        return res.status(403).json({ error: 'Forbidden', details: 'No write access to this file' });
+      }
+    }
+
+    if (file.ragie_document_id) {
+      return res.status(409).json({ error: 'File is already uploaded to Ragie' });
+    }
+
+    try {
+      const uploaded = await ragieService.uploadFileDocument({
+        companyId,
+        file: {
+          id: file.id,
+          name: file.name,
+          mime_type: file.mime_type,
+          created_at: file.created_at,
+          storage_path: file.storage_path,
+          metadata_values: file.metadata_values,
+        },
+      });
+
+      await prisma.file.update({
+        where: { id: file.id },
+        data: {
+          ragie_document_id: uploaded.documentId,
+          ragie_partition: uploaded.partition,
+          ragie_uploaded_at: new Date(),
+          ragie_status: uploaded.status,
+          ragie_metadata: uploaded.metadata as Prisma.InputJsonValue,
+        },
+      });
+
+      return res.status(200).json({
+        documentId: uploaded.documentId,
+        partition: uploaded.partition,
+        status: uploaded.status,
+      });
+    } catch (error) {
+      if (error instanceof RagieServiceError) {
+        return res.status(error.statusCode).json({ error: error.message });
+      }
+      console.error('uploadFileToRagie:', error);
+      return res.status(500).json({ error: 'Failed to upload document to Ragie' });
+    }
+  },
+
+  async removeFileFromRagie(req: AuthRequest, res: Response) {
+    const { companyId, fileId } = req.params;
+    const access = await ensureCompanyAccess(req, companyId);
+    if (access.error) return res.status(access.error.status).json(access.error.body);
+
+    const file = await prisma.file.findFirst({
+      where: { id: fileId, company_id: companyId },
+      select: {
+        id: true,
+        ragie_document_id: true,
+        ragie_partition: true,
+      },
+    });
+    if (!file) return res.status(404).json({ error: 'File not found' });
+
+    const userId = req.user?.id ?? '';
+    const isCompanyAdmin = access.userCompany?.role === 'company_admin' || !!req.user?.super_admin;
+    if (!isCompanyAdmin) {
+      if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+      const userGroupIds = await getUserGroupIdsInCompany(userId, companyId);
+      const accessLevel = await canUserAccessFileByMetadata({ userId, companyId, fileId, isCompanyAdmin, userGroupIds });
+      if (accessLevel !== 'write') {
+        return res.status(403).json({ error: 'Forbidden', details: 'No write access to this file' });
+      }
+    }
+
+    if (!file.ragie_document_id) {
+      return res.status(400).json({ error: 'File is not linked to Ragie' });
+    }
+
+    try {
+      await ragieService.deleteFileDocument({
+        documentId: file.ragie_document_id,
+        partition: file.ragie_partition,
+      });
+
+      await prisma.file.update({
+        where: { id: file.id },
+        data: {
+          ragie_document_id: null,
+          ragie_partition: null,
+          ragie_uploaded_at: null,
+          ragie_status: null,
+          ragie_metadata: Prisma.JsonNull,
+        },
+      });
+
+      return res.status(204).send();
+    } catch (error) {
+      if (error instanceof RagieServiceError) {
+        return res.status(error.statusCode).json({ error: error.message });
+      }
+      console.error('removeFileFromRagie:', error);
+      return res.status(500).json({ error: 'Failed to remove document from Ragie' });
+    }
+  },
+
   // ─── Bulk Metadata Assignment ───
 
   async bulkUpdateMetadata(req: AuthRequest, res: Response) {
@@ -880,6 +1016,149 @@ export const documentsController = {
     }
 
     return res.json({ updated: validFileIds.length });
+  },
+
+  async listSplitPdfPresets(req: AuthRequest, res: Response) {
+    const { companyId } = req.params;
+    const access = await ensureCompanyAccess(req, companyId);
+    if (access.error) return res.status(access.error.status).json(access.error.body);
+
+    const presets = await prisma.documentSplitPreset.findMany({
+      where: { company_id: companyId },
+      orderBy: [{ created_at: 'desc' }],
+    });
+
+    return res.json({
+      presets: presets.map((preset) => ({
+        id: preset.id,
+        name: preset.name,
+        namingInstructions: preset.naming_instructions,
+        metadataKeyIds: splitPresetMetadataKeyIdsFromJson(preset.metadata_key_ids),
+        createdAt: preset.created_at,
+        updatedAt: preset.updated_at,
+      })),
+    });
+  },
+
+  async createSplitPdfPreset(req: AuthRequest, res: Response) {
+    const { companyId } = req.params;
+    const { name, namingInstructions, metadataKeyIds } = req.body || {};
+    const access = await ensureCompanyAccess(req, companyId);
+    if (access.error) return res.status(access.error.status).json(access.error.body);
+
+    const trimmedName = typeof name === 'string' ? name.trim() : '';
+    const trimmedInstructions = typeof namingInstructions === 'string' ? namingInstructions.trim() : '';
+    const uniqueMetadataKeyIds = normalizeSplitPresetMetadataKeyIds(metadataKeyIds);
+
+    if (!trimmedName) return res.status(400).json({ error: 'name is required' });
+    if (!trimmedInstructions) return res.status(400).json({ error: 'namingInstructions is required' });
+    if (uniqueMetadataKeyIds.length === 0) {
+      return res.status(400).json({ error: 'metadataKeyIds must be a non-empty array' });
+    }
+
+    const keyRows = await prisma.filesMetadataKey.findMany({
+      where: { company_id: companyId, id: { in: uniqueMetadataKeyIds } },
+      select: { id: true },
+    });
+    if (keyRows.length !== uniqueMetadataKeyIds.length) {
+      return res.status(400).json({ error: 'One or more metadataKeyIds are invalid for this company' });
+    }
+
+    const created = await prisma.documentSplitPreset.create({
+      data: {
+        company_id: companyId,
+        name: trimmedName,
+        naming_instructions: trimmedInstructions,
+        metadata_key_ids: uniqueMetadataKeyIds,
+      },
+    });
+
+    return res.status(201).json({
+      id: created.id,
+      name: created.name,
+      namingInstructions: created.naming_instructions,
+      metadataKeyIds: splitPresetMetadataKeyIdsFromJson(created.metadata_key_ids),
+      createdAt: created.created_at,
+      updatedAt: created.updated_at,
+    });
+  },
+
+  async updateSplitPdfPreset(req: AuthRequest, res: Response) {
+    const { companyId, presetId } = req.params;
+    const { name, namingInstructions, metadataKeyIds } = req.body || {};
+    const access = await ensureCompanyAccess(req, companyId);
+    if (access.error) return res.status(access.error.status).json(access.error.body);
+
+    const existing = await prisma.documentSplitPreset.findFirst({
+      where: { id: presetId, company_id: companyId },
+      select: { id: true },
+    });
+    if (!existing) return res.status(404).json({ error: 'Preset not found' });
+
+    const data: {
+      name?: string;
+      naming_instructions?: string;
+      metadata_key_ids?: string[];
+    } = {};
+
+    if (name !== undefined) {
+      const trimmedName = typeof name === 'string' ? name.trim() : '';
+      if (!trimmedName) return res.status(400).json({ error: 'name must be a non-empty string when provided' });
+      data.name = trimmedName;
+    }
+
+    if (namingInstructions !== undefined) {
+      const trimmedInstructions = typeof namingInstructions === 'string' ? namingInstructions.trim() : '';
+      if (!trimmedInstructions) {
+        return res.status(400).json({ error: 'namingInstructions must be a non-empty string when provided' });
+      }
+      data.naming_instructions = trimmedInstructions;
+    }
+
+    if (metadataKeyIds !== undefined) {
+      const uniqueMetadataKeyIds = normalizeSplitPresetMetadataKeyIds(metadataKeyIds);
+      if (uniqueMetadataKeyIds.length === 0) {
+        return res.status(400).json({ error: 'metadataKeyIds must be a non-empty array when provided' });
+      }
+      const keyRows = await prisma.filesMetadataKey.findMany({
+        where: { company_id: companyId, id: { in: uniqueMetadataKeyIds } },
+        select: { id: true },
+      });
+      if (keyRows.length !== uniqueMetadataKeyIds.length) {
+        return res.status(400).json({ error: 'One or more metadataKeyIds are invalid for this company' });
+      }
+      data.metadata_key_ids = uniqueMetadataKeyIds;
+    }
+
+    if (Object.keys(data).length === 0) {
+      return res.status(400).json({ error: 'No updates provided' });
+    }
+
+    const updated = await prisma.documentSplitPreset.update({
+      where: { id: presetId },
+      data,
+    });
+
+    return res.json({
+      id: updated.id,
+      name: updated.name,
+      namingInstructions: updated.naming_instructions,
+      metadataKeyIds: splitPresetMetadataKeyIdsFromJson(updated.metadata_key_ids),
+      createdAt: updated.created_at,
+      updatedAt: updated.updated_at,
+    });
+  },
+
+  async deleteSplitPdfPreset(req: AuthRequest, res: Response) {
+    const { companyId, presetId } = req.params;
+    const access = await ensureCompanyAccess(req, companyId);
+    if (access.error) return res.status(access.error.status).json(access.error.body);
+
+    const deleted = await prisma.documentSplitPreset.deleteMany({
+      where: { id: presetId, company_id: companyId },
+    });
+    if (deleted.count === 0) return res.status(404).json({ error: 'Preset not found' });
+    return res.status(204).send();
   },
 
   async splitPdfPropose(req: AuthRequest, res: Response) {

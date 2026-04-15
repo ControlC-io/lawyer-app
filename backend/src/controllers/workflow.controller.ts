@@ -30,6 +30,69 @@ async function resolveExecutionVisibilityForUser(userId: string, companyId: stri
   return { canAccessCompany: true, isAdmin, groupIds };
 }
 
+function attachStepCompletionMeta(
+  rawStepData: unknown,
+  params: {
+    startedAt?: Date | null;
+    completedAt: Date;
+    closedBySource?: 'user' | 'company_api_key' | 'portal' | 'external' | 'system';
+    closedByName?: string;
+    closedByUserId?: string;
+    closedByEmail?: string;
+  }
+) {
+  const stepData =
+    rawStepData && typeof rawStepData === 'object' && !Array.isArray(rawStepData)
+      ? { ...(rawStepData as Record<string, unknown>) }
+      : {};
+  const existingMeta =
+    stepData._step_meta && typeof stepData._step_meta === 'object' && !Array.isArray(stepData._step_meta)
+      ? (stepData._step_meta as Record<string, unknown>)
+      : {};
+
+  return {
+    ...stepData,
+    _step_meta: {
+      ...existingMeta,
+      opened_at: params.startedAt ? params.startedAt.toISOString() : null,
+      closed_at: params.completedAt.toISOString(),
+      ...(params.closedBySource ? { closed_by_source: params.closedBySource } : {}),
+      ...(params.closedByName ? { closed_by_name: params.closedByName } : {}),
+      ...(params.closedByUserId ? { closed_by_user_id: params.closedByUserId } : {}),
+      ...(params.closedByEmail ? { closed_by_email: params.closedByEmail } : {}),
+    },
+  };
+}
+
+function getStepClosedByLabel(stepData: unknown): string | null {
+  if (!stepData || typeof stepData !== 'object' || Array.isArray(stepData)) return null;
+
+  const typedStepData = stepData as Record<string, unknown>;
+  const meta =
+    typedStepData._step_meta && typeof typedStepData._step_meta === 'object' && !Array.isArray(typedStepData._step_meta)
+      ? (typedStepData._step_meta as Record<string, unknown>)
+      : null;
+
+  const closedByName = typeof meta?.closed_by_name === 'string' ? meta.closed_by_name.trim() : '';
+  if (closedByName) return closedByName;
+
+  const closedBySource = typeof meta?.closed_by_source === 'string' ? meta.closed_by_source : null;
+  if (closedBySource === 'company_api_key') return 'API';
+  if (closedBySource === 'portal') return 'public';
+
+  const closedByEmail = typeof meta?.closed_by_email === 'string' ? meta.closed_by_email.trim() : '';
+  if (closedByEmail) return closedByEmail;
+
+  const closedByUserId = typeof meta?.closed_by_user_id === 'string' ? meta.closed_by_user_id.trim() : '';
+  if (closedByUserId) return closedByUserId;
+
+  // Backward compatibility for rows without _step_meta.
+  const submissionType = typeof typedStepData._submission_type === 'string' ? typedStepData._submission_type : null;
+  if (submissionType === 'portal') return 'public';
+
+  return null;
+}
+
 export const workflowController = {
   /**
    * POST /api/workflows/:workflowId/trigger
@@ -487,13 +550,25 @@ export const workflowController = {
         finalStepData = await workflowService.getExecutionDataSnapshot(executionId);
       }
 
+      const completedAt = new Date();
+      const closedBySource = req.user?.id ? 'user' : req.company?.id ? 'company_api_key' : undefined;
+      const finalStepDataWithMeta = attachStepCompletionMeta(finalStepData, {
+        startedAt: executionStep.started_at,
+        completedAt,
+        closedBySource,
+        closedByName: req.user?.email ?? (closedBySource === 'company_api_key' ? 'API' : undefined),
+        closedByUserId: req.user?.id,
+        closedByEmail: req.user?.email,
+      });
+
       // Mark step as completed
+      await workflowService.cancelReminderForExecutionStep(stepId);
       await prisma.workflowExecutionStep.update({
         where: { id: stepId },
         data: {
           status: 'completed',
-          completed_at: new Date(),
-          step_data: finalStepData,
+          completed_at: completedAt,
+          step_data: finalStepDataWithMeta,
         },
       });
 
@@ -605,14 +680,25 @@ export const workflowController = {
         ...dataSnapshot,
         decision_comment: decision_comment?.trim() || null,
       };
+      const completedAt = new Date();
+      const closedBySource = req.user?.id ? 'user' : req.company?.id ? 'company_api_key' : undefined;
+      const stepDataWithMeta = attachStepCompletionMeta(stepDataWithComment, {
+        startedAt: executionStep.started_at,
+        completedAt,
+        closedBySource,
+        closedByName: req.user?.email ?? (closedBySource === 'company_api_key' ? 'API' : undefined),
+        closedByUserId: req.user?.id,
+        closedByEmail: req.user?.email,
+      });
 
+      await workflowService.cancelReminderForExecutionStep(stepId);
       await prisma.workflowExecutionStep.update({
         where: { id: stepId },
         data: {
           decision_choice,
           status: 'completed',
-          completed_at: new Date(),
-          step_data: stepDataWithComment,
+          completed_at: completedAt,
+          step_data: stepDataWithMeta,
         },
       });
 
@@ -769,6 +855,14 @@ export const workflowController = {
           }
         }
       }
+
+      execution.execution_steps = execution.execution_steps.map((executionStep) => {
+        const closedByLabel = getStepClosedByLabel(executionStep.step_data);
+        return {
+          ...executionStep,
+          ...(closedByLabel ? { closed_by_label: closedByLabel } : {}),
+        };
+      });
 
       // Process execution data if data structure exists
       if (execution.workflow.data_structure && Array.isArray(execution.workflow.data_structure)) {

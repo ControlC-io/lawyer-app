@@ -22,7 +22,7 @@ import { CompanySwitcher } from "@/components/CompanySwitcher";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { StartWorkflowDialog } from "@/components/workflow/StartWorkflowDialog";
 import { useTheme } from "next-themes";
 import { Switch } from "@/components/ui/switch";
@@ -68,9 +68,10 @@ const menuSections: { groupLabelKey: string; items: MenuItem[] }[] = [
 
 export function AppSidebar() {
   const { open } = useSidebar();
-  const { signOut, profile, loading, userCompanies, isSuperAdmin, isCompanyAdmin, hasPermission } = useAuth();
+  const { signOut, profile, loading, userCompanies, isSuperAdmin, isCompanyAdmin, hasPermission, companyBranding } = useAuth();
   const location = useLocation();
   const [startWorkflowDialogOpen, setStartWorkflowDialogOpen] = useState(false);
+  const [logoLoadFailed, setLogoLoadFailed] = useState(false);
   const { theme, setTheme } = useTheme();
   const isDark = theme === "dark";
   const { t, language } = useLanguage();
@@ -89,17 +90,37 @@ export function AppSidebar() {
           ? location.pathname === "/data/global-variables"
           : location.pathname === item.url || location.pathname.startsWith(`${item.url}/`);
   };
+  const customLogoUrl = companyBranding?.internal_logo_url ?? "";
+  const shouldUseFallbackLogo = logoLoadFailed || !customLogoUrl;
+  const sidebarLogoSrc = shouldUseFallbackLogo
+    ? (open ? "/logo.png" : "/favicon.png")
+    : customLogoUrl;
+  const sidebarLogoAlt = open ? "Company logo" : "Company icon";
+  const showSidebarLogo = open || shouldUseFallbackLogo;
+
+  const handleLogoError = () => {
+    if (!logoLoadFailed) {
+      setLogoLoadFailed(true);
+    }
+  };
+
+  useEffect(() => {
+    setLogoLoadFailed(false);
+  }, [customLogoUrl]);
 
   return (
     <>
       <Sidebar collapsible="icon" className="border-r border-sidebar-border" style={{ overflow: 'visible' }}>
         <SidebarHeader className="border-b border-sidebar-border p-4 flex flex-row items-center justify-center">
           <div className="flex items-center gap-2">
-            <img 
-              src={open ? "/logo.png" : "/favicon.png"}
-              alt="Picobello" 
-              className="h-8"
-            />
+            {showSidebarLogo && (
+              <img
+                src={sidebarLogoSrc}
+                alt={sidebarLogoAlt}
+                className="h-8"
+                onError={handleLogoError}
+              />
+            )}
           </div>
         </SidebarHeader>
         <SidebarContent>

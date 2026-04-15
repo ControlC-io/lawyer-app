@@ -28,6 +28,8 @@ import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { useCompanyId } from "@/hooks/useCompanyId";
 import { useQueryClient } from "@tanstack/react-query";
+import { getStepExecutionStyles } from "@/lib/stepTypeColors";
+import { getTagColors } from "@/lib/tagColors";
 
 interface Execution {
     id: string;
@@ -38,6 +40,7 @@ interface Execution {
     } | null;
     current_step_name?: string;
     current_step_names?: string[];
+    current_step_types?: Array<string | null>;
     assignees?: Array<{ type: 'user' | 'group'; name: string }>;
     name?: string | null;
 }
@@ -49,7 +52,7 @@ interface ExecutionListProps {
 export const ExecutionList = ({ executions }: ExecutionListProps) => {
     const navigate = useNavigate();
     const { t, language } = useLanguage();
-    const { isCompanyAdmin } = useAuth();
+    const { isCompanyAdmin, companyBranding } = useAuth();
     const companyId = useCompanyId();
     const queryClient = useQueryClient();
     const [executionToDelete, setExecutionToDelete] = useState<Execution | null>(null);
@@ -117,6 +120,24 @@ export const ExecutionList = ({ executions }: ExecutionListProps) => {
         return format(date, "MMM d, yyyy HH:mm", { locale: dateLocale });
     };
 
+    const getStepBadgeStyle = (stepType?: string | null) => {
+        const stepStyle = getStepExecutionStyles(stepType);
+        return {
+            backgroundColor: stepStyle.backgroundColor,
+            color: stepStyle.textColor,
+            borderColor: stepStyle.borderColor,
+        };
+    };
+
+    const companyTagColors = getTagColors(companyBranding?.internal_primary_color ?? undefined);
+    const assigneeBadgeStyle = companyBranding?.internal_primary_color
+        ? {
+            backgroundColor: companyTagColors.bg,
+            color: companyTagColors.text,
+            borderColor: companyTagColors.dot,
+        }
+        : undefined;
+
     if (executions.length === 0) {
         return (
             <div className="flex flex-col items-center justify-center flex-1 text-muted-foreground p-8 border border-dashed rounded-lg m-4 bg-muted/10">
@@ -161,19 +182,23 @@ export const ExecutionList = ({ executions }: ExecutionListProps) => {
 
                                         <div className="flex flex-wrap gap-1.5 items-center min-h-[20px]">
                                             {(execution.current_step_names && execution.current_step_names.length > 0) ? (
-                                                execution.current_step_names.map((stepName, idx) => (
-                                                    <Badge
-                                                        key={idx}
-                                                        variant="outline"
-                                                        className="text-[10px] font-medium px-1.5 py-0 h-5 bg-primary/10 text-primary border-primary/30 dark:bg-primary/20 dark:text-primary dark:border-primary/50"
-                                                    >
-                                                        {stepName}
-                                                    </Badge>
-                                                ))
+                                                execution.current_step_names.map((stepName, idx) => {
+                                                    return (
+                                                        <Badge
+                                                            key={idx}
+                                                            variant="outline"
+                                                            className="text-[10px] font-medium px-1.5 py-0 h-5"
+                                                            style={getStepBadgeStyle(execution.current_step_types?.[idx])}
+                                                        >
+                                                            {stepName}
+                                                        </Badge>
+                                                    );
+                                                })
                                             ) : execution.current_step_name ? (
                                                 <Badge
                                                     variant="outline"
-                                                    className="text-[10px] font-medium px-1.5 py-0 h-5 bg-primary/10 text-primary border-primary/30 dark:bg-primary/20 dark:text-primary dark:border-primary/50"
+                                                    className="text-[10px] font-medium px-1.5 py-0 h-5"
+                                                    style={getStepBadgeStyle(execution.current_step_types?.[0])}
                                                 >
                                                     {execution.current_step_name}
                                                 </Badge>
@@ -204,10 +229,13 @@ export const ExecutionList = ({ executions }: ExecutionListProps) => {
                                                     variant="outline"
                                                     className={cn(
                                                         "text-[10px] font-normal flex items-center gap-1 px-1.5 py-0 h-5",
-                                                        assignee.type === 'user'
+                                                        !assigneeBadgeStyle && assignee.type === 'user'
                                                             ? "bg-indigo-50/50 text-indigo-700 border-indigo-200 dark:bg-indigo-900/10 dark:text-indigo-300 dark:border-indigo-800"
-                                                            : "bg-teal-50/50 text-teal-700 border-teal-200 dark:bg-teal-900/10 dark:text-teal-300 dark:border-teal-800"
+                                                            : !assigneeBadgeStyle
+                                                                ? "bg-teal-50/50 text-teal-700 border-teal-200 dark:bg-teal-900/10 dark:text-teal-300 dark:border-teal-800"
+                                                                : undefined
                                                     )}
+                                                    style={assigneeBadgeStyle}
                                                 >
                                                     {assignee.type === 'user' ? (
                                                         <User className="h-2.5 w-2.5" />

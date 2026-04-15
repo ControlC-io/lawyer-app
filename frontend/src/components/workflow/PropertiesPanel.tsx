@@ -27,8 +27,114 @@ import { PermissionTargetPicker } from "./PermissionTargetPicker";
 import { InteractivePromptEditor } from "@/components/promptTemplate/InteractivePromptEditor";
 import type { PromptValues } from "@/lib/promptTemplate";
 import { MetadataValueControl, type FileMetadataKey } from "@/components/documents/MetadataValueControl";
+import { useLanguage } from "@/contexts/LanguageContext";
+import ReactQuill from "react-quill-new";
+import "react-quill-new/dist/quill.snow.css";
 
 type KeyValuePair = { key: string; value: string; mode?: "static" | "bind" };
+type ReminderMode = "none" | "repeat" | "schedule";
+
+type StepNotificationConfig = {
+  assignment: { enabled: boolean };
+  reminder: {
+    mode: ReminderMode;
+    delay_minutes: number;
+    repeat_every_minutes?: number;
+    max_count?: number;
+    schedule_minutes: number[];
+  };
+};
+
+type ReminderDurationUnit = "hours" | "days";
+
+function clampPositiveInteger(value: unknown, fallbackValue: number): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallbackValue;
+  const rounded = Math.round(parsed);
+  return rounded > 0 ? rounded : fallbackValue;
+}
+
+function normalizeStepNotificationConfig(rawConfig: unknown): StepNotificationConfig {
+  const input = (rawConfig && typeof rawConfig === "object" ? rawConfig : {}) as Record<string, any>;
+  const assignment = (input.assignment && typeof input.assignment === "object" ? input.assignment : {}) as Record<string, any>;
+  const reminder = (input.reminder && typeof input.reminder === "object" ? input.reminder : {}) as Record<string, any>;
+
+  const rawMode = typeof reminder.mode === "string" ? reminder.mode.toLowerCase() : "none";
+  const mode: ReminderMode =
+    rawMode === "repeat" ? "repeat" : rawMode === "schedule" || rawMode === "once" ? "schedule" : "none";
+  const scheduleRaw = Array.isArray(reminder.schedule_minutes) ? reminder.schedule_minutes : [];
+  const scheduleMinutes = scheduleRaw
+    .map((value: unknown) => Number(value))
+    .filter((value: number) => Number.isFinite(value) && value > 0)
+    .map((value: number) => Math.round(value))
+    .sort((a: number, b: number) => a - b)
+    .filter((value: number, index: number, list: number[]) => index === 0 || value !== list[index - 1]);
+
+  return {
+    assignment: {
+      enabled: assignment.enabled !== false,
+    },
+    reminder: {
+      mode,
+      delay_minutes: clampPositiveInteger(reminder.delay_minutes, 24 * 60),
+      repeat_every_minutes: clampPositiveInteger(reminder.repeat_every_minutes, 24 * 60),
+      max_count:
+        reminder.max_count === null || reminder.max_count === undefined
+          ? undefined
+          : clampPositiveInteger(reminder.max_count, 1),
+      schedule_minutes: scheduleMinutes.length > 0 ? scheduleMinutes : [24 * 60],
+    },
+  };
+}
+
+function minutesToDuration(minutes: number): { value: number; unit: ReminderDurationUnit } {
+  const safeMinutes = clampPositiveInteger(minutes, 24 * 60);
+  if (safeMinutes % (24 * 60) === 0) {
+    return { value: Math.max(1, Math.round(safeMinutes / (24 * 60))), unit: "days" };
+  }
+  return { value: Math.max(1, Math.round(safeMinutes / 60)), unit: "hours" };
+}
+
+function durationToMinutes(value: unknown, unit: ReminderDurationUnit): number {
+  const safeValue = clampPositiveInteger(value, 1);
+  return unit === "days" ? safeValue * 24 * 60 : safeValue * 60;
+}
+
+function normalizeStepExplanation(value: unknown): string | undefined {
+  if (value === null || value === undefined) return undefined;
+  const raw = typeof value === "string" ? value : String(value);
+  const trimmed = raw.trim();
+  if (!trimmed) return undefined;
+
+  const plainText = trimmed
+    .replace(/<br\s*\/?>/gi, " ")
+    .replace(/<\/p>/gi, " ")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&nbsp;|&#160;/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return plainText ? trimmed : undefined;
+}
+
+const EXPLANATION_EDITOR_MODULES = {
+  toolbar: [
+    [{ header: [1, 2, 3, false] }],
+    ["bold", "italic", "underline"],
+    [{ list: "ordered" }, { list: "bullet" }],
+    ["link", "clean"],
+  ],
+};
+
+const EXPLANATION_EDITOR_FORMATS = [
+  "header",
+  "bold",
+  "italic",
+  "underline",
+  "list",
+  "bullet",
+  "link",
+];
 
 interface PropertiesPanelProps {
   step: WorkflowStep;
@@ -45,6 +151,7 @@ interface PropertiesPanelProps {
 export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep, onClose, onOutputRenamed, onOpenDataStructureEditor, initialConfigurationSubTab }: PropertiesPanelProps) {
   const companyId = useCompanyId();
   const { isSuperAdmin } = useAuth();
+  const { t } = useLanguage();
   const navigate = useNavigate();
   // API configurations are typed; for an "action" step we only want action-compatible configs.
   // Otherwise the dropdown shows decision configs, which isn't allowed in the current UX.
@@ -89,6 +196,18 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
   const isAgentDecisionNode =
     step.step_type === "decision" &&
     (step.decision_node_type === "Agent" || step.decision_node_type === "Agent_Human");
+  const supportsNotificationTab =
+    (step.step_type === "action" && (step.action_type || "manual") === "manual") ||
+    (step.step_type === "decision" && ["Human", "Agent_Human"].includes(step.decision_node_type || "Human")) ||
+    step.step_type === "edit_form";
+  const stepNotificationConfig = normalizeStepNotificationConfig(step.config?.notifications);
+  const reminderDelayDuration = minutesToDuration(stepNotificationConfig.reminder.delay_minutes);
+  const reminderRepeatDuration = minutesToDuration(
+    stepNotificationConfig.reminder.repeat_every_minutes || stepNotificationConfig.reminder.delay_minutes
+  );
+  const reminderScheduleDurations = (stepNotificationConfig.reminder.schedule_minutes || [24 * 60]).map((minutes) =>
+    minutesToDuration(minutes)
+  );
   const [decisionSourceMode, setDecisionSourceMode] = useState<"none" | "integration" | "agent">(
     step.config.agent_id ? "agent" : step.config.api_configuration_id ? "integration" : "none"
   );
@@ -637,6 +756,33 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
     onUpdateStep({ ...step, config: { ...step.config, [configKey]: valueToSave } });
   };
 
+  const updateStepNotifications = (updater: (current: StepNotificationConfig) => StepNotificationConfig) => {
+    const current = normalizeStepNotificationConfig(step.config?.notifications);
+    const next = updater(current);
+    onUpdateStep({
+      ...step,
+      config: {
+        ...step.config,
+        notifications: next,
+      },
+    });
+  };
+
+  const handleExplanationChange = (value: string) => {
+    const normalizedExplanation = normalizeStepExplanation(value);
+    const nextConfig = { ...step.config };
+    if (normalizedExplanation) {
+      nextConfig.explanation = normalizedExplanation;
+    } else {
+      delete nextConfig.explanation;
+    }
+
+    onUpdateStep({
+      ...step,
+      config: nextConfig,
+    });
+  };
+
   return (
     <div className="flex flex-col h-full p-6">
       <div className="space-y-6">
@@ -660,11 +806,32 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
           />
         </div>
 
+        {!isStartOrEnd && (
+          <div className="space-y-2">
+            <Label>{t("workflowEditor.stepExplanationLabel")}</Label>
+            <div className="bg-background rounded-md">
+              <ReactQuill
+                theme="snow"
+                value={step.config.explanation || ""}
+                onChange={handleExplanationChange}
+                modules={EXPLANATION_EDITOR_MODULES}
+                formats={EXPLANATION_EDITOR_FORMATS}
+                placeholder={t("workflowEditor.stepExplanationPlaceholder")}
+                className="min-h-[130px]"
+              />
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {t("workflowEditor.stepExplanationDescription")}
+            </p>
+          </div>
+        )}
+
         <Tabs defaultValue="configuration" className="w-full">
           {!isStartOrEnd && (
-            <TabsList className="grid w-full grid-cols-3">
+            <TabsList className={`grid w-full ${supportsNotificationTab ? "grid-cols-4" : "grid-cols-3"}`}>
               <TabsTrigger value="assign">Assign</TabsTrigger>
               <TabsTrigger value="configuration">Configuration</TabsTrigger>
+              {supportsNotificationTab && <TabsTrigger value="notification">Notification</TabsTrigger>}
               <TabsTrigger value="output" className="flex items-center gap-2">
                 Output
                 <Badge variant="secondary" className="h-5 px-1.5 min-w-[1.25rem]">
@@ -798,6 +965,293 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
           </TabsContent>
           )}
 
+          {supportsNotificationTab && (
+          <TabsContent value="notification" className="space-y-4 mt-4">
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <Label htmlFor="notification-assignment-enabled">
+                    {t("workflowEditorStepNotifications.assignmentEnabled")}
+                  </Label>
+                  <p className="text-xs text-muted-foreground">
+                    {t("workflowEditorStepNotifications.assignmentEnabledHint")}
+                  </p>
+                </div>
+                <Switch
+                  id="notification-assignment-enabled"
+                  checked={stepNotificationConfig.assignment.enabled}
+                  onCheckedChange={(checked) => {
+                    updateStepNotifications((current) => ({
+                      ...current,
+                      assignment: {
+                        ...current.assignment,
+                        enabled: checked,
+                      },
+                    }));
+                  }}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="step-reminder-mode">{t("workflowEditorStepNotifications.reminderMode")}</Label>
+                <Select
+                  value={stepNotificationConfig.reminder.mode}
+                  onValueChange={(value) => {
+                    const nextMode = value as ReminderMode;
+                    if (nextMode !== "none" && nextMode !== "repeat" && nextMode !== "schedule") return;
+                    updateStepNotifications((current) => ({
+                      ...current,
+                      reminder: {
+                        ...current.reminder,
+                        mode: nextMode,
+                      },
+                    }));
+                  }}
+                >
+                  <SelectTrigger id="step-reminder-mode">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">{t("workflowEditorStepNotifications.reminderModeNone")}</SelectItem>
+                    <SelectItem value="repeat">{t("workflowEditorStepNotifications.reminderModeRepeat")}</SelectItem>
+                    <SelectItem value="schedule">{t("workflowEditorStepNotifications.reminderModeSchedule")}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {stepNotificationConfig.reminder.mode === "repeat" && (
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label>{t("workflowEditorStepNotifications.firstReminderAfter")}</Label>
+                    <div className="grid grid-cols-[1fr_140px] gap-2">
+                      <Input
+                        type="number"
+                        min={1}
+                        value={reminderDelayDuration.value}
+                        onChange={(event) => {
+                          updateStepNotifications((current) => {
+                            const unit = minutesToDuration(current.reminder.delay_minutes).unit;
+                            return {
+                              ...current,
+                              reminder: {
+                                ...current.reminder,
+                                delay_minutes: durationToMinutes(event.target.value, unit),
+                              },
+                            };
+                          });
+                        }}
+                      />
+                      <Select
+                        value={reminderDelayDuration.unit}
+                        onValueChange={(value) => {
+                          if (value !== "hours" && value !== "days") return;
+                          updateStepNotifications((current) => {
+                            const currentValue = minutesToDuration(current.reminder.delay_minutes).value;
+                            return {
+                              ...current,
+                              reminder: {
+                                ...current.reminder,
+                                delay_minutes: durationToMinutes(currentValue, value),
+                              },
+                            };
+                          });
+                        }}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="hours">{t("workflowEditorStepNotifications.hours")}</SelectItem>
+                          <SelectItem value="days">{t("workflowEditorStepNotifications.days")}</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>{t("workflowEditorStepNotifications.repeatEvery")}</Label>
+                    <div className="grid grid-cols-[1fr_140px] gap-2">
+                      <Input
+                        type="number"
+                        min={1}
+                        value={reminderRepeatDuration.value}
+                        onChange={(event) => {
+                          updateStepNotifications((current) => {
+                            const unit = minutesToDuration(
+                              current.reminder.repeat_every_minutes || current.reminder.delay_minutes
+                            ).unit;
+                            return {
+                              ...current,
+                              reminder: {
+                                ...current.reminder,
+                                repeat_every_minutes: durationToMinutes(event.target.value, unit),
+                              },
+                            };
+                          });
+                        }}
+                      />
+                      <Select
+                        value={reminderRepeatDuration.unit}
+                        onValueChange={(value) => {
+                          if (value !== "hours" && value !== "days") return;
+                          updateStepNotifications((current) => {
+                            const currentValue = minutesToDuration(
+                              current.reminder.repeat_every_minutes || current.reminder.delay_minutes
+                            ).value;
+                            return {
+                              ...current,
+                              reminder: {
+                                ...current.reminder,
+                                repeat_every_minutes: durationToMinutes(currentValue, value),
+                              },
+                            };
+                          });
+                        }}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="hours">{t("workflowEditorStepNotifications.hours")}</SelectItem>
+                          <SelectItem value="days">{t("workflowEditorStepNotifications.days")}</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>{t("workflowEditorStepNotifications.maxReminders")}</Label>
+                    <Input
+                      type="number"
+                      min={1}
+                      value={stepNotificationConfig.reminder.max_count ?? ""}
+                      placeholder={t("workflowEditorStepNotifications.maxRemindersPlaceholder")}
+                      onChange={(event) => {
+                        const rawValue = event.target.value.trim();
+                        updateStepNotifications((current) => ({
+                          ...current,
+                          reminder: {
+                            ...current.reminder,
+                            max_count: rawValue ? clampPositiveInteger(rawValue, 1) : undefined,
+                          },
+                        }));
+                      }}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      {t("workflowEditorStepNotifications.maxRemindersHint")}
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {stepNotificationConfig.reminder.mode === "schedule" && (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <Label>{t("workflowEditorStepNotifications.multipleReminders")}</Label>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        updateStepNotifications((current) => {
+                          const existingSchedule = current.reminder.schedule_minutes || [24 * 60];
+                          const highestDelay = existingSchedule.length > 0 ? Math.max(...existingSchedule) : 24 * 60;
+                          const nextDelay = highestDelay + 24 * 60;
+                          return {
+                            ...current,
+                            reminder: {
+                              ...current.reminder,
+                              // Keep delays unique so normalization does not collapse the new row.
+                              schedule_minutes: [...existingSchedule, nextDelay],
+                            },
+                          };
+                        });
+                      }}
+                    >
+                      <Plus className="h-4 w-4 mr-1" />
+                      {t("workflowEditorStepNotifications.addReminder")}
+                    </Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {t("workflowEditorStepNotifications.multipleRemindersHint")}
+                  </p>
+
+                  {(stepNotificationConfig.reminder.schedule_minutes || [24 * 60]).map((minutes, index) => (
+                    <div key={`${minutes}-${index}`} className="grid grid-cols-[1fr_140px_auto] gap-2">
+                      <Input
+                        type="number"
+                        min={1}
+                        value={reminderScheduleDurations[index]?.value || 1}
+                        onChange={(event) => {
+                          updateStepNotifications((current) => {
+                            const currentList = [...(current.reminder.schedule_minutes || [24 * 60])];
+                            const unit = minutesToDuration(currentList[index] || 24 * 60).unit;
+                            currentList[index] = durationToMinutes(event.target.value, unit);
+                            return {
+                              ...current,
+                              reminder: {
+                                ...current.reminder,
+                                schedule_minutes: currentList,
+                              },
+                            };
+                          });
+                        }}
+                      />
+                      <Select
+                        value={reminderScheduleDurations[index]?.unit || "days"}
+                        onValueChange={(value) => {
+                          if (value !== "hours" && value !== "days") return;
+                          updateStepNotifications((current) => {
+                            const currentList = [...(current.reminder.schedule_minutes || [24 * 60])];
+                            const currentValue = minutesToDuration(currentList[index] || 24 * 60).value;
+                            currentList[index] = durationToMinutes(currentValue, value);
+                            return {
+                              ...current,
+                              reminder: {
+                                ...current.reminder,
+                                schedule_minutes: currentList,
+                              },
+                            };
+                          });
+                        }}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="hours">{t("workflowEditorStepNotifications.hours")}</SelectItem>
+                          <SelectItem value="days">{t("workflowEditorStepNotifications.days")}</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        disabled={(stepNotificationConfig.reminder.schedule_minutes || [24 * 60]).length <= 1}
+                        onClick={() => {
+                          updateStepNotifications((current) => {
+                            const currentList = [...(current.reminder.schedule_minutes || [24 * 60])];
+                            const nextList = currentList.filter((_, i) => i !== index);
+                            return {
+                              ...current,
+                              reminder: {
+                                ...current.reminder,
+                                schedule_minutes: nextList.length > 0 ? nextList : [24 * 60],
+                              },
+                            };
+                          });
+                        }}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </TabsContent>
+          )}
+
           {!isStartOrEnd && (
           <TabsContent value="output" className="space-y-4 mt-4">
             {(step.step_type === "action" || step.step_type === "file") ? (
@@ -896,11 +1350,10 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
           <TabsContent value="configuration" className="space-y-4 mt-4">
             {step.step_type === "edit_form" ? (
               <Tabs defaultValue={initialConfigurationSubTab ?? "status"} className="w-full">
-                <TabsList className="grid w-full grid-cols-5">
+                <TabsList className="grid w-full grid-cols-4">
                   <TabsTrigger value="status">Status</TabsTrigger>
                   <TabsTrigger value="form">Form</TabsTrigger>
                   <TabsTrigger value="rules">Rules</TabsTrigger>
-                  <TabsTrigger value="validation">Validation</TabsTrigger>
                   <TabsTrigger value="action">Action</TabsTrigger>
                 </TabsList>
                 <TabsContent value="status" className="space-y-4 mt-4">
@@ -966,28 +1419,20 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
                       </p>
                     </div>
                   ) : (
-                    <FieldRulesEditor
-                      step={step}
-                      dataStructureItems={dataStructureItems}
-                      fullDataStructure={dataStructure || undefined}
-                      onUpdate={onUpdateStep}
-                    />
-                  )}
-                </TabsContent>
-                <TabsContent value="validation" className="space-y-4 mt-4">
-                  {dataStructureItems.length === 0 ? (
-                    <div className="p-4 border border-dashed rounded-md text-center">
-                      <p className="text-sm text-muted-foreground">
-                        No data structures linked to this workflow. Please link a data structure first.
-                      </p>
-                    </div>
-                  ) : (
-                    <FieldValidationsEditor
-                      step={step}
-                      dataStructureItems={dataStructureItems}
-                      fullDataStructure={dataStructure || undefined}
-                      onUpdate={onUpdateStep}
-                    />
+                    <>
+                      <FieldRulesEditor
+                        step={step}
+                        dataStructureItems={dataStructureItems}
+                        fullDataStructure={dataStructure || undefined}
+                        onUpdate={onUpdateStep}
+                      />
+                      <FieldValidationsEditor
+                        step={step}
+                        dataStructureItems={dataStructureItems}
+                        fullDataStructure={dataStructure || undefined}
+                        onUpdate={onUpdateStep}
+                      />
+                    </>
                   )}
 
                   <div className="space-y-4">

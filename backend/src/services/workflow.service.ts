@@ -1,5 +1,7 @@
 import { prisma } from '../lib/prisma';
 import fetch from 'node-fetch';
+import { notificationService } from './notification.service';
+import { resolveStepNotificationSettings, stepReminderService } from './stepReminder.service';
 
 type WorkflowStepRow = Awaited<ReturnType<typeof prisma.workflowStep.findMany>>[number];
 type WorkflowConnectionRow = Awaited<ReturnType<typeof prisma.workflowConnection.findMany>>[number];
@@ -115,6 +117,9 @@ export const workflowService = {
               status: 'running',
               started_at: new Date(),
             },
+          });
+          this.handleStepActivation(execStep.id, firstStep, companyId).catch((err) => {
+            console.error('Error handling step activation notifications/reminders:', err);
           });
           if (firstStep.step_type === 'action' && firstStep.action_type === 'automatic') {
             this.triggerStepProcessing(execution.id, execStep.id).catch((err) => {
@@ -337,6 +342,9 @@ export const workflowService = {
             current_step_id: targetStepId,
           },
         });
+        this.handleStepActivation(newExecutionStep.id, targetStep, companyId).catch((error) => {
+          console.error('Error handling step activation notifications/reminders:', error);
+        });
 
         // If automatic/agent step, trigger processing
         const isAutomaticAction =
@@ -391,6 +399,47 @@ export const workflowService = {
       console.error('Error advancing workflow:', error);
       throw error;
     }
+  },
+
+  /**
+   * Trigger assignment notifications for a newly running step.
+   */
+  async triggerAssignmentNotification(executionStepId: string): Promise<void> {
+    try {
+      const result = await notificationService.dispatchAssignmentForExecutionStep(executionStepId);
+      console.log('[workflow] assignment notification dispatched', {
+        execution_step_id: executionStepId,
+        found: result.found,
+        recipients_total: result.recipients_total,
+        recipients_emailed: result.recipients_emailed,
+        message: result.message,
+      });
+    } catch (error) {
+      console.error('Error dispatching assignment notification:', error);
+    }
+  },
+
+  async handleStepActivation(
+    executionStepId: string,
+    step: {
+      step_type?: string | null;
+      action_type?: string | null;
+      decision_node_type?: string | null;
+      config?: unknown;
+    },
+    companyId: string
+  ): Promise<void> {
+    const settings = resolveStepNotificationSettings(step);
+
+    if (settings.assignmentEnabled) {
+      await this.triggerAssignmentNotification(executionStepId);
+    }
+
+    await stepReminderService.scheduleForExecutionStep(executionStepId, companyId, settings);
+  },
+
+  async cancelReminderForExecutionStep(executionStepId: string): Promise<void> {
+    await stepReminderService.cancelForExecutionStep(executionStepId);
   },
 
   /**

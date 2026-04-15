@@ -198,6 +198,26 @@ router.post(
   requirePermission('documents.view'),
   asyncHandler(documentsController.splitPdfPropose),
 );
+router.get(
+  '/:companyId/documents/split-pdf-presets',
+  requirePermission('documents.view'),
+  asyncHandler(documentsController.listSplitPdfPresets),
+);
+router.post(
+  '/:companyId/documents/split-pdf-presets',
+  requirePermission('documents.manage'),
+  asyncHandler(documentsController.createSplitPdfPreset),
+);
+router.patch(
+  '/:companyId/documents/split-pdf-presets/:presetId',
+  requirePermission('documents.manage'),
+  asyncHandler(documentsController.updateSplitPdfPreset),
+);
+router.delete(
+  '/:companyId/documents/split-pdf-presets/:presetId',
+  requirePermission('documents.manage'),
+  asyncHandler(documentsController.deleteSplitPdfPreset),
+);
 router.post(
   '/:companyId/documents/split-pdf/apply',
   requirePermission('documents.view'),
@@ -208,6 +228,16 @@ router.post(
   '/:companyId/documents/extract-metadata-from-ocr',
   requirePermission('documents.view'),
   asyncHandler(documentsController.extractMetadataFromOcr),
+);
+router.post(
+  '/:companyId/documents/:fileId/ragie/upload',
+  requirePermission('documents.view'),
+  asyncHandler(documentsController.uploadFileToRagie),
+);
+router.delete(
+  '/:companyId/documents/:fileId/ragie',
+  requirePermission('documents.view'),
+  asyncHandler(documentsController.removeFileFromRagie),
 );
 
 // Bulk metadata assignment
@@ -242,6 +272,18 @@ router.get(
   asyncHandler(companiesController.getCompany)
 );
 
+router.get(
+  '/:companyId/portal/translations',
+  requirePermission('org_settings.manage'),
+  asyncHandler(companiesController.getPortalTranslations)
+);
+
+router.put(
+  '/:companyId/portal/translations',
+  requirePermission('org_settings.manage'),
+  asyncHandler(companiesController.updatePortalTranslations)
+);
+
 /**
  * POST /api/companies/:companyId/portal-logo
  */
@@ -259,6 +301,33 @@ router.delete(
   '/:companyId/portal-logo',
   requirePermission('org_settings.manage'),
   asyncHandler(companiesController.deletePortalLogo)
+);
+
+/**
+ * GET /api/companies/:companyId/internal-logo
+ */
+router.get(
+  '/:companyId/internal-logo',
+  asyncHandler(companiesController.getInternalLogo)
+);
+
+/**
+ * POST /api/companies/:companyId/internal-logo
+ */
+router.post(
+  '/:companyId/internal-logo',
+  filesController.uploadMiddleware,
+  requirePermission('org_settings.manage'),
+  asyncHandler(companiesController.uploadInternalLogo)
+);
+
+/**
+ * DELETE /api/companies/:companyId/internal-logo
+ */
+router.delete(
+  '/:companyId/internal-logo',
+  requirePermission('org_settings.manage'),
+  asyncHandler(companiesController.deleteInternalLogo)
 );
 
 /**

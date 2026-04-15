@@ -3,7 +3,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
-import { Loader2, ArrowRight, Lock, Eye, AlertCircle, UserCog, Bot, Mail, Save, ChevronLeft, ChevronRight } from "lucide-react";
+import { Loader2, ArrowRight, Lock, Eye, AlertCircle, UserCog, Bot, Mail, Save, ChevronLeft, ChevronRight, ChevronDown, ChevronUp } from "lucide-react";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
@@ -24,6 +24,11 @@ import { cn } from "@/lib/utils";
 import { getFormPagesFromConfig, evaluateFieldRules, validateAllFields, type FieldRule, type FieldValidationRule } from "@/lib/formConfig";
 import { resolvePromptTemplate, type PromptValues } from "@/lib/promptTemplate";
 import { FormPageStepper } from "@/components/execution/FormPageStepper";
+import { getStepExecutionStyles } from "@/lib/stepTypeColors";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+
+const FIXED_FORM_PRIMARY_COLOR = "#2A5CE5";
+
 interface ExecutionDataPanelProps {
   executionId: string;
   onFileView?: (fileUrl: string, fileName: string, filePath: string) => void;
@@ -40,6 +45,24 @@ const hasValue = (value: any) => {
   if (Array.isArray(value) && value.length === 0) return false;
   return true;
 };
+
+const normalizeStepExplanation = (value: unknown): string | undefined => {
+  if (value === null || value === undefined) return undefined;
+  const raw = typeof value === "string" ? value : String(value);
+  const trimmed = raw.trim();
+  if (!trimmed) return undefined;
+
+  const plainText = trimmed
+    .replace(/<br\s*\/?>/gi, " ")
+    .replace(/<\/p>/gi, " ")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&nbsp;|&#160;/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return plainText ? trimmed : undefined;
+};
+
 export const ExecutionDataPanel = ({
   executionId,
   onFileView,
@@ -56,6 +79,7 @@ export const ExecutionDataPanel = ({
   const queryClient = useQueryClient();
   const [isReassignDialogOpen, setIsReassignDialogOpen] = useState(false);
   const [isSendLinkDialogOpen, setIsSendLinkDialogOpen] = useState(false);
+  const [isExplanationOpen, setIsExplanationOpen] = useState(false);
   const [reassignType, setReassignType] = useState<"user" | "group">("user");
   const [selectedReassignId, setSelectedReassignId] = useState<string>("");
   const [triggeringActions, setTriggeringActions] = useState<Record<string, boolean>>({});
@@ -885,6 +909,7 @@ export const ExecutionDataPanel = ({
   // Reset form page index when step changes (e.g. different edit_form step)
   useEffect(() => {
     setFormPageIndex(0);
+    setIsExplanationOpen(false);
   }, [runningStep?.id]);
 
   const aiValidationEnabled =
@@ -934,6 +959,8 @@ export const ExecutionDataPanel = ({
   // Agent_Human decision steps: agent makes decision first, then human confirms
   const isAgentPlusHumanDecision = isDecisionStep && runningStep.workflow_steps?.decision_node_type === 'Agent_Human';
   const stepData = (runningStep.step_data || {}) as any;
+  const runningStepStyle = getStepExecutionStyles(runningStep.workflow_steps?.step_type);
+  const stepExplanation = normalizeStepExplanation(runningStep.workflow_steps?.config?.explanation);
   const agentDecisionChoice = stepData.agent_decision_choice;
   const agentDecisionReason = stepData.agent_decision_reason;
   // For Agent_Human, wait for agent decision before allowing human interaction
@@ -1075,6 +1102,7 @@ export const ExecutionDataPanel = ({
           }}
           isUploading={form.uploadingFiles[fieldUuid]}
           signedUrl={form.signedUrls[`${execRow.id}-${fieldUuid}`]}
+          primaryColor={FIXED_FORM_PRIMARY_COLOR}
           // ArrayField props
           fieldConfig={fieldConfig}
           getSignedUrl={form.getSignedUrl}
@@ -1095,6 +1123,7 @@ export const ExecutionDataPanel = ({
                 disabled={isDisabled}
                 required={isRequired}
                 labelPosition={hideLabel ? "hidden" : "top"}
+                primaryColor={FIXED_FORM_PRIMARY_COLOR}
                 dynamicOptions={form.dynamicOptions[childField.id]}
                 isLoadingDynamic={form.loadingDynamicOptions[childField.id]}
                 dynamicError={form.dynamicOptionsErrors[childField.id]}
@@ -1398,6 +1427,7 @@ export const ExecutionDataPanel = ({
                   form.handleValueChange(editingKey, val);
                 }
               }} disabled={disabled} required={required}
+                primaryColor={FIXED_FORM_PRIMARY_COLOR}
                 // OptionField props
                 dynamicOptions={form.dynamicOptions[fieldUuid]} isLoadingDynamic={form.loadingDynamicOptions[fieldUuid]} dynamicError={form.dynamicOptionsErrors[fieldUuid]} onRetryDynamic={() => form.retryDynamicOptions(fieldUuid)}
                 // FileField props
@@ -1416,6 +1446,7 @@ export const ExecutionDataPanel = ({
                   return <FieldRenderer field={childField} value={childValue} onChange={onChildChange} disabled={isDisabled}
                     required={isRequired}
                     labelPosition={hideLabel ? "hidden" : "top"}
+                    primaryColor={FIXED_FORM_PRIMARY_COLOR}
                     dynamicOptions={form.dynamicOptions[childField.id]} isLoadingDynamic={form.loadingDynamicOptions[childField.id]} dynamicError={form.dynamicOptionsErrors[childField.id]} onRetryDynamic={() => form.retryDynamicOptions(childField.id)}
                     onUpload={isFileChild ? async (file: File) => {
                       markAiValidationDirty();
@@ -1452,57 +1483,89 @@ export const ExecutionDataPanel = ({
   return <div className="space-y-6 pb-20 w-full min-w-0 max-w-full">
     {/* Action Buttons Section */}
     <div className="sticky top-0 z-50 -mx-2 sm:-mx-3 md:-mx-4 lg:-mx-6 px-2 sm:px-3 md:px-4 lg:px-6 pt-2 sm:pt-3 md:pt-4 lg:pt-3 pb-2 sm:pb-3 md:pb-4 lg:pb-3 bg-background/95 backdrop-blur-md">
-      <Card className="w-full min-w-0 max-w-full overflow-x-hidden bg-primary/5 border-primary/20 shadow-md">
+      <Card
+        className="w-full min-w-0 max-w-full overflow-x-hidden shadow-md"
+        style={{
+          backgroundColor: runningStepStyle.backgroundColor,
+          borderColor: runningStepStyle.borderColor,
+        }}
+      >
         <div className="p-2 sm:p-3 flex items-center justify-between gap-3 flex-wrap">
-          <div className="flex-1 min-w-0 flex items-center gap-2">
-            <h3 className="text-base sm:text-lg font-semibold truncate">
-              {runningStep.workflow_steps?.name}
-            </h3>
-            {isApiProcessedAction && (
-              <Badge variant="secondary" className="gap-1 h-6 px-2 animate-pulse font-normal">
-                <Loader2 className="h-3 w-3 animate-spin" />
-                <span className="hidden sm:inline">Processing</span>
-              </Badge>
-            )}
-            {!canCompleteStep && !isApiProcessedAction && (
-              <Badge variant="outline" className="gap-1 h-6 px-2 text-muted-foreground font-normal">
-                <Lock className="h-3 w-3" />
-                <span className="hidden sm:inline">Read Only</span>
-              </Badge>
-            )}
-            {aiValidationEnabled && (
-              <Badge
-                variant={
-                  aiFormValidation.status === "valid"
-                    ? "secondary"
-                    : aiFormValidation.status === "invalid"
-                    ? "destructive"
-                    : "outline"
-                }
-                className="gap-1 h-6 px-2 font-normal"
-                title={aiFormValidation.comment || undefined}
-              >
-                {aiFormValidation.status === "validating" ? (
+          <div className="flex-1 min-w-0 space-y-2">
+            <div className="flex items-center gap-2 flex-wrap min-w-0">
+              <h3 className="text-base sm:text-lg font-semibold truncate" style={{ color: runningStepStyle.textColor }}>
+                {runningStep.workflow_steps?.name}
+              </h3>
+              {isApiProcessedAction && (
+                <Badge variant="secondary" className="gap-1 h-6 px-2 animate-pulse font-normal">
                   <Loader2 className="h-3 w-3 animate-spin" />
-                ) : aiFormValidation.status === "invalid" ? (
-                  <AlertCircle className="h-3 w-3" />
-                ) : (
-                  <Bot className="h-3 w-3" />
-                )}
-                <span className="hidden sm:inline">
-                  {aiFormValidation.status === "valid"
-                    ? "AI validated"
-                    : aiFormValidation.status === "validating"
-                    ? "AI validating…"
-                    : aiFormValidation.status === "invalid"
-                    ? "AI invalid"
-                    : "AI not validated"}
-                </span>
-              </Badge>
+                  <span className="hidden sm:inline">Processing</span>
+                </Badge>
+              )}
+              {!canCompleteStep && !isApiProcessedAction && (
+                <Badge variant="outline" className="gap-1 h-6 px-2 text-muted-foreground font-normal">
+                  <Lock className="h-3 w-3" />
+                  <span className="hidden sm:inline">Read Only</span>
+                </Badge>
+              )}
+              {aiValidationEnabled && (
+                <Badge
+                  variant={
+                    aiFormValidation.status === "valid"
+                      ? "secondary"
+                      : aiFormValidation.status === "invalid"
+                      ? "destructive"
+                      : "outline"
+                  }
+                  className="gap-1 h-6 px-2 font-normal"
+                  title={aiFormValidation.comment || undefined}
+                >
+                  {aiFormValidation.status === "validating" ? (
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                  ) : aiFormValidation.status === "invalid" ? (
+                    <AlertCircle className="h-3 w-3" />
+                  ) : (
+                    <Bot className="h-3 w-3" />
+                  )}
+                  <span className="hidden sm:inline">
+                    {aiFormValidation.status === "valid"
+                      ? "AI validated"
+                      : aiFormValidation.status === "validating"
+                      ? "AI validating…"
+                      : aiFormValidation.status === "invalid"
+                      ? "AI invalid"
+                      : "AI not validated"}
+                  </span>
+                </Badge>
+              )}
+            </div>
+
+            {stepExplanation && (
+              <Collapsible open={isExplanationOpen} onOpenChange={setIsExplanationOpen}>
+                <div className="rounded-md border bg-background/80 px-2 py-1.5">
+                  <CollapsibleTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 px-1 w-full justify-between text-[11px] font-medium text-muted-foreground"
+                    >
+                      <span>{t("executionDataPanel.stepExplanation")}</span>
+                      {isExplanationOpen ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                    </Button>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="pt-1">
+                    <div
+                      className="ql-editor !p-0 text-xs leading-snug [&_p]:!my-0 [&_ul]:!my-0 [&_ol]:!my-0 [&_li]:!my-0 [&_h1]:!my-0 [&_h2]:!my-0 [&_h3]:!my-0 [&_blockquote]:!my-0"
+                      dangerouslySetInnerHTML={{ __html: stepExplanation }}
+                    />
+                  </CollapsibleContent>
+                </div>
+              </Collapsible>
             )}
           </div>
 
-          <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
+          <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end self-start">
             {aiValidationEnabled && !isApiProcessedAction && (
               <Button
                 size="sm"
@@ -2113,10 +2176,10 @@ export const ExecutionDataPanel = ({
           <div className="px-2 sm:px-3 pb-2 sm:pb-3 pt-0 border-t border-border/50">
             <div className="space-y-2">
               <div className="flex items-center gap-2">
-                <Bot className="h-4 w-4 text-primary" />
+                <Bot className="h-4 w-4 text-blue-600 dark:text-blue-400" />
                 <span className="text-sm font-semibold">Agent Decision</span>
               </div>
-              <div className="bg-primary/5 border border-primary/20 rounded-md p-2 sm:p-3">
+              <div className="bg-blue-50 border border-blue-200 dark:bg-blue-950/20 dark:border-blue-800 rounded-md p-2 sm:p-3">
                 <div className="flex items-center gap-2 mb-1">
                   <Badge variant="secondary" className="text-xs">
                     {agentDecisionChoice}
@@ -2178,6 +2241,7 @@ export const ExecutionDataPanel = ({
                 // Get field config to apply same settings (like compact_mode for arrays)
                 const fieldConfig = formFields[field.id];
                 return <FieldRenderer key={field.id} field={field} value={fieldValue} onChange={() => { }} disabled={true}
+                  primaryColor={FIXED_FORM_PRIMARY_COLOR}
                   // Dynamic options props for OptionField
                   dynamicOptions={form.dynamicOptions[field.id]} isLoadingDynamic={form.loadingDynamicOptions[field.id]} dynamicError={form.dynamicOptionsErrors[field.id]} onRetryDynamic={() => form.retryDynamicOptions(field.id)}
                   // FileField props
@@ -2192,6 +2256,7 @@ export const ExecutionDataPanel = ({
                     return <FieldRenderer field={cf} value={cv} onChange={onChildChange || (() => { })} disabled={true}
                     required={required}
                     labelPosition={hideLabel ? "hidden" : "top"}
+                    primaryColor={FIXED_FORM_PRIMARY_COLOR}
                     dynamicOptions={form.dynamicOptions[cf.id]} isLoadingDynamic={form.loadingDynamicOptions[cf.id]} dynamicError={form.dynamicOptionsErrors[cf.id]} onRetryDynamic={() => form.retryDynamicOptions(cf.id)}
                     onUpload={file => form.handleFileUpload(cf.id, file)} onViewFile={onFileView} isUploading={form.uploadingFiles[cf.id]}
                     signedUrl={isFileChild && cfFilePath ? form.signedUrls[cfFilePath] : form.signedUrls[`${eds.id}-${cf.id}`]} />;

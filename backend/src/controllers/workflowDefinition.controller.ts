@@ -71,6 +71,124 @@ function legacyWorkflowPermissionType(type: string): string {
   return type;
 }
 
+type ReminderMode = 'none' | 'repeat' | 'schedule';
+type NormalizedStepNotifications = {
+  assignment: { enabled: boolean };
+  reminder: {
+    mode: ReminderMode;
+    delay_minutes: number;
+    repeat_every_minutes?: number;
+    max_count?: number;
+    schedule_minutes: number[];
+  };
+};
+
+function parsePositiveInteger(value: unknown, fallbackValue: number): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallbackValue;
+  const rounded = Math.round(parsed);
+  return rounded > 0 ? rounded : fallbackValue;
+}
+
+function stepSupportsNotifications(stepType: string, actionType: string, decisionNodeType: string): boolean {
+  if (stepType === 'edit_form') return true;
+  if (stepType === 'action') return actionType === 'manual';
+  if (stepType === 'decision') return ['Human', 'Agent_Human', 'Agent + Human'].includes(decisionNodeType);
+  return false;
+}
+
+function normalizeStepNotifications(input: unknown): {
+  value?: NormalizedStepNotifications;
+  error?: string;
+} {
+  if (input === null || input === undefined) {
+    return {
+      value: {
+        assignment: { enabled: true },
+        reminder: {
+          mode: 'none',
+          delay_minutes: 24 * 60,
+          repeat_every_minutes: 24 * 60,
+          max_count: undefined,
+          schedule_minutes: [24 * 60],
+        },
+      },
+    };
+  }
+
+  if (typeof input !== 'object') {
+    return { error: 'notifications must be an object' };
+  }
+
+  const source = input as Record<string, any>;
+  const assignmentInput =
+    source.assignment && typeof source.assignment === 'object' ? source.assignment : {};
+  const reminderInput =
+    source.reminder && typeof source.reminder === 'object' ? source.reminder : {};
+
+  const rawMode =
+    typeof reminderInput.mode === 'string' ? reminderInput.mode.trim().toLowerCase() : 'none';
+  if (!['none', 'repeat', 'schedule', 'once'].includes(rawMode)) {
+    return { error: 'notifications.reminder.mode must be one of: none, repeat, schedule' };
+  }
+  const normalizedMode: ReminderMode = rawMode === 'repeat' ? 'repeat' : rawMode === 'schedule' || rawMode === 'once' ? 'schedule' : 'none';
+
+  const delayMinutes = parsePositiveInteger(reminderInput.delay_minutes, 24 * 60);
+  const repeatEveryMinutes = parsePositiveInteger(reminderInput.repeat_every_minutes, 24 * 60);
+  const maxCount =
+    reminderInput.max_count === null || reminderInput.max_count === undefined
+      ? undefined
+      : parsePositiveInteger(reminderInput.max_count, 1);
+  const scheduleMinutesRaw = Array.isArray(reminderInput.schedule_minutes)
+    ? reminderInput.schedule_minutes
+    : reminderInput.delay_minutes
+      ? [reminderInput.delay_minutes]
+      : [];
+  const scheduleMinutes = scheduleMinutesRaw
+    .map((entry: unknown) => Number(entry))
+    .filter((entry: number) => Number.isFinite(entry) && entry > 0)
+    .map((entry: number) => Math.round(entry))
+    .sort((a: number, b: number) => a - b)
+    .filter((entry: number, index: number, arr: number[]) => index === 0 || entry !== arr[index - 1]);
+
+  if (normalizedMode === 'schedule' && scheduleMinutes.length === 0) {
+    return { error: 'notifications.reminder.schedule_minutes must contain at least one positive delay' };
+  }
+
+  return {
+    value: {
+      assignment: { enabled: assignmentInput.enabled !== false },
+      reminder: {
+        mode: normalizedMode,
+        delay_minutes: normalizedMode === 'repeat' ? delayMinutes : 24 * 60,
+        repeat_every_minutes: normalizedMode === 'repeat' ? repeatEveryMinutes : undefined,
+        max_count: normalizedMode === 'repeat' ? maxCount : undefined,
+        schedule_minutes: normalizedMode === 'schedule' ? scheduleMinutes : [24 * 60],
+      },
+    },
+  };
+}
+
+function normalizeStepExplanation(input: unknown): string | undefined {
+  if (input === null || input === undefined) return undefined;
+
+  const raw = typeof input === 'string' ? input : String(input);
+  const trimmed = raw.trim();
+  if (!trimmed) return undefined;
+
+  // Consider rich-text editor fillers as empty content.
+  const plainText = trimmed
+    .replace(/<br\s*\/?>/gi, ' ')
+    .replace(/<\/p>/gi, ' ')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&nbsp;|&#160;/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!plainText) return undefined;
+  return trimmed;
+}
+
 export const workflowDefinitionController = {
   /** GET /api/companies/:companyId/workflows - list workflows user has permission to execute */
   async listWorkflows(req: AuthRequest, res: Response) {
@@ -432,9 +550,33 @@ export const workflowDefinitionController = {
         const stepType = step.step_type || 'action';
         const actionType = step.action_type || 'manual';
         const decisionNodeType = step.decision_node_type || 'Human';
-        const config = (step.config ?? {}) as Record<string, any>;
+        const originalConfig = (step.config ?? {}) as Record<string, any>;
+        const config: Record<string, any> = { ...originalConfig };
+        const normalizedExplanation = normalizeStepExplanation(config.explanation);
         const isAgentDecision = stepType === 'decision' && ['Agent', 'Agent_Human'].includes(decisionNodeType);
         const isExternalForm = stepType === 'edit_form' && config.allow_external_assignment === true;
+        const supportsNotifications = stepSupportsNotifications(stepType, actionType, decisionNodeType);
+        const normalizedNotifications = normalizeStepNotifications(config.notifications);
+
+        if (normalizedExplanation) {
+          config.explanation = normalizedExplanation;
+        } else if ('explanation' in config) {
+          delete config.explanation;
+        }
+
+        if (normalizedNotifications.error) {
+          return res.status(400).json({
+            error: 'Invalid notifications configuration',
+            details: `Step "${step.name || 'Unnamed step'}" ${normalizedNotifications.error}`,
+          });
+        }
+
+        if (supportsNotifications) {
+          config.notifications = normalizedNotifications.value;
+        } else if ('notifications' in config) {
+          delete config.notifications;
+        }
+        step.config = config;
 
         const requiresAssignment =
           (stepType === 'action' && actionType === 'manual') ||
@@ -519,6 +661,7 @@ export const workflowDefinitionController = {
 
       for (const step of steps) {
         const id = step.id;
+        const config = (step.config ?? {}) as Record<string, any>;
         const data = {
           workflow_id: workflowId,
           company_id: companyId,
@@ -526,7 +669,7 @@ export const workflowDefinitionController = {
           name: step.name || 'Step',
           position_x: step.position_x ?? 0,
           position_y: step.position_y ?? 0,
-          config: step.config ?? {},
+          config,
           assigned_to_user_id: step.assigned_to_user_id || null,
           assigned_to_group_id: step.assigned_to_group_id || null,
           decision_node_type: step.decision_node_type || null,

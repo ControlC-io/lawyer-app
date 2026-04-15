@@ -152,4 +152,22 @@ export const api = {
     if (res.status === 204) return;
     await handleResponse(res);
   },
+
+  async getBlob(path: string, options?: { apiKey?: string; skipAuth?: boolean }): Promise<Blob> {
+    const res = await fetch(`${BASE}${path}`, {
+      method: 'GET',
+      headers: headers(!options?.skipAuth, options?.apiKey),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      let err: ApiError | null = null;
+      try {
+        err = text ? (JSON.parse(text) as ApiError) : null;
+      } catch {
+        err = null;
+      }
+      throw new Error(err?.details || err?.error || res.statusText || 'Request failed');
+    }
+    return res.blob();
+  },
 };

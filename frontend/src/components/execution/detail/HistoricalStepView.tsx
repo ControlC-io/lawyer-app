@@ -2,13 +2,17 @@ import { useState, useEffect, useCallback } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { AlertCircle, ArrowLeft, Eye } from "lucide-react";
+import { AlertCircle, ArrowLeft, Eye, ChevronDown, ChevronUp } from "lucide-react";
 import { format } from "date-fns";
 import { fr, enUS } from "date-fns/locale";
 import { api } from "@/lib/api";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { toast } from "@/hooks/use-toast";
 import { FieldRenderer } from "../form/FieldRenderer";
+import { getStepExecutionStyles } from "@/lib/stepTypeColors";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+
+const FIXED_FORM_PRIMARY_COLOR = "#2A5CE5";
 
 interface HistoricalStepViewProps {
   step: any;
@@ -17,6 +21,23 @@ interface HistoricalStepViewProps {
   onFileView: (url: string, name: string, path: string) => void;
   isExecutionCompleted?: boolean;
 }
+
+const normalizeStepExplanation = (value: unknown): string | undefined => {
+  if (value === null || value === undefined) return undefined;
+  const raw = typeof value === "string" ? value : String(value);
+  const trimmed = raw.trim();
+  if (!trimmed) return undefined;
+
+  const plainText = trimmed
+    .replace(/<br\s*\/?>/gi, " ")
+    .replace(/<\/p>/gi, " ")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&nbsp;|&#160;/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return plainText ? trimmed : undefined;
+};
 
 export const HistoricalStepView = ({
   step,
@@ -28,10 +49,19 @@ export const HistoricalStepView = ({
   const { t, language } = useLanguage();
   const dateLocale = language === "fr" ? fr : enUS;
   const stepData = step?.step_data || {};
+  const historicalStepStyle = getStepExecutionStyles(step?.workflow_steps?.step_type);
+  const stepMeta = (stepData && typeof stepData === "object" && !Array.isArray(stepData))
+    ? (stepData._step_meta as Record<string, any> | undefined)
+    : undefined;
+  const openedAt = step?.started_at ?? stepMeta?.opened_at;
+  const closedAt = step?.completed_at ?? stepMeta?.closed_at;
+  const closedBy = stepMeta?.closed_by_name ?? stepMeta?.closed_by_email ?? stepMeta?.closed_by_user_id;
   const [signedUrls, setSignedUrls] = useState<Record<string, string>>({});
+  const [isExplanationOpen, setIsExplanationOpen] = useState(false);
   
   // Get form configuration from step to apply same settings (like compact_mode for arrays)
   const stepConfig = step?.workflow_steps?.config || {};
+  const stepExplanation = normalizeStepExplanation(stepConfig.explanation);
   const formFields = (stepConfig.form_fields || {}) as Record<string, any>;
 
   // Show decision information if this is a decision step
@@ -161,6 +191,10 @@ export const HistoricalStepView = ({
     }
   }, [executionData, stepData]);
 
+  useEffect(() => {
+    setIsExplanationOpen(false);
+  }, [step?.id]);
+
   const handleFileView = async (url: string, name: string, path: string) => {
     // If it's a signed URL already, just view it
     if (url.startsWith('http')) {
@@ -200,10 +234,16 @@ export const HistoricalStepView = ({
 
   return (
     <div className="space-y-3 sm:space-y-4 w-full min-w-0 max-w-full overflow-hidden">
-      <Card className="border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/20 w-full min-w-0 max-w-full overflow-x-hidden">
+      <Card
+        className="w-full min-w-0 max-w-full overflow-x-hidden"
+        style={{
+          borderColor: historicalStepStyle.borderColor,
+          backgroundColor: historicalStepStyle.backgroundColor,
+        }}
+      >
         <CardHeader className="pb-2 sm:pb-3 px-2 sm:px-3 md:px-4 lg:px-6 min-w-0 max-w-full">
           <CardTitle className="flex items-center gap-2 text-sm sm:text-base md:text-lg break-words min-w-0 max-w-full">
-            <AlertCircle className="h-4 w-4 sm:h-5 sm:w-5 text-blue-600 dark:text-blue-400 flex-shrink-0" />
+            <AlertCircle className="h-4 w-4 sm:h-5 sm:w-5 flex-shrink-0" style={{ color: historicalStepStyle.textColor }} />
             <span className="min-w-0 max-w-full">Viewing Historical Step</span>
           </CardTitle>
           <CardDescription className="text-xs sm:text-sm break-words min-w-0 max-w-full">
@@ -227,12 +267,47 @@ export const HistoricalStepView = ({
           <CardTitle className="text-sm sm:text-base md:text-lg break-words min-w-0 max-w-full">
             {step?.workflow_steps?.name} - {t("executionHistoricalStep.historicalDataTitle")}
           </CardTitle>
-          <CardDescription className="text-xs sm:text-sm break-words min-w-0 max-w-full">
-            {t("executionHistoricalStep.snapshotDescription")}{" "}
-            {step?.completed_at
-              ? format(new Date(step.completed_at), "PPpp", { locale: dateLocale })
-              : t("executionHistoricalStep.unknownDate")}
+          <CardDescription className="text-xs sm:text-sm break-words min-w-0 max-w-full space-y-1">
+            <p>
+              {t("executionHistoricalStep.openedAt")}{" "}
+              {openedAt
+                ? format(new Date(openedAt), "PPpp", { locale: dateLocale })
+                : t("executionHistoricalStep.unknownDate")}
+            </p>
+            <p>
+              {t("executionHistoricalStep.closedAt")}{" "}
+              {closedAt
+                ? format(new Date(closedAt), "PPpp", { locale: dateLocale })
+                : t("executionHistoricalStep.unknownDate")}
+            </p>
+            <p>
+              {t("executionHistoricalStep.closedBy")}{" "}
+              {closedBy || t("executionHistoricalStep.unknownCloser")}
+            </p>
           </CardDescription>
+          {stepExplanation && (
+            <Collapsible open={isExplanationOpen} onOpenChange={setIsExplanationOpen}>
+              <div className="rounded-md border bg-muted/30 px-2 py-1.5">
+                <CollapsibleTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 px-1 w-full justify-between text-[11px] font-medium text-muted-foreground"
+                  >
+                    <span>{t("executionHistoricalStep.stepExplanation")}</span>
+                    {isExplanationOpen ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                  </Button>
+                </CollapsibleTrigger>
+                <CollapsibleContent className="pt-1">
+                  <div
+                    className="ql-editor !p-0 text-xs leading-snug [&_p]:!my-0 [&_ul]:!my-0 [&_ol]:!my-0 [&_li]:!my-0 [&_h1]:!my-0 [&_h2]:!my-0 [&_h3]:!my-0 [&_blockquote]:!my-0"
+                    dangerouslySetInnerHTML={{ __html: stepExplanation }}
+                  />
+                </CollapsibleContent>
+              </div>
+            </Collapsible>
+          )}
         </CardHeader>
         <CardContent className="px-2 sm:px-3 md:px-4 lg:px-6 pb-2 sm:pb-3 md:pb-4 lg:pb-6 min-w-0 max-w-full">
           <div className="space-y-6 min-w-0 overflow-hidden">
@@ -308,6 +383,7 @@ export const HistoricalStepView = ({
                             value={value}
                             onChange={() => { }} // Read-only
                             disabled={true}
+                            primaryColor={FIXED_FORM_PRIMARY_COLOR}
                             childFields={allFields}
                             fieldConfig={fieldConfig}
                             getSignedUrl={getSignedUrl}
@@ -323,6 +399,7 @@ export const HistoricalStepView = ({
                                   disabled={true}
                                   required={required}
                                   labelPosition={hideLabel ? "hidden" : "top"}
+                                  primaryColor={FIXED_FORM_PRIMARY_COLOR}
                                   signedUrl={isFileChild && cfFilePath ? signedUrls[cfFilePath] : signedUrls[childField.id]}
                                   onViewFile={handleFileView}
                                 />

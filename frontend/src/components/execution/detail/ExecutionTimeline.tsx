@@ -5,16 +5,7 @@ import { format } from "date-fns";
 import { fr, enUS } from "date-fns/locale";
 import { CheckCircle, Clock, PlayCircle, XCircle, Pause, FileText, AlertCircle, ChevronLeft } from "lucide-react";
 import { useLanguage } from "@/contexts/LanguageContext";
-
-// Step type colors aligned with workflow editor (WorkflowNode); light + dark variants so steps fit both themes
-const stepTypeStyles: Record<string, { border: string; bg: string; text: string; ring: string; completedDot: string; completedIcon: string; runningDot: string }> = {
-  start: { border: "border-emerald-400 dark:border-emerald-600", bg: "bg-emerald-50/60 dark:bg-emerald-950/50", text: "text-emerald-700 dark:text-emerald-300", ring: "ring-emerald-400", completedDot: "bg-emerald-500", completedIcon: "text-white", runningDot: "bg-emerald-500" },
-  end: { border: "border-rose-400 dark:border-rose-600", bg: "bg-rose-50/60 dark:bg-rose-950/50", text: "text-rose-700 dark:text-rose-300", ring: "ring-rose-400", completedDot: "bg-rose-500", completedIcon: "text-white", runningDot: "bg-rose-500" },
-  decision: { border: "border-amber-400 dark:border-amber-600", bg: "bg-amber-50/60 dark:bg-amber-950/50", text: "text-amber-700 dark:text-amber-300", ring: "ring-amber-400", completedDot: "bg-amber-500", completedIcon: "text-white", runningDot: "bg-amber-500" },
-  action: { border: "border-blue-400 dark:border-blue-600", bg: "bg-blue-50/60 dark:bg-blue-950/50", text: "text-blue-700 dark:text-blue-300", ring: "ring-blue-400", completedDot: "bg-blue-500", completedIcon: "text-white", runningDot: "bg-blue-500" },
-  edit_form: { border: "border-primary", bg: "bg-primary/10 dark:bg-primary/20", text: "text-primary", ring: "ring-primary", completedDot: "bg-primary", completedIcon: "text-primary-foreground", runningDot: "bg-primary" },
-  file: { border: "border-orange-400 dark:border-orange-600", bg: "bg-orange-50/60 dark:bg-orange-950/50", text: "text-orange-700 dark:text-orange-300", ring: "ring-orange-400", completedDot: "bg-orange-500", completedIcon: "text-white", runningDot: "bg-orange-500" },
-};
+import { getStepExecutionStyles } from "@/lib/stepTypeColors";
 
 interface ExecutionTimelineProps {
   execution: any;
@@ -60,6 +51,32 @@ export const ExecutionTimeline = ({
       case "paused": return "outline";
       default: return "default";
     }
+  };
+
+  const resolveClosedByLabel = (step: any): string | null => {
+    if (typeof step?.closed_by_label === "string" && step.closed_by_label.trim()) return step.closed_by_label.trim();
+    const stepData = step?.step_data;
+    if (!stepData || typeof stepData !== "object" || Array.isArray(stepData)) return null;
+
+    const stepMeta = (stepData as Record<string, any>)._step_meta;
+    if (stepMeta && typeof stepMeta === "object" && !Array.isArray(stepMeta)) {
+      const closedByName = typeof stepMeta.closed_by_name === "string" ? stepMeta.closed_by_name.trim() : "";
+      if (closedByName) return closedByName;
+
+      const closedBySource = typeof stepMeta.closed_by_source === "string" ? stepMeta.closed_by_source : null;
+      if (closedBySource === "company_api_key") return "API";
+      if (closedBySource === "portal") return "public";
+
+      const closedByEmail = typeof stepMeta.closed_by_email === "string" ? stepMeta.closed_by_email.trim() : "";
+      if (closedByEmail) return closedByEmail;
+    }
+
+    const submissionType = typeof (stepData as Record<string, any>)._submission_type === "string"
+      ? (stepData as Record<string, any>)._submission_type
+      : null;
+    if (submissionType === "portal") return "public";
+
+    return null;
   };
 
   if (isCollapsed) {
@@ -157,19 +174,39 @@ export const ExecutionTimeline = ({
                       const isClickable = isCompleted || isActiveStep;
                       const isCurrentlyViewing = viewingHistoricalStep === step.id;
                       const stepType = step.workflow_steps?.step_type ?? "action";
-                      const typeStyle = stepTypeStyles[stepType] ?? stepTypeStyles.action;
+                      const typeStyle = getStepExecutionStyles(stepType);
+                      const stepContainerShadow = isCurrentlyViewing
+                        ? `inset 0 0 0 2px ${typeStyle.ringColor}`
+                        : isActiveStep
+                          ? `0 0 0 2px ${typeStyle.ringColor}`
+                          : "none";
 
                       return (
                         <div
                           key={step.id}
-                          className={`relative pl-5 pb-2 border-l-2 last:border-l-0 transition-colors ${typeStyle.border} ${typeStyle.bg} rounded-md p-1.5 -ml-1.5 ${isCurrentlyViewing ? `ring-2 ${typeStyle.ring} ring-inset` : isActiveStep ? `ring-2 ring-offset-2 ring-offset-background ${typeStyle.ring}` : ""} ${isClickable && !isCurrentlyViewing ? "cursor-pointer hover:bg-muted/60" : ""}`}
+                          className={`relative pl-5 pb-2 border-l-2 last:border-l-0 transition-all rounded-md p-1.5 -ml-1.5 ${isClickable && !isCurrentlyViewing ? "cursor-pointer hover:brightness-95" : ""}`}
+                          style={{
+                            borderLeftColor: typeStyle.borderColor,
+                            backgroundColor: typeStyle.backgroundColor,
+                            boxShadow: stepContainerShadow,
+                          }}
                           onClick={() => {
                             if (isClickable && !isCurrentlyViewing) onStepClick(step.id);
                           }}
                         >
                           <div className="absolute -left-[7px] top-1.5">
-                            <div className={`w-3 h-3 rounded-full flex items-center justify-center ${step.status === "completed" ? typeStyle.completedDot : step.status === "running" ? `${typeStyle.runningDot} border-2 border-white shadow-sm` : step.status === "failed" ? "bg-destructive" : "bg-muted"}`}>
-                              {step.status === "completed" && <CheckCircle className={`h-2.5 w-2.5 ${typeStyle.completedIcon}`} />}
+                            <div
+                              className={`w-3 h-3 rounded-full flex items-center justify-center ${step.status === "running" ? "border-2 border-white shadow-sm" : ""} ${step.status === "failed" ? "bg-destructive" : step.status === "pending" ? "bg-muted" : ""}`}
+                              style={{
+                                backgroundColor:
+                                  step.status === "completed"
+                                    ? typeStyle.completedDotColor
+                                    : step.status === "running"
+                                      ? typeStyle.runningDotColor
+                                      : undefined,
+                              }}
+                            >
+                              {step.status === "completed" && <CheckCircle className="h-2.5 w-2.5" style={{ color: typeStyle.completedIconColor }} />}
                               {step.status === "running" && <div className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />}
                               {step.status === "failed" && <XCircle className="h-2.5 w-2.5 text-destructive-foreground" />}
                             </div>
@@ -177,7 +214,7 @@ export const ExecutionTimeline = ({
 
                           <div className="space-y-0.5">
                             <div className="flex items-center justify-between gap-2 flex-wrap">
-                              <h3 className={`font-semibold text-xs break-words flex-1 min-w-0 ${typeStyle.text}`}>
+                              <h3 className="font-semibold text-xs break-words flex-1 min-w-0" style={{ color: typeStyle.textColor }}>
                                 {step.workflow_steps?.name}
                               </h3>
                               <div className="flex gap-1 flex-shrink-0">
@@ -199,6 +236,11 @@ export const ExecutionTimeline = ({
                             </div>
 
                             {step.started_at && <p className="text-[10px] text-muted-foreground break-words">{format(new Date(step.started_at), "dd/MM/yyyy HH:mm:ss", { locale: dateLocale })}</p>}
+                            {step.status === "completed" && resolveClosedByLabel(step) && (
+                              <p className="text-[10px] text-muted-foreground break-words">
+                                {t("executionTimeline.closedBy")} {resolveClosedByLabel(step)}
+                              </p>
+                            )}
 
                             {step.decision_choice && (
                               <div className="mt-1 space-y-0.5">

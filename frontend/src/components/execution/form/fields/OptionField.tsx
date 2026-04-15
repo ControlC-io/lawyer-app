@@ -22,6 +22,11 @@ interface OptionFieldProps {
   onRetryDynamic?: () => void;
 }
 
+interface OptionItem {
+  value: string;
+  label: string;
+}
+
 export const OptionField = ({ 
   field, 
   value, 
@@ -42,14 +47,28 @@ export const OptionField = ({
   const isMultiple = fieldType === "multiple_option";
   
   // Get options based on source
-  const getOptions = (): string[] => {
+  const getOptions = (): OptionItem[] => {
     if (field.options_source === "dynamic") {
-      return dynamicOptions || [];
+      return (dynamicOptions || []).map((option) => ({ value: option, label: option }));
     }
-    return (field.options || []).map((opt: any) => typeof opt === 'string' ? opt : opt.value || opt.label);
+    return (field.options || []).map((opt: any) => {
+      if (typeof opt === "string") {
+        return { value: opt, label: opt };
+      }
+      const value = typeof opt?.value === "string" && opt.value.trim()
+        ? opt.value
+        : typeof opt?.label === "string"
+          ? opt.label
+          : "";
+      const label = typeof opt?.label === "string" && opt.label.trim()
+        ? opt.label
+        : value;
+      return { value, label };
+    });
   };
 
   const options = getOptions();
+  const getLabelByValue = (optionValue: string) => options.find((opt) => opt.value === optionValue)?.label || optionValue;
   const isDynamic = field.options_source === "dynamic";
   const hasFetchedOptions = isDynamic && (dynamicOptions !== undefined && dynamicOptions.length > 0);
   const shouldShowFetchButton = isDynamic && !hasFetchedOptions && !isLoadingDynamic && !dynamicError;
@@ -169,18 +188,18 @@ export const OptionField = ({
                     <CommandGroup className="max-h-60 overflow-auto">
                       {options.map((option) => (
                         <CommandItem
-                          key={option}
-                          value={option}
-                          onSelect={() => handleSelect(option)}
+                          key={option.value}
+                          value={option.label}
+                          onSelect={() => handleSelect(option.value)}
                           className={cn(primaryColor && "use-portal-primary")}
                         >
                           <Check
                             className={cn(
                               "mr-2 h-4 w-4",
-                              selectedValues.includes(option) ? "opacity-100" : "opacity-0"
+                              selectedValues.includes(option.value) ? "opacity-100" : "opacity-0"
                             )}
                           />
-                          {option}
+                          {option.label}
                         </CommandItem>
                       ))}
                     </CommandGroup>
@@ -196,7 +215,7 @@ export const OptionField = ({
           <div className="flex flex-wrap gap-2 mt-2">
             {selectedValues.map((val: string) => (
               <Badge key={val} variant="secondary" className="flex items-center gap-1">
-                {val}
+                {getLabelByValue(val)}
                 {!disabled && (
                   <X
                     className="h-3 w-3 cursor-pointer hover:text-destructive"
@@ -220,12 +239,12 @@ export const OptionField = ({
 
   // Single select
   const selectedValue = value || "";
-  const selectedOption = options.find((opt) => opt === selectedValue);
+  const selectedOption = options.find((opt) => opt.value === selectedValue);
   
   // For disabled/read-only fields, show the value even if options haven't loaded or value isn't in options
   const displayValue = disabled 
     ? (selectedValue || (isLoadingDynamic ? "Loading options..." : "No value"))
-    : (isLoadingDynamic ? "Loading options..." : selectedOption || "Select an option...");
+    : (isLoadingDynamic ? "Loading options..." : selectedOption?.label || "Select an option...");
 
   const handleSingleSelect = (optionValue: string) => {
     onChange(optionValue);
@@ -322,18 +341,18 @@ export const OptionField = ({
                   <CommandGroup className="max-h-60 overflow-auto">
                     {options.map((option) => (
                       <CommandItem
-                        key={option}
-                        value={option}
-                        onSelect={() => handleSingleSelect(option)}
+                        key={option.value}
+                        value={option.label}
+                        onSelect={() => handleSingleSelect(option.value)}
                         className={cn(primaryColor && "use-portal-primary")}
                       >
                         <Check
                           className={cn(
                             "mr-2 h-4 w-4",
-                            selectedValue === option ? "opacity-100" : "opacity-0"
+                            selectedValue === option.value ? "opacity-100" : "opacity-0"
                           )}
                         />
-                        {option}
+                        {option.label}
                       </CommandItem>
                     ))}
                   </CommandGroup>

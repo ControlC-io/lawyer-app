@@ -14,6 +14,14 @@ import { canUserAccessFolder, getUserGroupIdsInCompany } from '../lib/folderAcce
 import { getAccessibleFileIds, canUserAccessFileByMetadata } from '../lib/documentAccess';
 import { storageService } from '../services/storage.service';
 import bcrypt from 'bcryptjs';
+import {
+  SUPPORTED_PORTAL_LANGUAGES,
+  type PortalLanguage,
+  normalizePortalDefaultLanguage,
+  normalizePortalLanguages,
+  collectPortalTranslationRows,
+  applyPortalTranslationUpdate,
+} from '../services/portalTranslation.service';
 
 
 /**
@@ -71,6 +79,83 @@ async function getUserGroupIdsForCompany(userId: string, companyId: string): Pro
   return memberships
     .map((membership) => membership.group_id)
     .filter((id): id is string => id !== null);
+}
+
+function resolvePortalLogoUrl(company: {
+  id: string;
+  slug: string | null;
+  logo_storage_path: string | null;
+  logo_url: string | null;
+}) {
+  const rawLogoUrl =
+    company.logo_storage_path && company.slug
+      ? `/api/portal/${company.id.slice(0, 6)}_${company.slug}/logo`
+      : company.logo_url ?? null;
+  return typeof rawLogoUrl === 'string' &&
+    rawLogoUrl.startsWith('/api/portal/') &&
+    rawLogoUrl.endsWith('/logo') &&
+    !company.logo_storage_path
+    ? null
+    : rawLogoUrl;
+}
+
+function resolveInternalLogoUrl(company: {
+  id: string;
+  internal_logo_storage_path: string | null;
+  internal_logo_url: string | null;
+}) {
+  return company.internal_logo_storage_path
+    ? `/api/companies/${company.id}/internal-logo`
+    : company.internal_logo_url ?? null;
+}
+
+function isValidHexColor(value: string) {
+  return /^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$/.test(value);
+}
+
+interface PortalTranslationUpdateRowInput {
+  workflow_id?: unknown;
+  path?: unknown;
+  translations?: unknown;
+}
+
+interface ParsedPortalTranslationUpdate {
+  workflowId: string;
+  path: string;
+  translations: Array<{ language: PortalLanguage; value: string | null }>;
+}
+
+function parsePortalTranslationUpdates(input: unknown): ParsedPortalTranslationUpdate[] {
+  if (!Array.isArray(input)) return [];
+
+  const updates: ParsedPortalTranslationUpdate[] = [];
+  for (const row of input as PortalTranslationUpdateRowInput[]) {
+    if (!row || typeof row.workflow_id !== 'string' || typeof row.path !== 'string') continue;
+    const workflowId = row.workflow_id.trim();
+    const path = row.path.trim();
+    if (!workflowId || !path) continue;
+
+    const translationsRaw = row.translations;
+    if (!translationsRaw || typeof translationsRaw !== 'object' || Array.isArray(translationsRaw)) continue;
+
+    const parsedTranslations: Array<{ language: PortalLanguage; value: string | null }> = [];
+    for (const [languageRaw, valueRaw] of Object.entries(translationsRaw as Record<string, unknown>)) {
+      const language = languageRaw.trim().toLowerCase();
+      if (!SUPPORTED_PORTAL_LANGUAGES.includes(language as PortalLanguage)) continue;
+
+      if (typeof valueRaw === 'string') {
+        const trimmed = valueRaw.trim();
+        parsedTranslations.push({ language: language as PortalLanguage, value: trimmed || null });
+      } else if (valueRaw === null) {
+        parsedTranslations.push({ language: language as PortalLanguage, value: null });
+      }
+    }
+
+    if (parsedTranslations.length === 0) continue;
+    updates.push({ workflowId, path, translations: parsedTranslations });
+  }
+
+  return updates;
 }
 
 export const companiesController = {
@@ -165,9 +250,14 @@ export const companiesController = {
           slug: true,
           logo_url: true,
           logo_storage_path: true,
+          internal_logo_url: true,
+          internal_logo_storage_path: true,
+          internal_primary_color: true,
           portal_description: true,
           portal_primary_color: true,
           portal_enabled: true,
+          portal_default_language: true,
+          portal_enabled_languages: true,
         },
       });
 
@@ -175,19 +265,23 @@ export const companiesController = {
         return res.status(404).json({ error: 'Company not found', details: 'Company not found' });
       }
 
-      const rawLogoUrl =
-        company.logo_storage_path && company.slug
-          ? `/api/portal/${companyId.slice(0, 6)}_${company.slug}/logo`
-          : company.logo_url ?? null;
-      const effectiveLogoUrl =
-        typeof rawLogoUrl === 'string' && rawLogoUrl.startsWith('/api/portal/') && rawLogoUrl.endsWith('/logo') && !company.logo_storage_path
-          ? null
-          : rawLogoUrl;
+      const effectiveLogoUrl = resolvePortalLogoUrl({
+        id: company.id,
+        slug: company.slug,
+        logo_storage_path: company.logo_storage_path,
+        logo_url: company.logo_url,
+      });
+      const effectiveInternalLogoUrl = await resolveInternalLogoUrl({
+        id: company.id,
+        internal_logo_storage_path: company.internal_logo_storage_path,
+        internal_logo_url: company.internal_logo_url,
+      });
 
       // Return full api_key so dashboard can call execution endpoints with x-api-key
       return res.json({
         ...company,
         logo_url: effectiveLogoUrl,
+        internal_logo_url: effectiveInternalLogoUrl,
         has_api_key: !!company.api_key,
       });
     } catch (error) {
@@ -205,7 +299,22 @@ export const companiesController = {
   async updateCompany(req: AuthRequest, res: Response) {
     try {
       const { companyId } = req.params;
-      const { name, is_active, regenerate_api_key, slug, logo_url, portal_description, portal_primary_color, portal_enabled, clear_logo_upload } = req.body;
+      const {
+        name,
+        is_active,
+        regenerate_api_key,
+        slug,
+        logo_url,
+        portal_description,
+        portal_primary_color,
+        portal_enabled,
+        portal_default_language,
+        portal_enabled_languages,
+        clear_logo_upload,
+        internal_logo_url,
+        internal_primary_color,
+        clear_internal_logo_upload,
+      } = req.body;
 
       if (!companyId) {
         return res.status(400).json({ error: 'Missing company ID', details: 'companyId is required' });
@@ -262,6 +371,42 @@ export const companiesController = {
           updateData.logo_storage_path = null;
         }
       }
+
+      if ('internal_logo_url' in req.body) {
+        const nextInternalLogoUrl = typeof internal_logo_url === 'string' ? internal_logo_url.trim() : '';
+        updateData.internal_logo_url = nextInternalLogoUrl || null;
+        if (nextInternalLogoUrl) {
+          const current = await prisma.company.findUnique({
+            where: { id: companyId },
+            select: { internal_logo_storage_path: true },
+          });
+          if (current?.internal_logo_storage_path) {
+            const bucket = storageService.getBucketName();
+            try {
+              await storageService.deleteFile(bucket, current.internal_logo_storage_path);
+            } catch (e) {
+              console.error('updateCompany: failed to delete internal logo from MinIO:', e);
+            }
+          }
+          updateData.internal_logo_storage_path = null;
+        }
+      }
+
+      if (clear_internal_logo_upload === true) {
+        const current = await prisma.company.findUnique({
+          where: { id: companyId },
+          select: { internal_logo_storage_path: true },
+        });
+        if (current?.internal_logo_storage_path) {
+          const bucket = storageService.getBucketName();
+          try {
+            await storageService.deleteFile(bucket, current.internal_logo_storage_path);
+          } catch (e) {
+            console.error('updateCompany: failed to clear internal logo from MinIO:', e);
+          }
+          updateData.internal_logo_storage_path = null;
+        }
+      }
       // Allow clearing portal description: accept string (trimmed) or null/empty
       if ('portal_description' in req.body) {
         updateData.portal_description =
@@ -271,12 +416,33 @@ export const companiesController = {
       }
       if (typeof portal_primary_color === 'string') {
         const color = portal_primary_color.trim();
-        if (color && !/^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$/.test(color)) {
+        if (color && !isValidHexColor(color)) {
           return res.status(400).json({ error: 'Invalid color', details: 'portal_primary_color must be a valid hex color (e.g. #3B82F6)' });
         }
         updateData.portal_primary_color = color || null;
       }
+      if ('internal_primary_color' in req.body) {
+        const color = typeof internal_primary_color === 'string' ? internal_primary_color.trim() : '';
+        if (color && !isValidHexColor(color)) {
+          return res.status(400).json({ error: 'Invalid color', details: 'internal_primary_color must be a valid hex color (e.g. #3B82F6)' });
+        }
+        updateData.internal_primary_color = color || null;
+      }
       if (typeof portal_enabled === 'boolean') updateData.portal_enabled = portal_enabled;
+      if ('portal_enabled_languages' in req.body || 'portal_default_language' in req.body) {
+        const enabledLanguages = normalizePortalLanguages(portal_enabled_languages);
+        const defaultLanguage = normalizePortalDefaultLanguage(portal_default_language, enabledLanguages);
+
+        if (!enabledLanguages.includes(defaultLanguage)) {
+          return res.status(400).json({
+            error: 'Invalid portal language settings',
+            details: 'portal_default_language must be included in portal_enabled_languages',
+          });
+        }
+
+        updateData.portal_enabled_languages = enabledLanguages;
+        updateData.portal_default_language = defaultLanguage;
+      }
 
       const company = await prisma.company.update({
         where: { id: companyId },
@@ -290,27 +456,214 @@ export const companiesController = {
           slug: true,
           logo_url: true,
           logo_storage_path: true,
+          internal_logo_url: true,
+          internal_logo_storage_path: true,
+          internal_primary_color: true,
           portal_description: true,
           portal_primary_color: true,
           portal_enabled: true,
+          portal_default_language: true,
+          portal_enabled_languages: true,
         },
       });
 
-      const rawLogoUrl =
-        company.logo_storage_path && company.slug
-          ? `/api/portal/${companyId.slice(0, 6)}_${company.slug}/logo`
-          : company.logo_url ?? null;
-      const effectiveLogoUrl =
-        typeof rawLogoUrl === 'string' && rawLogoUrl.startsWith('/api/portal/') && rawLogoUrl.endsWith('/logo') && !company.logo_storage_path
-          ? null
-          : rawLogoUrl;
+      const effectiveLogoUrl = resolvePortalLogoUrl({
+        id: company.id,
+        slug: company.slug,
+        logo_storage_path: company.logo_storage_path,
+        logo_url: company.logo_url,
+      });
+      const effectiveInternalLogoUrl = await resolveInternalLogoUrl({
+        id: company.id,
+        internal_logo_storage_path: company.internal_logo_storage_path,
+        internal_logo_url: company.internal_logo_url,
+      });
 
-      return res.json({ ...company, logo_url: effectiveLogoUrl });
+      return res.json({ ...company, logo_url: effectiveLogoUrl, internal_logo_url: effectiveInternalLogoUrl });
     } catch (error) {
       console.error('updateCompany error:', error);
       return res.status(500).json({
         error: error instanceof Error ? error.message : 'Unknown error',
       });
+    }
+  },
+
+  /**
+   * GET /api/companies/:companyId/portal/translations
+   * Returns normalized translation rows for portal-enabled workflows.
+   */
+  async getPortalTranslations(req: AuthRequest, res: Response) {
+    try {
+      const { companyId } = req.params;
+      if (!companyId) {
+        return res.status(400).json({ error: 'Missing company ID', details: 'companyId is required' });
+      }
+
+      const access = await ensureCompanyAccess(req, companyId);
+      if (access.error) {
+        return res.status(access.error.status).json(access.error.body);
+      }
+
+      const company = await prisma.company.findUnique({
+        where: { id: companyId },
+        select: {
+          id: true,
+          portal_default_language: true,
+          portal_enabled_languages: true,
+        },
+      });
+      if (!company) {
+        return res.status(404).json({ error: 'Company not found', details: 'Company not found' });
+      }
+
+      const enabledLanguages = normalizePortalLanguages(company.portal_enabled_languages);
+      const defaultLanguage = normalizePortalDefaultLanguage(company.portal_default_language, enabledLanguages);
+
+      const workflows = await prisma.workflow.findMany({
+        where: {
+          company_id: companyId,
+          portal_enabled: true,
+          is_active: true,
+        },
+        select: {
+          id: true,
+          name: true,
+          description: true,
+          name_i18n: true,
+          description_i18n: true,
+          data_structure: true,
+          steps: {
+            where: { step_type: 'edit_form' },
+            select: { id: true, config: true },
+            orderBy: { created_at: 'asc' },
+            take: 1,
+          },
+        },
+        orderBy: { name: 'asc' },
+      });
+
+      const rows = workflows.flatMap((workflow) => collectPortalTranslationRows({
+        workflow,
+        formStepConfig: workflow.steps[0]?.config ?? null,
+        enabledLanguages,
+      }));
+
+      return res.json({
+        supported_languages: SUPPORTED_PORTAL_LANGUAGES,
+        enabled_languages: enabledLanguages,
+        default_language: defaultLanguage,
+        rows,
+      });
+    } catch (error) {
+      console.error('getPortalTranslations error:', error);
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
+  /**
+   * PUT /api/companies/:companyId/portal/translations
+   * Updates translation values for portal-enabled workflows.
+   */
+  async updatePortalTranslations(req: AuthRequest, res: Response) {
+    try {
+      const { companyId } = req.params;
+      if (!companyId) {
+        return res.status(400).json({ error: 'Missing company ID', details: 'companyId is required' });
+      }
+
+      const access = await ensureCompanyAccess(req, companyId);
+      if (access.error) {
+        return res.status(access.error.status).json(access.error.body);
+      }
+
+      const updates = parsePortalTranslationUpdates(req.body?.rows ?? req.body);
+      if (updates.length === 0) {
+        return res.status(400).json({ error: 'Missing updates', details: 'No valid translation updates provided' });
+      }
+
+      const workflowIds = Array.from(new Set(updates.map((u) => u.workflowId)));
+      const workflows = await prisma.workflow.findMany({
+        where: {
+          company_id: companyId,
+          id: { in: workflowIds },
+          portal_enabled: true,
+        },
+        select: {
+          id: true,
+          name_i18n: true,
+          description_i18n: true,
+          data_structure: true,
+          steps: {
+            where: { step_type: 'edit_form' },
+            select: { id: true, config: true },
+            orderBy: { created_at: 'asc' },
+            take: 1,
+          },
+        },
+      });
+      const workflowMap = new Map(workflows.map((w) => [w.id, w]));
+
+      await prisma.$transaction(async (tx) => {
+        for (const workflowId of workflowIds) {
+          const workflow = workflowMap.get(workflowId);
+          if (!workflow) continue;
+
+          const workflowUpdates = updates.filter((u) => u.workflowId === workflowId);
+          let nextNameI18n = workflow.name_i18n;
+          let nextDescriptionI18n = workflow.description_i18n;
+          let nextDataStructure: Prisma.JsonValue = workflow.data_structure as Prisma.JsonValue;
+          let nextStepConfig: Prisma.JsonValue = (workflow.steps[0]?.config ?? null) as Prisma.JsonValue;
+          let workflowChanged = false;
+          let stepConfigChanged = false;
+
+          for (const update of workflowUpdates) {
+            for (const translation of update.translations) {
+              const result = applyPortalTranslationUpdate({
+                workflowNameI18n: nextNameI18n,
+                workflowDescriptionI18n: nextDescriptionI18n,
+                dataStructure: nextDataStructure,
+                formStepConfig: nextStepConfig,
+                path: update.path,
+                language: translation.language,
+                value: translation.value,
+              });
+              if (!result.applied) continue;
+
+              nextNameI18n = result.workflowNameI18n;
+              nextDescriptionI18n = result.workflowDescriptionI18n;
+              nextDataStructure = result.dataStructure as Prisma.JsonValue;
+              nextStepConfig = result.formStepConfig as Prisma.JsonValue;
+              workflowChanged = true;
+              if (update.path.startsWith('form_page.')) stepConfigChanged = true;
+            }
+          }
+
+          if (workflowChanged) {
+            await tx.workflow.update({
+              where: { id: workflowId },
+              data: {
+                name_i18n: nextNameI18n as Prisma.InputJsonValue,
+                description_i18n: nextDescriptionI18n as Prisma.InputJsonValue,
+                data_structure: nextDataStructure as Prisma.InputJsonValue,
+              },
+            });
+          }
+
+          if (stepConfigChanged && workflow.steps[0]?.id) {
+            await tx.workflowStep.update({
+              where: { id: workflow.steps[0].id },
+              data: {
+                config: nextStepConfig as Prisma.InputJsonValue,
+              },
+            });
+          }
+        }
+      });
+
+      return res.json({ success: true, updated_workflows: workflowIds.length });
+    } catch (error) {
+      console.error('updatePortalTranslations error:', error);
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
     }
   },
 
@@ -442,6 +795,180 @@ export const companiesController = {
       return res.status(500).json({
         error: error instanceof Error ? error.message : 'Unknown error',
       });
+    }
+  },
+
+  /**
+   * POST /api/companies/:companyId/internal-logo
+   * Upload internal application logo (JWT, company admin)
+   */
+  async uploadInternalLogo(req: AuthRequest, res: Response) {
+    try {
+      const { companyId } = req.params;
+      const file = (req as unknown as { file?: Express.Multer.File }).file;
+
+      if (!companyId) {
+        return res.status(400).json({ error: 'Missing company ID', details: 'companyId is required' });
+      }
+      if (!file || !file.buffer) {
+        return res.status(400).json({ error: 'Missing file', details: 'A logo image file is required' });
+      }
+
+      const allowedTypes = ['image/png', 'image/jpeg', 'image/svg+xml', 'image/webp'];
+      if (!allowedTypes.includes(file.mimetype)) {
+        return res.status(400).json({
+          error: 'Invalid file type',
+          details: 'Logo must be PNG, JPEG, SVG or WebP',
+        });
+      }
+      const maxSize = 2 * 1024 * 1024; // 2 MB
+      if (file.size > maxSize) {
+        return res.status(400).json({
+          error: 'File too large',
+          details: 'Logo must be 2 MB or less',
+        });
+      }
+
+      const access = await ensureCompanyAccess(req, companyId);
+      if (access.error) {
+        return res.status(access.error.status).json(access.error.body);
+      }
+
+      const company = await prisma.company.findUnique({
+        where: { id: companyId },
+        select: { internal_logo_storage_path: true },
+      });
+      if (!company) {
+        return res.status(404).json({ error: 'Company not found', details: 'Company not found' });
+      }
+
+      const extMap: Record<string, string> = {
+        'image/png': 'png',
+        'image/jpeg': 'jpg',
+        'image/svg+xml': 'svg',
+        'image/webp': 'webp',
+      };
+      const ext = extMap[file.mimetype] || 'png';
+      const path = `internal-logos/${companyId}/logo.${ext}`;
+      const bucket = storageService.getBucketName();
+
+      if (company.internal_logo_storage_path && company.internal_logo_storage_path !== path) {
+        try {
+          await storageService.deleteFile(bucket, company.internal_logo_storage_path);
+        } catch (e) {
+          console.error('uploadInternalLogo: failed to delete previous logo from storage:', e);
+        }
+      }
+
+      await storageService.uploadFile(bucket, path, file.buffer, file.mimetype);
+
+      await prisma.company.update({
+        where: { id: companyId },
+        data: {
+          internal_logo_storage_path: path,
+          internal_logo_url: null,
+        },
+      });
+
+      return res.json({ internal_logo_url: `/api/companies/${companyId}/internal-logo` });
+    } catch (error) {
+      console.error('uploadInternalLogo error:', error);
+      return res.status(500).json({
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  },
+
+  /**
+   * DELETE /api/companies/:companyId/internal-logo
+   * Remove internal app logo (JWT, company admin)
+   */
+  async deleteInternalLogo(req: AuthRequest, res: Response) {
+    try {
+      const { companyId } = req.params;
+      if (!companyId) {
+        return res.status(400).json({ error: 'Missing company ID', details: 'companyId is required' });
+      }
+
+      const access = await ensureCompanyAccess(req, companyId);
+      if (access.error) {
+        return res.status(access.error.status).json(access.error.body);
+      }
+
+      const company = await prisma.company.findUnique({
+        where: { id: companyId },
+        select: { internal_logo_storage_path: true },
+      });
+      if (!company) {
+        return res.status(404).json({ error: 'Company not found', details: 'Company not found' });
+      }
+
+      if (company.internal_logo_storage_path) {
+        const bucket = storageService.getBucketName();
+        try {
+          await storageService.deleteFile(bucket, company.internal_logo_storage_path);
+        } catch (e) {
+          console.error('deleteInternalLogo: failed to delete from MinIO:', e);
+        }
+      }
+
+      await prisma.company.update({
+        where: { id: companyId },
+        data: { internal_logo_storage_path: null, internal_logo_url: null },
+      });
+
+      return res.status(204).send();
+    } catch (error) {
+      console.error('deleteInternalLogo error:', error);
+      return res.status(500).json({
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  },
+
+  /**
+   * GET /api/companies/:companyId/internal-logo
+   * Stream uploaded internal app logo (authenticated company access required)
+   */
+  async getInternalLogo(req: AuthRequest, res: Response) {
+    try {
+      const { companyId } = req.params;
+      if (!companyId) {
+        return res.status(400).send();
+      }
+
+      const access = await ensureCompanyAccess(req, companyId);
+      if (access.error) {
+        return res.status(access.error.status).json(access.error.body);
+      }
+
+      const company = await prisma.company.findUnique({
+        where: { id: companyId },
+        select: { internal_logo_storage_path: true },
+      });
+      if (!company || !company.internal_logo_storage_path) {
+        return res.status(404).send();
+      }
+
+      const bucket = storageService.getBucketName();
+      const stream = await storageService.downloadFile(bucket, company.internal_logo_storage_path);
+      const ext = company.internal_logo_storage_path.split('.').pop()?.toLowerCase();
+      const mime: Record<string, string> = {
+        png: 'image/png',
+        jpg: 'image/jpeg',
+        jpeg: 'image/jpeg',
+        svg: 'image/svg+xml',
+        webp: 'image/webp',
+      };
+      const contentType = mime[ext ?? ''] || 'application/octet-stream';
+      res.setHeader('Content-Type', contentType);
+      res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+      stream.pipe(res);
+    } catch (error) {
+      console.error('getInternalLogo error:', error);
+      if (!res.headersSent) {
+        res.status(500).send();
+      }
     }
   },
 

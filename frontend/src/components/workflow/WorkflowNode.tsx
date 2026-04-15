@@ -1,6 +1,7 @@
 import { Trash2, Pencil, Copy, Hand, Zap, Bot, User } from "lucide-react";
 import { WorkflowStep } from "@/pages/WorkflowEditor";
 import { Button } from "@/components/ui/button";
+import { getStepNodeStyles } from "@/lib/stepTypeColors";
 
 interface WorkflowNodeProps {
   step: WorkflowStep;
@@ -19,57 +20,6 @@ interface WorkflowNodeProps {
   hideEditButton?: boolean;
 }
 
-const nodeStyles = {
-  start: {
-    bg: "bg-emerald-100",
-    borderColor: "border-emerald-400",
-    ringColor: "ring-emerald-400",
-    textColor: "text-emerald-700",
-    shadow: "shadow-emerald-200/50",
-    shape: "rounded-full",
-  },
-  end: {
-    bg: "bg-rose-100",
-    borderColor: "border-rose-400",
-    ringColor: "ring-rose-400",
-    textColor: "text-rose-700",
-    shadow: "shadow-rose-200/50",
-    shape: "rounded-full",
-  },
-  decision: {
-    bg: "bg-amber-100",
-    borderColor: "border-amber-400",
-    ringColor: "ring-amber-400",
-    textColor: "text-amber-700",
-    shadow: "shadow-amber-200/50",
-    shape: "rounded-lg",
-  },
-  action: {
-    bg: "bg-blue-100",
-    borderColor: "border-blue-400",
-    ringColor: "ring-blue-400",
-    textColor: "text-blue-700",
-    shadow: "shadow-blue-200/50",
-    shape: "rounded-lg",
-  },
-  edit_form: {
-    bg: "bg-primary/10",
-    borderColor: "border-primary",
-    ringColor: "ring-primary",
-    textColor: "text-primary",
-    shadow: "shadow-primary/20",
-    shape: "rounded-lg",
-  },
-  file: {
-    bg: "bg-orange-100",
-    borderColor: "border-orange-400",
-    ringColor: "ring-orange-400",
-    textColor: "text-orange-700",
-    shadow: "shadow-orange-200/50",
-    shape: "rounded-lg",
-  },
-};
-
 export function WorkflowNode({
   step,
   isSelected,
@@ -86,7 +36,13 @@ export function WorkflowNode({
   readOnly = false,
   hideEditButton = false,
 }: WorkflowNodeProps) {
-  const style = nodeStyles[step.step_type];
+  const stepColors = getStepNodeStyles(step.step_type);
+  const shapeClass = step.step_type === "start" || step.step_type === "end" ? "rounded-full" : "rounded-lg";
+  const nodeShadow = isHighlighted
+    ? `0 0 0 4px ${stepColors.ringColor}, 0 0 0 6px rgba(255,255,255,0.88), 0 12px 24px ${stepColors.shadowColor}`
+    : isSelected
+      ? `0 0 0 2px ${stepColors.ringColor}, 0 0 0 4px rgba(255,255,255,0.88), 0 10px 20px ${stepColors.shadowColor}`
+      : `0 8px 18px ${stepColors.shadowColor}`;
   const outputs = step.step_type === "decision"
     ? (step.config.outputs?.length ? step.config.outputs : ["Yes", "No"])
     : step.step_type === "edit_form"
@@ -187,24 +143,31 @@ export function WorkflowNode({
     >
       <div
         className={`
-          ${style.bg} ${style.shape}
+          ${shapeClass}
           ${step.step_type === "decision" ? "w-40 h-32" : "w-32 h-32"}
-          border-2 ${isHighlighted ? `${style.borderColor} border-4` : style.borderColor} shadow-md
+          border-2 ${isHighlighted ? "border-4" : ""}
           flex flex-col items-center justify-center relative
           transition-all duration-300
-          ${isHighlighted ? `ring-4 ${style.ringColor} ring-offset-2 animate-pulse` : ""}
-          ${isSelected ? `ring-2 ring-offset-2 ${style.borderColor} ${style.shadow}` : ""}
+          ${isHighlighted ? "animate-pulse" : ""}
           ${!readOnly && !isHighlighted && !isSelected ? "hover:scale-105 hover:shadow-lg" : ""}
         `}
+        style={{
+          backgroundColor: stepColors.backgroundColor,
+          borderColor: stepColors.borderColor,
+          boxShadow: nodeShadow,
+        }}
       >
         {/* Configuration icons - top right corner */}
         {(step.step_type === "action" || step.step_type === "decision" || step.step_type === "file") && (
-          <div className={`absolute top-1.5 right-1.5 ${style.textColor} opacity-80 z-10`}>
+          <div className="absolute top-1.5 right-1.5 opacity-80 z-10" style={{ color: stepColors.textColor }}>
             {renderConfigIcons()}
           </div>
         )}
         
-        <p className={`${style.textColor} font-semibold text-center text-sm px-2 break-words ${(step.step_type === "action" || step.step_type === "decision" || step.step_type === "file") ? "pt-1" : ""}`}>
+        <p
+          className={`font-semibold text-center text-sm px-2 break-words ${(step.step_type === "action" || step.step_type === "decision" || step.step_type === "file") ? "pt-1" : ""}`}
+          style={{ color: stepColors.textColor }}
+        >
           {step.name}
         </p>
       </div>

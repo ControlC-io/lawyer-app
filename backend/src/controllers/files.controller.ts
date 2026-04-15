@@ -42,6 +42,40 @@ function sanitizeFileName(fileName: string): string {
   return sanitized;
 }
 
+function attachStepCompletionMeta(
+  rawStepData: unknown,
+  params: {
+    startedAt?: Date | null;
+    completedAt: Date;
+    closedBySource?: 'user' | 'company_api_key' | 'portal' | 'external' | 'system';
+    closedByName?: string;
+    closedByUserId?: string;
+    closedByEmail?: string;
+  }
+) {
+  const stepData =
+    rawStepData && typeof rawStepData === 'object' && !Array.isArray(rawStepData)
+      ? { ...(rawStepData as Record<string, unknown>) }
+      : {};
+  const existingMeta =
+    stepData._step_meta && typeof stepData._step_meta === 'object' && !Array.isArray(stepData._step_meta)
+      ? (stepData._step_meta as Record<string, unknown>)
+      : {};
+
+  return {
+    ...stepData,
+    _step_meta: {
+      ...existingMeta,
+      opened_at: params.startedAt ? params.startedAt.toISOString() : null,
+      closed_at: params.completedAt.toISOString(),
+      ...(params.closedBySource ? { closed_by_source: params.closedBySource } : {}),
+      ...(params.closedByName ? { closed_by_name: params.closedByName } : {}),
+      ...(params.closedByUserId ? { closed_by_user_id: params.closedByUserId } : {}),
+      ...(params.closedByEmail ? { closed_by_email: params.closedByEmail } : {}),
+    },
+  };
+}
+
 export const filesController = {
   /**
    * Multer middleware for file upload
@@ -578,7 +612,7 @@ export const filesController = {
       // Fetch execution step
       const executionStep = await prisma.workflowExecutionStep.findFirst({
         where: { id: stepId },
-        select: { assigned_to_user_id: true },
+        select: { assigned_to_user_id: true, started_at: true },
       });
 
       if (!executionStep) {
@@ -835,12 +869,23 @@ export const filesController = {
       }
 
       // Mark step as completed
+      const completedAt = new Date();
+      const closedBySource = req.user?.id ? 'user' : req.company?.id ? 'company_api_key' : undefined;
+      const stepDataWithMeta = attachStepCompletionMeta(stepData, {
+        startedAt: executionStep.started_at,
+        completedAt,
+        closedBySource,
+        closedByName: req.user?.email ?? (closedBySource === 'company_api_key' ? 'API' : undefined),
+        closedByUserId: req.user?.id,
+        closedByEmail: req.user?.email,
+      });
+      await workflowService.cancelReminderForExecutionStep(stepId);
       await prisma.workflowExecutionStep.update({
         where: { id: stepId },
         data: {
           status: 'completed',
-          completed_at: new Date(),
-          step_data: stepData,
+          completed_at: completedAt,
+          step_data: stepDataWithMeta,
         },
       });
 

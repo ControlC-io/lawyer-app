@@ -1,18 +1,19 @@
 import { useEffect, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import { api } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Loader2 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { FieldRenderer } from "@/components/execution/form/FieldRenderer";
-import { Separator } from "@/components/ui/separator";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { FileViewer } from "@/components/execution/FileViewer";
 import { cn } from "@/lib/utils";
 import { getFormPagesFromConfig, evaluateFieldRules, validateAllFields, type FieldRule, type FieldValidationRule } from "@/lib/formConfig";
 import { FormPageStepper } from "@/components/execution/FormPageStepper";
 import { ChevronLeft, ChevronRight, Send } from "lucide-react";
+import { getPortalLanguageDisplay, type PortalLanguageCode } from "@/lib/portalLanguages";
+import { getPortalTheme, normalizePortalPrimaryColor, withPortalAlpha } from "@/lib/portalTheme";
 
 interface ExecutionData {
     execution_step_id: string;
@@ -23,11 +24,13 @@ interface ExecutionData {
     workflow_name: string;
     company_id: string;
     data_structure: any;
+    selected_language?: PortalLanguageCode;
+    default_language?: PortalLanguageCode;
+    enabled_languages?: PortalLanguageCode[];
 }
 
 export const ExternalForm = () => {
     const { token } = useParams<{ token: string }>();
-    const navigate = useNavigate();
     const [loading, setLoading] = useState(true);
     const [submitting, setSubmitting] = useState(false);
     const [completed, setCompleted] = useState(false);
@@ -38,6 +41,42 @@ export const ExternalForm = () => {
     const [previewFile, setPreviewFile] = useState<{ url: string; name: string } | null>(null);
     const [signedUrls, setSignedUrls] = useState<Record<string, string>>({}); // fieldId -> signedUrl for files
     const [formPageIndex, setFormPageIndex] = useState(0);
+    const [selectedLanguage, setSelectedLanguage] = useState<PortalLanguageCode>("en");
+    const [enabledLanguages, setEnabledLanguages] = useState<PortalLanguageCode[]>(["en"]);
+    const primaryColor = normalizePortalPrimaryColor("#3B82F6");
+    const theme = getPortalTheme(primaryColor);
+
+    const renderLanguageTags = () => (
+        <div className="mt-5 flex flex-wrap justify-center gap-2">
+            {enabledLanguages.map((languageCode) => (
+                <button
+                    key={languageCode}
+                    type="button"
+                    className={cn(
+                        "rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
+                        selectedLanguage === languageCode
+                            ? "text-slate-900"
+                            : "bg-white/90 text-slate-700 hover:bg-slate-100",
+                    )}
+                    style={
+                        selectedLanguage === languageCode
+                            ? {
+                                  backgroundColor: withPortalAlpha(primaryColor, 0.22),
+                                  borderColor: withPortalAlpha(primaryColor, 0.45),
+                              }
+                            : { borderColor: theme.softBorder }
+                    }
+                    onClick={() => {
+                        setSelectedLanguage(languageCode);
+                        if (token) localStorage.setItem(`external-language-${token}`, languageCode);
+                    }}
+                    aria-pressed={selectedLanguage === languageCode}
+                >
+                    {getPortalLanguageDisplay(languageCode)}
+                </button>
+            ))}
+        </div>
+    );
 
     useEffect(() => {
         if (data) setFormPageIndex(0);
@@ -49,8 +88,18 @@ export const ExternalForm = () => {
         const fetchData = async () => {
             try {
                 setLoading(true);
-                const stepData = await api.get<ExecutionData>(`/api/external/steps/${token}`, { skipAuth: true });
+                const storageKey = `external-language-${token}`;
+                const storedLanguage = localStorage.getItem(storageKey) as PortalLanguageCode | null;
+                const langQuery = storedLanguage ? `?lang=${encodeURIComponent(storedLanguage)}` : "";
+                const stepData = await api.get<ExecutionData>(`/api/external/steps/${token}${langQuery}`, { skipAuth: true });
                 setData(stepData);
+                const responseEnabled = stepData.enabled_languages?.length ? stepData.enabled_languages : ["en"];
+                const responseDefault = stepData.default_language || "en";
+                const nextLanguage = storedLanguage && responseEnabled.includes(storedLanguage)
+                    ? storedLanguage
+                    : responseDefault;
+                setEnabledLanguages(responseEnabled);
+                setSelectedLanguage(nextLanguage);
             } catch (error: unknown) {
                 console.error("Error fetching form:", error);
                 toast({
@@ -65,6 +114,26 @@ export const ExternalForm = () => {
 
         fetchData();
     }, [token]);
+
+    useEffect(() => {
+        if (!token || !selectedLanguage) return;
+
+        const fetchLocalizedData = async () => {
+            try {
+                const stepData = await api.get<ExecutionData>(
+                    `/api/external/steps/${token}?lang=${encodeURIComponent(selectedLanguage)}`,
+                    { skipAuth: true }
+                );
+                setData(stepData);
+                if (stepData.enabled_languages?.length) {
+                    setEnabledLanguages(stepData.enabled_languages);
+                }
+            } catch (error) {
+                console.error("Error fetching localized form:", error);
+            }
+        };
+        fetchLocalizedData();
+    }, [token, selectedLanguage]);
 
     // Helper function to generate signed URL for a file path (for non-authenticated users)
     const generateSignedUrl = async (filePath: string): Promise<string | null> => {
@@ -241,7 +310,14 @@ export const ExternalForm = () => {
 
     if (loading) {
         return (
-            <div className="flex items-center justify-center min-h-screen bg-gray-50">
+            <div
+                className="flex min-h-screen items-center justify-center bg-slate-50"
+                style={{
+                    ...theme.rootStyle,
+                    backgroundImage: `radial-gradient(circle at 15% 10%, ${theme.softBackground} 0%, transparent 40%)`,
+                    fontFamily: "'DM Sans', sans-serif",
+                }}
+            >
                 <Loader2 className="h-8 w-8 animate-spin text-primary" />
             </div>
         );
@@ -249,11 +325,21 @@ export const ExternalForm = () => {
 
     if (completed) {
         return (
-            <div className="flex items-center justify-center min-h-screen bg-gray-50 p-4">
-                <Card className="w-full max-w-md text-center py-8">
+            <div
+                className="flex min-h-screen items-center justify-center bg-slate-50 p-4"
+                style={{
+                    ...theme.rootStyle,
+                    backgroundImage: `radial-gradient(circle at 50% 0%, ${theme.softBackground} 0%, transparent 50%)`,
+                    fontFamily: "'DM Sans', sans-serif",
+                }}
+            >
+                <Card className="w-full max-w-md border-0 py-8 text-center shadow-xl">
                     <CardHeader>
-                        <div className="mx-auto bg-green-100 p-3 rounded-full w-fit mb-4">
-                            <svg className="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <div
+                            className="mx-auto mb-4 w-fit rounded-full p-3"
+                            style={{ backgroundColor: withPortalAlpha(primaryColor, 0.14) }}
+                        >
+                            <svg className="h-6 w-6" fill="none" stroke={primaryColor} viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                             </svg>
                         </div>
@@ -267,8 +353,15 @@ export const ExternalForm = () => {
 
     if (!data) {
         return (
-            <div className="flex items-center justify-center min-h-screen bg-gray-50 p-4">
-                <Card className="w-full max-w-md text-center py-8">
+            <div
+                className="flex min-h-screen items-center justify-center bg-slate-50 p-4"
+                style={{
+                    ...theme.rootStyle,
+                    backgroundImage: `radial-gradient(circle at 10% 20%, ${theme.softBackground} 0%, transparent 45%)`,
+                    fontFamily: "'DM Sans', sans-serif",
+                }}
+            >
+                <Card className="w-full max-w-md border-0 py-8 text-center shadow-xl">
                     <CardHeader>
                         <div className="mx-auto bg-red-100 p-3 rounded-full w-fit mb-4">
                             <svg className="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
@@ -494,24 +587,47 @@ export const ExternalForm = () => {
     // If form has page/block structure, use page → block → fields rendering (same as internal)
     if (formPages.length > 0 && formPages.some((p) => p.blocks.length > 0)) {
         return (
-            <div className="min-h-screen bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-                <div className="max-w-3xl mx-auto">
-                    <div className="text-center mb-8">
-                        <h1 className="text-3xl font-bold text-gray-900">{data.workflow_name}</h1>
-                        <p className="mt-2 text-gray-600">Please complete the form below</p>
+            <div
+                className="min-h-screen px-4 py-12 sm:px-6 lg:px-8"
+                style={{
+                    ...theme.rootStyle,
+                    background:
+                        "linear-gradient(180deg, rgba(248,250,252,1) 0%, rgba(241,245,249,1) 45%, rgba(248,250,252,1) 100%)",
+                    fontFamily: "'DM Sans', sans-serif",
+                }}
+            >
+                <style>{`
+.external-form-shell { border: 1px solid ${theme.softBorder}; box-shadow: 0 20px 60px -38px ${withPortalAlpha(primaryColor, 0.45)}; }
+.external-form select:focus-visible,
+.external-form input:focus-visible,
+.external-form textarea:focus-visible { --tw-ring-color: ${primaryColor}; box-shadow: 0 0 0 4px ${withPortalAlpha(primaryColor, 0.2)}; }
+.external-form button[role="combobox"] { border-color: ${theme.softBorder}; color: inherit; }
+.external-form button[role="combobox"]:hover,
+.external-form button[role="combobox"][data-state="open"] { background-color: ${primaryColor} !important; color: white !important; border-color: ${primaryColor} !important; }
+.external-form-submit { background-color: ${primaryColor} !important; color: white !important; border: none; }
+.external-form-submit:hover:not(:disabled) { filter: brightness(0.92); }
+.external-form-pagination { border-color: ${theme.softBorder}; color: ${primaryColor}; }
+.external-form-pagination:hover:not(:disabled) { background-color: ${primaryColor} !important; border-color: ${primaryColor} !important; color: white !important; }
+`}</style>
+                <div className="mx-auto max-w-5xl">
+                    <div className="mb-10 text-center">
+                        <h1 className="text-3xl font-semibold tracking-tight text-slate-900 md:text-4xl">{data.workflow_name}</h1>
+                        <p className="mx-auto mt-3 max-w-2xl text-slate-600">Please complete the form below</p>
+                        {renderLanguageTags()}
                     </div>
 
-                    <Card>
+                    <Card className="external-form-shell overflow-hidden rounded-2xl border-0 bg-white/95">
                         <CardHeader>
-                            <CardTitle>Fill required fields to continue</CardTitle>
+                            <CardTitle className="text-xl font-semibold text-slate-900">Fill required fields to continue</CardTitle>
                         </CardHeader>
-                        <CardContent className="p-6">
+                        <CardContent className="external-form p-7 md:p-9">
                             <FormPageStepper
                                 pages={formPages}
                                 currentIndex={formPageIndex}
                                 onPageChange={setFormPageIndex}
                                 getStepLabel={(page, idx) => page.title || `Page ${idx + 1}`}
                                 className="mb-6"
+                                primaryColor={primaryColor}
                             />
                             <form onSubmit={e => e.preventDefault()} className="w-full space-y-6">
                                 {(() => {
@@ -524,7 +640,12 @@ export const ExternalForm = () => {
                                                 <div key={block.id} className={cn(block.compact ? "space-y-2" : "space-y-4")}>
                                                     {block.title && (
                                                         <div className={cn(block.compact ? "pt-1 pb-0.5" : "pt-2 pb-1")}>
-                                                            <h3 className={cn("font-semibold border-b", block.compact ? "text-sm pb-0.5" : "text-base pb-1")}>{block.title}</h3>
+                                                            <h3
+                                                                className={cn("border-b font-semibold text-slate-900", block.compact ? "text-sm pb-0.5" : "text-base pb-1")}
+                                                                style={{ borderColor: theme.softBorder }}
+                                                            >
+                                                                {block.title}
+                                                            </h3>
                                                         </div>
                                                     )}
                                                     <div
@@ -550,8 +671,12 @@ export const ExternalForm = () => {
                                                             );
                                                             if (columnName) {
                                                                 return (
-                                                                    <div key={colIndex} className={cn("border rounded-md bg-muted/20", block.compact ? "p-2" : "p-3")}>
-                                                                        <div className={cn("border-b", block.compact ? "mb-1 pb-1" : "mb-2 pb-2")}>
+                                                                    <div
+                                                                        key={colIndex}
+                                                                        className={cn("rounded-lg border bg-slate-50/60", block.compact ? "p-2" : "p-3")}
+                                                                        style={{ borderColor: theme.softBorder }}
+                                                                    >
+                                                                        <div className={cn("border-b", block.compact ? "mb-1 pb-1" : "mb-2 pb-2")} style={{ borderColor: theme.softBorder }}>
                                                                             <h4 className={cn("font-semibold", block.compact ? "text-xs" : "text-sm")}>{columnName}</h4>
                                                                         </div>
                                                                         {columnContent}
@@ -569,11 +694,12 @@ export const ExternalForm = () => {
                             </form>
 
                             {formPages.length > 1 && (
-                                <div className="flex items-center justify-between gap-4 mt-4 pt-4 border-t">
+                                <div className="mt-6 flex items-center justify-between gap-4 border-t pt-5" style={{ borderColor: theme.softBorder }}>
                                     <Button
                                         type="button"
                                         variant="outline"
                                         size="sm"
+                                        className="external-form-pagination"
                                         disabled={formPageIndex <= 0}
                                         onClick={() => setFormPageIndex((i) => Math.max(0, i - 1))}
                                     >
@@ -587,6 +713,7 @@ export const ExternalForm = () => {
                                         type="button"
                                         variant="outline"
                                         size="sm"
+                                        className="external-form-pagination"
                                         disabled={formPageIndex >= formPages.length - 1}
                                         onClick={() => setFormPageIndex((i) => Math.min(formPages.length - 1, i + 1))}
                                     >
@@ -599,7 +726,7 @@ export const ExternalForm = () => {
                             {(formPages.length <= 1 || formPageIndex >= formPages.length - 1) && (
                                 <div className="pt-4">
                                     <Button
-                                        className="w-full"
+                                        className="external-form-submit w-full"
                                         size="lg"
                                         onClick={handleSubmit}
                                         disabled={submitting}
@@ -638,20 +765,40 @@ export const ExternalForm = () => {
 
     // Fallback to simple list rendering
     return (
-        <div className="min-h-screen bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-            <div className="max-w-3xl mx-auto">
-                <div className="text-center mb-8">
-                    <h1 className="text-3xl font-bold text-gray-900">{data.workflow_name}</h1>
-                    <p className="mt-2 text-gray-600">Please complete the form below</p>
+        <div
+            className="min-h-screen px-4 py-12 sm:px-6 lg:px-8"
+            style={{
+                ...theme.rootStyle,
+                background:
+                    "linear-gradient(180deg, rgba(248,250,252,1) 0%, rgba(241,245,249,1) 45%, rgba(248,250,252,1) 100%)",
+                fontFamily: "'DM Sans', sans-serif",
+            }}
+        >
+            <style>{`
+.external-form-shell { border: 1px solid ${theme.softBorder}; box-shadow: 0 20px 60px -38px ${withPortalAlpha(primaryColor, 0.45)}; }
+.external-form select:focus-visible,
+.external-form input:focus-visible,
+.external-form textarea:focus-visible { --tw-ring-color: ${primaryColor}; box-shadow: 0 0 0 4px ${withPortalAlpha(primaryColor, 0.2)}; }
+.external-form button[role="combobox"] { border-color: ${theme.softBorder}; color: inherit; }
+.external-form button[role="combobox"]:hover,
+.external-form button[role="combobox"][data-state="open"] { background-color: ${primaryColor} !important; color: white !important; border-color: ${primaryColor} !important; }
+.external-form-submit { background-color: ${primaryColor} !important; color: white !important; border: none; }
+.external-form-submit:hover:not(:disabled) { filter: brightness(0.92); }
+`}</style>
+            <div className="mx-auto max-w-5xl">
+                <div className="mb-10 text-center">
+                    <h1 className="text-3xl font-semibold tracking-tight text-slate-900 md:text-4xl">{data.workflow_name}</h1>
+                    <p className="mx-auto mt-3 max-w-2xl text-slate-600">Please complete the form below</p>
+                    {renderLanguageTags()}
                 </div>
 
-                <Card>
-                    <CardContent className="p-6 space-y-6">
+                <Card className="external-form-shell overflow-hidden rounded-2xl border-0 bg-white/95">
+                    <CardContent className="external-form space-y-6 p-7 md:p-9">
                         {visibleFields.map(fieldId => renderField(fieldId))}
 
                         <div className="pt-4">
                             <Button
-                                className="w-full"
+                                className="external-form-submit w-full"
                                 size="lg"
                                 onClick={handleSubmit}
                                 disabled={submitting}

@@ -11,6 +11,11 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { FileViewer } from "@/components/execution/FileViewer";
 import { cn } from "@/lib/utils";
 import {
+  getPortalTheme,
+  normalizePortalPrimaryColor,
+  withPortalAlpha,
+} from "@/lib/portalTheme";
+import {
   getFormPagesFromConfig,
   evaluateFieldRules,
   validateAllFields,
@@ -18,6 +23,11 @@ import {
   type FieldValidationRule,
 } from "@/lib/formConfig";
 import { FormPageStepper } from "@/components/execution/FormPageStepper";
+import {
+  getPortalLanguageDisplay,
+  getPortalStartLabel,
+  type PortalLanguageCode,
+} from "@/lib/portalLanguages";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -30,6 +40,8 @@ interface PortalInfo {
   logo_url: string | null;
   portal_description: string | null;
   portal_primary_color: string | null;
+  default_language?: PortalLanguageCode;
+  enabled_languages?: PortalLanguageCode[];
 }
 
 interface PortalWorkflow {
@@ -40,6 +52,9 @@ interface PortalWorkflow {
 }
 
 interface WorkflowDetail {
+  selected_language?: PortalLanguageCode;
+  default_language?: PortalLanguageCode;
+  enabled_languages?: PortalLanguageCode[];
   workflow: {
     id: string;
     name: string;
@@ -58,16 +73,6 @@ interface WorkflowDetail {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Softer border color from company primary (hex → rgba with alpha) */
-function primaryBorderColor(hex: string, alpha = 0.28): string {
-  const h = (hex || "#3B82F6").replace(/^#/, "");
-  if (h.length !== 6 && h.length !== 3) return `rgba(0,0,0,${alpha})`;
-  const r = h.length === 6 ? parseInt(h.slice(0, 2), 16) : parseInt(h[0] + h[0], 16);
-  const g = h.length === 6 ? parseInt(h.slice(2, 4), 16) : parseInt(h[1] + h[1], 16);
-  const b = h.length === 6 ? parseInt(h.slice(4, 6), 16) : parseInt(h[2] + h[2], 16);
-  return `rgba(${r},${g},${b},${alpha})`;
-}
-
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -85,6 +90,7 @@ export default function CompanyPortal() {
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null>(null);
   const [workflowDetail, setWorkflowDetail] = useState<WorkflowDetail | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
+  const [selectedLanguage, setSelectedLanguage] = useState<PortalLanguageCode>("en");
 
   // Form state
   const [formData, setFormData] = useState<Record<string, any>>({});
@@ -102,8 +108,9 @@ export default function CompanyPortal() {
   const [signedUrls, setSignedUrls] = useState<Record<string, string>>({});
 
   // Primary color from portal; softer variant for borders
-  const primaryColor = portal?.portal_primary_color || "#3B82F6";
-  const softBorderColor = primaryBorderColor(primaryColor);
+  const primaryColor = normalizePortalPrimaryColor(portal?.portal_primary_color);
+  const theme = getPortalTheme(primaryColor);
+  const softBorderColor = theme.softBorder;
 
   // Resolve logo src: use same base as API so logo request hits the same origin; cache-buster so new uploads show
   const apiBase = getApiBase();
@@ -118,18 +125,22 @@ export default function CompanyPortal() {
         `v=${logoCacheBuster}`
       : null;
 
-  // Fetch portal info + workflows
+  // Fetch portal info
   useEffect(() => {
     if (!slug) return;
     const fetchPortal = async () => {
       try {
         setLoading(true);
-        const [portalData, workflowsData] = await Promise.all([
-          api.get<PortalInfo>(`/api/portal/${slug}`, { skipAuth: true }),
-          api.get<PortalWorkflow[]>(`/api/portal/${slug}/workflows`, { skipAuth: true }),
-        ]);
+        const portalData = await api.get<PortalInfo>(`/api/portal/${slug}`, { skipAuth: true });
+        const storageKey = `portal-language-${slug}`;
+        const defaultLanguage = portalData.default_language || "en";
+        const enabledLanguages = portalData.enabled_languages || ["en"];
+        const storedLanguage = localStorage.getItem(storageKey) as PortalLanguageCode | null;
+        const nextLanguage = storedLanguage && enabledLanguages.includes(storedLanguage)
+          ? storedLanguage
+          : defaultLanguage;
         setPortal(portalData);
-        setWorkflows(workflowsData);
+        setSelectedLanguage(nextLanguage);
       } catch (err: any) {
         setError(err.message || "Portal not found");
       } finally {
@@ -139,6 +150,23 @@ export default function CompanyPortal() {
     fetchPortal();
   }, [slug]);
 
+  // Fetch workflows with selected language
+  useEffect(() => {
+    if (!slug || !selectedLanguage) return;
+    const fetchWorkflows = async () => {
+      try {
+        const workflowsData = await api.get<PortalWorkflow[]>(
+          `/api/portal/${slug}/workflows?lang=${encodeURIComponent(selectedLanguage)}`,
+          { skipAuth: true }
+        );
+        setWorkflows(workflowsData);
+      } catch (err: any) {
+        setError(err.message || "Portal not found");
+      }
+    };
+    fetchWorkflows();
+  }, [slug, selectedLanguage]);
+
   // Fetch workflow detail when selected
   useEffect(() => {
     if (!selectedWorkflowId || !slug) return;
@@ -146,7 +174,7 @@ export default function CompanyPortal() {
       try {
         setLoadingDetail(true);
         const detail = await api.get<WorkflowDetail>(
-          `/api/portal/${slug}/workflows/${selectedWorkflowId}`,
+          `/api/portal/${slug}/workflows/${selectedWorkflowId}?lang=${encodeURIComponent(selectedLanguage)}`,
           { skipAuth: true }
         );
         setWorkflowDetail(detail);
@@ -165,7 +193,7 @@ export default function CompanyPortal() {
       }
     };
     fetchDetail();
-  }, [selectedWorkflowId, slug]);
+  }, [selectedWorkflowId, slug, selectedLanguage]);
 
   // ---------------------------------------------------------------------------
   // File upload helpers (same pattern as ExternalForm)
@@ -475,13 +503,56 @@ export default function CompanyPortal() {
     );
   };
 
+  const renderLanguageSelector = (className?: string) => {
+    const enabledLanguages = portal?.enabled_languages || ["en"];
+
+    return (
+      <div className={cn("flex flex-wrap items-center justify-center gap-2", className)}>
+        {enabledLanguages.map((languageCode) => (
+          <button
+            key={languageCode}
+            type="button"
+            className={cn(
+              "rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
+              selectedLanguage === languageCode
+                ? "text-slate-900"
+                : "bg-white/90 text-slate-700 hover:bg-slate-100",
+            )}
+            style={
+              selectedLanguage === languageCode
+                ? {
+                    backgroundColor: withPortalAlpha(primaryColor, 0.22),
+                    borderColor: withPortalAlpha(primaryColor, 0.45),
+                  }
+                : { borderColor: softBorderColor }
+            }
+            onClick={() => {
+              setSelectedLanguage(languageCode);
+              if (slug) localStorage.setItem(`portal-language-${slug}`, languageCode);
+            }}
+            aria-pressed={selectedLanguage === languageCode}
+          >
+            {getPortalLanguageDisplay(languageCode)}
+          </button>
+        ))}
+      </div>
+    );
+  };
+
   // ---------------------------------------------------------------------------
   // Render: Loading
   // ---------------------------------------------------------------------------
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-gray-50">
+      <div
+        className="flex min-h-screen items-center justify-center bg-slate-50"
+        style={{
+          ...theme.rootStyle,
+          backgroundImage: `radial-gradient(circle at 15% 10%, ${theme.softBackground} 0%, transparent 40%)`,
+          fontFamily: "'DM Sans', sans-serif",
+        }}
+      >
         <Loader2 className="h-8 w-8 animate-spin" style={{ color: primaryColor }} />
       </div>
     );
@@ -493,8 +564,15 @@ export default function CompanyPortal() {
 
   if (error || !portal) {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-gray-50 p-4">
-        <Card className="w-full max-w-md text-center py-8">
+      <div
+        className="flex min-h-screen items-center justify-center bg-slate-50 p-4"
+        style={{
+          ...theme.rootStyle,
+          backgroundImage: `radial-gradient(circle at 10% 20%, ${theme.softBackground} 0%, transparent 45%)`,
+          fontFamily: "'DM Sans', sans-serif",
+        }}
+      >
+        <Card className="w-full max-w-md border-0 py-8 text-center shadow-xl">
           <CardHeader>
             <div className="mx-auto bg-red-100 p-3 rounded-full w-fit mb-4">
               <svg className="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -515,10 +593,17 @@ export default function CompanyPortal() {
 
   if (completed) {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-gray-50 p-4">
-        <Card className="w-full max-w-md text-center py-8">
+      <div
+        className="flex min-h-screen items-center justify-center bg-slate-50 p-4"
+        style={{
+          ...theme.rootStyle,
+          backgroundImage: `radial-gradient(circle at 50% 0%, ${theme.softBackground} 0%, transparent 45%)`,
+          fontFamily: "'DM Sans', sans-serif",
+        }}
+      >
+        <Card className="w-full max-w-md border-0 py-8 text-center shadow-xl">
           <CardHeader>
-            <div className="mx-auto p-3 rounded-full w-fit mb-4" style={{ backgroundColor: `${primaryColor}20` }}>
+            <div className="mx-auto mb-4 w-fit rounded-full p-3" style={{ backgroundColor: withPortalAlpha(primaryColor, 0.14) }}>
               <svg className="w-6 h-6" fill="none" stroke={primaryColor} viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
               </svg>
@@ -529,18 +614,8 @@ export default function CompanyPortal() {
           <CardContent>
             <Button
               variant="outline"
-              className="transition-colors"
-              style={{ borderColor: primaryColor, color: primaryColor }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.backgroundColor = `${primaryColor}20`;
-                e.currentTarget.style.borderColor = primaryColor;
-                e.currentTarget.style.color = primaryColor;
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.backgroundColor = "";
-                e.currentTarget.style.borderColor = primaryColor;
-                e.currentTarget.style.color = primaryColor;
-              }}
+              className="rounded-xl border transition-colors hover:bg-slate-100"
+              style={{ borderColor: softBorderColor, color: primaryColor }}
               onClick={() => {
                 setCompleted(false);
                 setSelectedWorkflowId(null);
@@ -583,13 +658,22 @@ export default function CompanyPortal() {
       .map((f: any) => f.id);
 
   return (
-    <div className="min-h-screen flex flex-col antialiased" style={{ background: "#f5f5f5", fontFamily: "'DM Sans', sans-serif", fontWeight: 400 }}>
+    <div
+      className="min-h-screen flex flex-col antialiased"
+      style={{
+        ...theme.rootStyle,
+        background:
+          "linear-gradient(180deg, rgba(248,250,252,1) 0%, rgba(241,245,249,1) 45%, rgba(248,250,252,1) 100%)",
+        fontFamily: "'DM Sans', sans-serif",
+        fontWeight: 400,
+      }}
+    >
       <style>{`
-.portal-back-btn { border-color: ${softBorderColor}; color: ${primaryColor}; }
-.portal-back-btn:hover { background-color: ${primaryColor} !important; color: white !important; border-color: ${primaryColor} !important; }
+.portal-back-btn { border-color: ${softBorderColor}; color: ${primaryColor}; background-color: rgba(255,255,255,0.8); }
+.portal-back-btn:hover { background-color: ${withPortalAlpha(primaryColor, 0.1)} !important; color: ${primaryColor} !important; border-color: ${primaryColor} !important; }
 .portal-form input:focus-visible,
 .portal-form textarea:focus-visible,
-.portal-form select:focus-visible { --tw-ring-color: ${primaryColor}; }
+.portal-form select:focus-visible { --tw-ring-color: ${primaryColor}; box-shadow: 0 0 0 4px ${withPortalAlpha(primaryColor, 0.2)}; }
 .portal-form .portal-primary-btn[data-portal-color="true"] { border-color: ${primaryColor}; color: ${primaryColor}; }
 .portal-form .portal-primary-btn[data-portal-color="true"]:hover:not(:disabled),
 .portal-form .portal-primary-btn[data-portal-color="true"][data-state="open"],
@@ -614,14 +698,15 @@ export default function CompanyPortal() {
 .portal-submit-btn { background-color: ${primaryColor} !important; color: white !important; border: none; }
 .portal-submit-btn:hover:not(:disabled) { filter: brightness(0.92); }
 .portal-submit-btn:focus-visible { outline: none; box-shadow: 0 0 0 2px white, 0 0 0 4px ${primaryColor}; }
+.portal-form-shell { border: 1px solid ${softBorderColor}; box-shadow: 0 20px 60px -38px ${withPortalAlpha(primaryColor, 0.45)}; }
 `}</style>
         {/* Header — soft company-color border */}
-        <header className="bg-white border-b" style={{ borderBottomColor: softBorderColor }}>
-          <div className="max-w-4xl mx-auto px-4 py-4 flex items-center gap-4">
+        <header className="border-b bg-white/80 backdrop-blur-md" style={{ borderBottomColor: softBorderColor }}>
+          <div className="mx-auto flex w-full max-w-5xl items-center gap-4 px-4 py-4">
             <Button
               variant="ghost"
               size="sm"
-              className="portal-back-btn border rounded-lg font-normal"
+              className="portal-back-btn rounded-xl border font-normal"
               onClick={() => {
                 setSelectedWorkflowId(null);
                 setWorkflowDetail(null);
@@ -632,20 +717,23 @@ export default function CompanyPortal() {
               <ArrowLeft className="h-4 w-4 mr-1" />
               Back
             </Button>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 rounded-xl bg-white/75 px-3 py-2">
               {logoSrc && (
-                <img src={logoSrc} alt={portal.name} className="h-8 w-8 object-contain rounded" />
+                <img src={logoSrc} alt={portal.name} className="h-8 w-8 object-contain rounded-md" />
               )}
-              <span className="text-sm text-gray-500 font-normal">{portal.name}</span>
+              <span className="text-sm text-gray-600 font-medium">{portal.name}</span>
             </div>
+            <div className="flex-1" />
+            {renderLanguageSelector()}
+            <div className="flex-1" />
           </div>
         </header>
 
-        <div className="max-w-4xl mx-auto py-8 px-4 flex-1 w-full">
-          <div className="text-center mb-8">
-            <h1 className="text-2xl font-normal text-gray-900">{workflowDetail.workflow.name}</h1>
+        <div className="mx-auto flex-1 w-full max-w-5xl px-4 py-10">
+          <div className="mb-8 text-center">
+            <h1 className="text-3xl font-semibold tracking-tight text-slate-900">{workflowDetail.workflow.name}</h1>
             {workflowDetail.workflow.description && (
-              <p className="mt-2 text-gray-600 font-light">{workflowDetail.workflow.description}</p>
+              <p className="mx-auto mt-3 max-w-2xl text-slate-600">{workflowDetail.workflow.description}</p>
             )}
           </div>
 
@@ -654,8 +742,8 @@ export default function CompanyPortal() {
               <Loader2 className="h-8 w-8 animate-spin" style={{ color: primaryColor }} />
             </div>
           ) : hasPages ? (
-            <Card>
-              <CardContent className="p-6">
+            <Card className="portal-form-shell overflow-hidden rounded-2xl border-0 bg-white/95">
+              <CardContent className="p-7 md:p-9">
                 <FormPageStepper
                   pages={formPages}
                   currentIndex={formPageIndex}
@@ -717,7 +805,7 @@ export default function CompanyPortal() {
                 </form>
 
                 {formPages.length > 1 && (
-                  <div className="flex items-center justify-between gap-4 mt-4 pt-4 border-t">
+                  <div className="mt-6 flex items-center justify-between gap-4 border-t pt-5">
                     <Button
                       type="button"
                       variant="outline"
@@ -767,8 +855,8 @@ export default function CompanyPortal() {
             </Card>
           ) : (
             /* Fallback: simple list rendering */
-            <Card>
-              <CardContent className="p-6">
+            <Card className="portal-form-shell overflow-hidden rounded-2xl border-0 bg-white/95">
+              <CardContent className="p-7 md:p-9">
                 <form className="portal-form w-full space-y-6" onSubmit={(e) => e.preventDefault()}>
                 {sortedFields.map((fieldId: string) => renderField(fieldId))}
                 <div className="pt-4">
@@ -834,8 +922,8 @@ export default function CompanyPortal() {
         </Dialog>
 
         {/* Footer */}
-        <footer className="mt-auto border-t bg-white py-4" style={{ borderColor: softBorderColor }}>
-          <div className="max-w-4xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-center gap-3 text-sm text-gray-500 font-normal">
+        <footer className="mt-auto border-t bg-white/85 py-4 backdrop-blur-md" style={{ borderColor: softBorderColor }}>
+          <div className="mx-auto flex max-w-5xl flex-col items-center justify-center gap-3 px-4 text-sm text-gray-500 sm:flex-row">
             <span>This portal has been created with</span>
             <a
               href="https://picobello.com"
@@ -860,28 +948,46 @@ export default function CompanyPortal() {
   // ---------------------------------------------------------------------------
 
   return (
-    <div className="min-h-screen flex flex-col antialiased" style={{ background: "#f5f5f5", fontFamily: "'DM Sans', sans-serif", fontWeight: 400 }}>
+    <div
+      className="min-h-screen flex flex-col antialiased"
+      style={{
+        ...theme.rootStyle,
+        background:
+          "linear-gradient(180deg, rgba(248,250,252,1) 0%, rgba(241,245,249,1) 45%, rgba(248,250,252,1) 100%)",
+        fontFamily: "'DM Sans', sans-serif",
+        fontWeight: 400,
+      }}
+    >
+      <style>{`
+.portal-workflow-card { border-color: ${softBorderColor}; }
+.portal-workflow-card:hover { border-color: ${primaryColor}; box-shadow: 0 20px 50px -36px ${withPortalAlpha(primaryColor, 0.58)}; transform: translateY(-2px); }
+.portal-workflow-cta { border-color: ${softBorderColor}; color: ${primaryColor}; background: ${withPortalAlpha(primaryColor, 0.08)}; }
+.portal-workflow-card:hover .portal-workflow-cta { border-color: ${primaryColor}; background: ${primaryColor}; color: #fff; }
+`}</style>
       {/* Portal header — company-color border */}
-      <header className="relative overflow-hidden border-b bg-white" style={{ borderBottomColor: primaryColor }}>
-        <div className="relative max-w-4xl mx-auto px-1.5 py-3">
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-4 sm:gap-6 text-center sm:text-left">
+      <header className="relative overflow-hidden border-b bg-white/85 backdrop-blur-md" style={{ borderBottomColor: primaryColor }}>
+        <div className="relative mx-auto max-w-5xl px-4 py-10">
+          <div className="flex flex-col items-center justify-center gap-5 text-center">
             {logoSrc && (
-              <div className="flex-shrink-0 inline-flex items-center justify-center w-28 h-28 sm:w-32 sm:h-32 rounded-2xl bg-white">
+              <div className="inline-flex h-28 w-28 items-center justify-center rounded-3xl border bg-white shadow-sm sm:h-32 sm:w-32" style={{ borderColor: softBorderColor }}>
                 <img
                   src={logoSrc}
                   alt={portal.name}
-                  className="h-20 w-20 sm:h-24 sm:w-24 object-contain rounded-xl"
+                  className="h-20 w-20 rounded-xl object-contain sm:h-24 sm:w-24"
                 />
               </div>
             )}
             <div className="min-w-0">
-              <h1 className="text-3xl sm:text-4xl font-normal tracking-tight text-gray-900">
+              <h1 className="text-3xl font-semibold tracking-tight text-slate-900 sm:text-5xl">
                 {portal.name}
               </h1>
             </div>
           </div>
+          <div className="mt-6 flex justify-center">
+            {renderLanguageSelector()}
+          </div>
           {portal.portal_description?.trim() && (
-            <p className="mt-4 text-center text-base sm:text-lg text-gray-600 max-w-2xl mx-auto leading-relaxed font-light">
+            <p className="mx-auto mt-4 max-w-2xl text-center text-base leading-relaxed text-slate-600 sm:text-lg">
               {portal.portal_description}
             </p>
           )}
@@ -889,46 +995,43 @@ export default function CompanyPortal() {
       </header>
 
       {/* Workflow list */}
-      <main className="max-w-4xl mx-auto px-4 py-8 flex-1">
+      <main className="mx-auto flex-1 w-full max-w-5xl px-4 py-10">
         {workflows.length === 0 ? (
-          <div className="text-center py-12 text-gray-500 font-normal">
-            No forms available at the moment.
-          </div>
+          <Card className="mx-auto max-w-2xl rounded-2xl border-0 bg-white/90 py-6 text-center shadow-lg">
+            <CardContent className="space-y-2">
+              <p className="text-base font-medium text-slate-800">No forms available right now</p>
+              <p className="text-sm text-slate-500">Please check back later or contact your organization.</p>
+            </CardContent>
+          </Card>
         ) : (
-          <div className="flex flex-col gap-4">
+          <div className="grid gap-4 sm:grid-cols-2">
             {workflows.map((wf) => (
               <Card
                 key={wf.id}
-                className="cursor-pointer transition-colors border flex flex-row items-center gap-4 p-4"
-                style={{
-                  borderColor: "rgb(228 228 231)",
-                  borderWidth: "1px",
-                  outline: "none",
-                }}
+                className="portal-workflow-card group cursor-pointer rounded-2xl border bg-white/95 p-5 transition-all duration-200"
                 onClick={() => setSelectedWorkflowId(wf.id)}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.borderColor = primaryColor;
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.borderColor = "rgb(228 228 231)";
-                }}
               >
-                <div className="flex items-center gap-3 flex-1 min-w-0">
-                  {wf.icon && <span className="flex-shrink-0">{renderIcon(wf.icon, "h-6 w-6", Folder)}</span>}
-                  <div className="min-w-0">
-                    <CardTitle className="text-lg font-normal">{wf.name}</CardTitle>
-                    {wf.description && (
-                      <p className="text-sm text-gray-500 line-clamp-2 mt-0.5 font-light">{wf.description}</p>
-                    )}
-                  </div>
-                </div>
-                <div className="flex-shrink-0">
+                <div className="mb-4 flex items-center gap-3">
                   <span
-                    className="inline-flex items-center justify-center w-10 h-10 rounded-full border-2 transition-colors"
-                    style={{ borderColor: softBorderColor, color: primaryColor }}
+                    className="inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl border"
+                    style={{ borderColor: softBorderColor, background: withPortalAlpha(primaryColor, 0.08), color: primaryColor }}
+                  >
+                    {renderIcon(wf.icon || "", "h-5 w-5", Folder)}
+                  </span>
+                  <CardTitle className="line-clamp-2 text-lg font-semibold text-slate-900">{wf.name}</CardTitle>
+                </div>
+                {wf.description && (
+                  <p className="line-clamp-3 min-h-[3.5rem] text-sm text-slate-600">{wf.description}</p>
+                )}
+                <div className="mt-5 flex items-center justify-between">
+                  <span className="text-xs uppercase tracking-[0.16em] text-slate-500">
+                    {getPortalStartLabel(selectedLanguage)}
+                  </span>
+                  <span
+                    className="portal-workflow-cta inline-flex h-10 w-10 items-center justify-center rounded-full border-2 transition-colors"
                     aria-label="Start"
                   >
-                    <Play className="h-5 w-5 fill-current" />
+                    <Play className="h-4 w-4 fill-current" />
                   </span>
                 </div>
               </Card>
@@ -938,8 +1041,8 @@ export default function CompanyPortal() {
       </main>
 
       {/* Footer */}
-      <footer className="mt-auto border-t bg-white py-4" style={{ borderColor: softBorderColor }}>
-        <div className="max-w-4xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-center gap-3 text-sm text-gray-500 font-normal">
+      <footer className="mt-auto border-t bg-white/85 py-4 backdrop-blur-md" style={{ borderColor: softBorderColor }}>
+        <div className="mx-auto flex max-w-5xl flex-col items-center justify-center gap-3 px-4 text-sm text-gray-500 sm:flex-row">
           <span>This portal has been created with</span>
           <a
             href="https://picobello.com"

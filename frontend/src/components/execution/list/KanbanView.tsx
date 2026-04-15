@@ -9,6 +9,8 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { PlayCircle, Clock, CheckCircle, XCircle, Pause, User, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getTagColors } from "@/lib/tagColors";
+import { getStepExecutionStyles } from "@/lib/stepTypeColors";
+import { useAuth } from "@/contexts/AuthContext";
 
 interface Execution {
     id: string;
@@ -37,6 +39,7 @@ interface ExecutionStep {
     assigned_to_group_id?: string | null;
     workflow_steps: {
         name: string;
+        step_type?: string | null;
         config: any;
     } | null;
     assigned_to_user?: {
@@ -89,7 +92,17 @@ const getStatusBadgeClass = (status: string) => {
 const KanbanCard = ({ execution, step }: { execution: Execution; step: ExecutionStep }) => {
     const navigate = useNavigate();
     const { t, language } = useLanguage();
+    const { companyBranding } = useAuth();
     const dateLocale = language === "fr" ? fr : enUS;
+    const stepStyle = getStepExecutionStyles(step.workflow_steps?.step_type);
+    const companyTagColors = getTagColors(companyBranding?.internal_primary_color ?? undefined);
+    const assigneeBadgeStyle = companyBranding?.internal_primary_color
+        ? {
+            backgroundColor: companyTagColors.bg,
+            color: companyTagColors.text,
+            borderColor: companyTagColors.dot,
+        }
+        : undefined;
 
     return (
         <Card
@@ -124,7 +137,12 @@ const KanbanCard = ({ execution, step }: { execution: Execution; step: Execution
                     {step.workflow_steps?.name && (
                         <Badge
                             variant="outline"
-                            className="text-[10px] font-medium px-1.5 py-0 h-5 bg-primary/10 text-primary border-primary/30 dark:bg-primary/20 dark:text-primary dark:border-primary/50"
+                            className="text-[10px] font-medium px-1.5 py-0 h-5"
+                            style={{
+                                backgroundColor: stepStyle.backgroundColor,
+                                color: stepStyle.textColor,
+                                borderColor: stepStyle.borderColor,
+                            }}
                         >
                             {step.workflow_steps.name}
                         </Badge>
@@ -137,7 +155,11 @@ const KanbanCard = ({ execution, step }: { execution: Execution; step: Execution
                         {step.assigned_to_user_id && step.assigned_to_user && (
                             <Badge
                                 variant="outline"
-                                className="text-[10px] font-normal flex items-center gap-1 px-1.5 py-0 h-5 bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-900/20 dark:text-indigo-300 dark:border-indigo-800"
+                                className={cn(
+                                    "text-[10px] font-normal flex items-center gap-1 px-1.5 py-0 h-5",
+                                    !assigneeBadgeStyle && "bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-900/20 dark:text-indigo-300 dark:border-indigo-800",
+                                )}
+                                style={assigneeBadgeStyle}
                             >
                                 <User className="h-2.5 w-2.5" />
                                 <span className="truncate max-w-[100px]">
@@ -148,7 +170,11 @@ const KanbanCard = ({ execution, step }: { execution: Execution; step: Execution
                         {step.assigned_to_group_id && step.assigned_to_group && (
                             <Badge
                                 variant="outline"
-                                className="text-[10px] font-normal flex items-center gap-1 px-1.5 py-0 h-5 bg-teal-50 text-teal-700 border-teal-200 dark:bg-teal-900/20 dark:text-teal-300 dark:border-teal-800"
+                                className={cn(
+                                    "text-[10px] font-normal flex items-center gap-1 px-1.5 py-0 h-5",
+                                    !assigneeBadgeStyle && "bg-teal-50 text-teal-700 border-teal-200 dark:bg-teal-900/20 dark:text-teal-300 dark:border-teal-800",
+                                )}
+                                style={assigneeBadgeStyle}
                             >
                                 <Users className="h-2.5 w-2.5" />
                                 <span className="truncate max-w-[100px]">

@@ -10,6 +10,7 @@ if (!process.env.DATABASE_URL) {
 
 import { app } from './app';
 import { storageService } from './services/storage.service';
+import { stepReminderService } from './services/stepReminder.service';
 
 const port = process.env.PORT || 3001;
 
@@ -23,4 +24,7 @@ app.listen(port, async () => {
   } catch (error) {
     console.error('Failed to initialize storage service:', error);
   }
+
+  // Start background reminder worker for open workflow steps.
+  stepReminderService.startWorker();
 });

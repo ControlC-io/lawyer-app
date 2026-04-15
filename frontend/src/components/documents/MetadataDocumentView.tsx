@@ -32,7 +32,6 @@ import {
   ChevronRight,
   ChevronDown,
   Trash2,
-  Eye,
   Download,
   Edit,
   Settings,
@@ -88,6 +87,11 @@ interface FileType {
   ocr_error?: string | null;
   ocr_processed_at?: string | null;
   ocrSnippet?: string;
+  ragie_document_id?: string | null;
+  ragie_partition?: string | null;
+  ragie_uploaded_at?: string | null;
+  ragie_status?: string | null;
+  ragie_metadata?: Record<string, unknown> | null;
 }
 
 interface OcrViewerData {
@@ -767,6 +771,42 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
     }
   };
 
+  const handleUploadToRagie = async (file: FileType) => {
+    if (file.ragie_document_id) return;
+    try {
+      await api.post(`/api/companies/${companyId}/documents/${file.id}/ragie/upload`);
+      toast({
+        title: String(t("metadataDocuments.ragieUploadSuccessTitle")),
+        description: String(t("metadataDocuments.ragieUploadSuccessDescription", { name: file.name })),
+      });
+      fetchFiles();
+    } catch (e) {
+      toast({
+        title: String(t("metadataDocuments.ragieUploadFailedTitle")),
+        description: e instanceof Error ? e.message : String(t("metadataDocuments.ragieUploadFailedDescription")),
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleRemoveFromRagie = async (file: FileType) => {
+    if (!file.ragie_document_id) return;
+    try {
+      await api.delete(`/api/companies/${companyId}/documents/${file.id}/ragie`);
+      toast({
+        title: String(t("metadataDocuments.ragieRemoveSuccessTitle")),
+        description: String(t("metadataDocuments.ragieRemoveSuccessDescription", { name: file.name })),
+      });
+      fetchFiles();
+    } catch (e) {
+      toast({
+        title: String(t("metadataDocuments.ragieRemoveFailedTitle")),
+        description: e instanceof Error ? e.message : String(t("metadataDocuments.ragieRemoveFailedDescription")),
+        variant: "destructive",
+      });
+    }
+  };
+
   const confirmDeleteSelected = async () => {
     const ids = Array.from(selectedFileIds);
     if (ids.length === 0) {
@@ -1064,21 +1104,6 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
             <Copy className="h-3 w-3 mr-1" />
             Copy raw Markdown
           </Button>
-          {ocrEnabled && (
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-7 text-xs"
-              onClick={() => {
-                setPreviewOcrData(null);
-                setPreviewOcrFileId(null);
-                triggerOcr(previewFile.id);
-              }}
-            >
-              <ScanText className="h-3 w-3 mr-1" />
-              Re-run OCR
-            </Button>
-          )}
         </div>
         <div className="flex items-center gap-1.5">
           <div className="relative flex-1">
@@ -1129,7 +1154,7 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
             </div>
           )}
         </div>
-        <ScrollArea className="flex-1 min-h-0">
+        <ScrollArea className="flex-1 min-h-0" horizontal>
           <div ref={ocrContentRef} className="ocr-document text-sm text-foreground px-1">
             <ReactMarkdown
               remarkPlugins={[remarkGfm, remarkBreaks]}
@@ -1488,6 +1513,12 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
                       <div className="flex items-center gap-2">
                         <FileIcon className="h-4 w-4 text-muted-foreground shrink-0" />
                         <span className="truncate">{file.name}</span>
+                        {file.ragie_document_id && (
+                          <Badge variant="secondary" className="gap-1 text-[10px]">
+                            <CheckCircle className="h-3 w-3" />
+                            {String(t("metadataDocuments.ragieLinkedBadge"))}
+                          </Badge>
+                        )}
                       </div>
                       {searchActive && file.ocrSnippet && (
                         <div className="flex items-center gap-1 ml-6">
@@ -1536,21 +1567,6 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex gap-0.5 justify-end">
-                      {canPreview(file.mime_type) && (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7"
-                          title={String(t("data.preview"))}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            openPreview(file);
-                          }}
-                        >
-                          <Eye className="h-3.5 w-3.5" />
-                        </Button>
-                      )}
-
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <Button
@@ -1567,6 +1583,22 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
                           <DropdownMenuItem onClick={() => handleDownload(file)}>
                             <Download className="h-4 w-4 mr-2" />
                             {String(t("metadataDocuments.download"))}
+                          </DropdownMenuItem>
+
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            disabled={!fileWritable || !!file.ragie_document_id}
+                            onClick={() => handleUploadToRagie(file)}
+                          >
+                            <CloudUpload className="h-4 w-4 mr-2" />
+                            {String(t("metadataDocuments.ragieUploadAction"))}
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            disabled={!fileWritable || !file.ragie_document_id}
+                            onClick={() => handleRemoveFromRagie(file)}
+                          >
+                            <Trash2 className="h-4 w-4 mr-2" />
+                            {String(t("metadataDocuments.ragieRemoveAction"))}
                           </DropdownMenuItem>
 
                           <DropdownMenuSeparator />

@@ -1,7 +1,6 @@
 import { useState, useEffect } from "react";
 import { api } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
-import { useToast } from "@/hooks/use-toast";
 
 export interface Notification {
   id: string;
@@ -17,7 +16,6 @@ export interface Notification {
 
 export function useNotifications() {
   const { profile } = useAuth();
-  const { toast } = useToast();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -63,6 +61,21 @@ export function useNotifications() {
     }
   };
 
+  const deleteNotification = async (id: string) => {
+    try {
+      await api.delete(`/api/notifications/${id}`);
+      setNotifications((prev) => {
+        const toDelete = prev.find((n) => n.id === id);
+        if (toDelete && !toDelete.is_read) {
+          setUnreadCount((count) => Math.max(0, count - 1));
+        }
+        return prev.filter((n) => n.id !== id);
+      });
+    } catch (error) {
+      console.error("Error deleting notification:", error);
+    }
+  };
+
   useEffect(() => {
     fetchNotifications();
   }, [profile?.id]);
@@ -80,6 +93,7 @@ export function useNotifications() {
     loading,
     markAsRead,
     markAllAsRead,
+    deleteNotification,
     refetch: fetchNotifications,
   };
 }

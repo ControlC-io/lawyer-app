@@ -28,6 +28,11 @@ interface Session {
   user: User;
 }
 
+interface CompanyBranding {
+  internal_logo_url?: string | null;
+  internal_primary_color?: string | null;
+}
+
 interface AuthContextType {
   user: User | null;
   session: Session | null;
@@ -39,6 +44,7 @@ interface AuthContextType {
   isCompanyAdmin: boolean;
   isSuperAdmin: boolean;
   permissions: string[];
+  companyBranding: CompanyBranding | null;
   hasPermission: (key: string) => boolean;
   signOut: () => Promise<void>;
   refreshUserData: () => Promise<void>;
@@ -58,7 +64,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const selectedCompanyRef = useRef(selectedCompanyId);
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [permissions, setPermissions] = useState<string[]>([]);
+  const [companyBranding, setCompanyBranding] = useState<CompanyBranding | null>(null);
+  const brandingLogoObjectUrlRef = useRef<string | null>(null);
   const navigate = useNavigate();
+
+  const revokeBrandingLogoObjectUrl = useCallback(() => {
+    if (brandingLogoObjectUrlRef.current) {
+      URL.revokeObjectURL(brandingLogoObjectUrlRef.current);
+      brandingLogoObjectUrlRef.current = null;
+    }
+  }, []);
 
   const setSelectedCompanyId = useCallback((id: string | null) => {
     setSelectedCompanyIdState(id);
@@ -148,6 +163,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!selectedCompanyId || !user) {
       setPermissions([]);
+      setCompanyBranding(null);
       return;
     }
     const fetchPermissions = async () => {
@@ -161,6 +177,45 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     fetchPermissions();
   }, [selectedCompanyId, user]);
 
+  useEffect(() => {
+    if (!selectedCompanyId || !user) {
+      setCompanyBranding(null);
+      return;
+    }
+
+    const fetchBranding = async () => {
+      try {
+        const company = await api.get<CompanyBranding>(`/api/companies/${selectedCompanyId}`);
+        let resolvedLogoUrl: string | null = company.internal_logo_url ?? null;
+        const rawLogoUrl = company.internal_logo_url?.trim() ?? "";
+        if (/^\/api\/companies\/[a-zA-Z0-9-]+\/internal-logo$/.test(rawLogoUrl)) {
+          const blob = await api.getBlob(rawLogoUrl);
+          revokeBrandingLogoObjectUrl();
+          const objectUrl = URL.createObjectURL(blob);
+          brandingLogoObjectUrlRef.current = objectUrl;
+          resolvedLogoUrl = objectUrl;
+        } else {
+          revokeBrandingLogoObjectUrl();
+        }
+        setCompanyBranding({
+          internal_logo_url: resolvedLogoUrl,
+          internal_primary_color: company.internal_primary_color ?? null,
+        });
+      } catch {
+        revokeBrandingLogoObjectUrl();
+        setCompanyBranding(null);
+      }
+    };
+
+    fetchBranding();
+  }, [selectedCompanyId, user, revokeBrandingLogoObjectUrl]);
+
+  useEffect(() => {
+    return () => {
+      revokeBrandingLogoObjectUrl();
+    };
+  }, [revokeBrandingLogoObjectUrl]);
+
   const signOut = async () => {
     clearToken();
     setUser(null);
@@ -169,6 +224,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUserCompanies([]);
     setSelectedCompanyIdState(null);
     setPermissions([]);
+    revokeBrandingLogoObjectUrl();
+    setCompanyBranding(null);
     navigate("/auth");
   };
 
@@ -191,6 +248,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         isCompanyAdmin,
         isSuperAdmin,
         permissions,
+        companyBranding,
         hasPermission,
         signOut,
         refreshUserData,

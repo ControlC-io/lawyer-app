@@ -3,6 +3,13 @@ import crypto from 'crypto';
 import { prisma } from '../lib/prisma';
 import { workflowService } from '../services/workflow.service';
 import { storageService } from '../services/storage.service';
+import {
+  localizeDataStructure,
+  localizeFormStepConfig,
+  normalizePortalDefaultLanguage,
+  normalizePortalLanguages,
+  resolveLocalizedText,
+} from '../services/portalTranslation.service';
 
 // ---------------------------------------------------------------------------
 // Field validation (reused from external.controller.ts)
@@ -19,6 +26,40 @@ interface FieldValidationRule {
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const URL_RE = /^https?:\/\/.+/i;
 const PHONE_RE = /^\+?[\d\s\-().]{7,20}$/;
+
+function attachStepCompletionMeta(
+  rawStepData: unknown,
+  params: {
+    startedAt?: Date | null;
+    completedAt: Date;
+    closedBySource?: 'user' | 'company_api_key' | 'portal' | 'external' | 'system';
+    closedByName?: string;
+    closedByUserId?: string;
+    closedByEmail?: string;
+  }
+) {
+  const stepData =
+    rawStepData && typeof rawStepData === 'object' && !Array.isArray(rawStepData)
+      ? { ...(rawStepData as Record<string, unknown>) }
+      : {};
+  const existingMeta =
+    stepData._step_meta && typeof stepData._step_meta === 'object' && !Array.isArray(stepData._step_meta)
+      ? (stepData._step_meta as Record<string, unknown>)
+      : {};
+
+  return {
+    ...stepData,
+    _step_meta: {
+      ...existingMeta,
+      opened_at: params.startedAt ? params.startedAt.toISOString() : null,
+      closed_at: params.completedAt.toISOString(),
+      ...(params.closedBySource ? { closed_by_source: params.closedBySource } : {}),
+      ...(params.closedByName ? { closed_by_name: params.closedByName } : {}),
+      ...(params.closedByUserId ? { closed_by_user_id: params.closedByUserId } : {}),
+      ...(params.closedByEmail ? { closed_by_email: params.closedByEmail } : {}),
+    },
+  };
+}
 
 function evaluateFieldValidation(
   rule: FieldValidationRule,
@@ -184,6 +225,18 @@ async function resolveCompanyFromPortalSegment<T>(
   return company ? (company as T) : null;
 }
 
+function getRequestedLanguage(req: Request): string {
+  const queryLang = typeof req.query.lang === 'string' ? req.query.lang.trim().toLowerCase() : '';
+  if (queryLang) return queryLang;
+
+  const headerLang = typeof req.headers['accept-language'] === 'string'
+    ? req.headers['accept-language']
+    : '';
+  if (!headerLang) return '';
+
+  return headerLang.split(',')[0]?.split('-')[0]?.trim().toLowerCase() || '';
+}
+
 function sanitizeFileName(fileName: string): string {
   if (!fileName || typeof fileName !== 'string') return 'file';
   let s = fileName
@@ -228,6 +281,8 @@ export const portalController = {
         logo_storage_path: string | null;
         portal_description: string | null;
         portal_primary_color: string | null;
+        portal_default_language: string;
+        portal_enabled_languages: unknown;
       };
       const company = await resolveCompanyFromPortalSegment<PortalInfoSelect>(slug, {
         id: true,
@@ -237,6 +292,8 @@ export const portalController = {
         logo_storage_path: true,
         portal_description: true,
         portal_primary_color: true,
+        portal_default_language: true,
+        portal_enabled_languages: true,
       });
 
       if (!company) {
@@ -260,6 +317,11 @@ export const portalController = {
         logo_url,
         portal_description: company.portal_description,
         portal_primary_color: company.portal_primary_color,
+        default_language: normalizePortalDefaultLanguage(
+          company.portal_default_language,
+          normalizePortalLanguages(company.portal_enabled_languages),
+        ),
+        enabled_languages: normalizePortalLanguages(company.portal_enabled_languages),
       });
     } catch (error) {
       console.error('getPortalInfo error:', error);
@@ -322,11 +384,19 @@ export const portalController = {
         return res.status(400).json({ error: 'Slug is required' });
       }
 
-      const company = await resolveCompanyFromPortalSegment<{ id: string }>(slug, { id: true });
+      const company = await resolveCompanyFromPortalSegment<{
+        id: string;
+        portal_default_language: string;
+        portal_enabled_languages: unknown;
+      }>(slug, { id: true, portal_default_language: true, portal_enabled_languages: true });
 
       if (!company) {
         return res.status(404).json({ error: 'Portal not found' });
       }
+
+      const enabledLanguages = normalizePortalLanguages(company.portal_enabled_languages);
+      const defaultLanguage = normalizePortalDefaultLanguage(company.portal_default_language, enabledLanguages);
+      const requestedLanguage = getRequestedLanguage(req);
 
       const workflows = await prisma.workflow.findMany({
         where: {
@@ -337,13 +407,22 @@ export const portalController = {
         select: {
           id: true,
           name: true,
+          name_i18n: true,
           description: true,
+          description_i18n: true,
           icon: true,
         },
         orderBy: { name: 'asc' },
       });
 
-      return res.json(workflows);
+      return res.json(workflows.map((workflow) => ({
+        id: workflow.id,
+        name: resolveLocalizedText(workflow.name, workflow.name_i18n, requestedLanguage, defaultLanguage),
+        description: workflow.description
+          ? resolveLocalizedText(workflow.description, workflow.description_i18n, requestedLanguage, defaultLanguage)
+          : workflow.description,
+        icon: workflow.icon,
+      })));
     } catch (error) {
       console.error('listPortalWorkflows error:', error);
       return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
@@ -361,11 +440,19 @@ export const portalController = {
         return res.status(400).json({ error: 'Slug and workflowId are required' });
       }
 
-      const company = await resolveCompanyFromPortalSegment<{ id: string }>(slug, { id: true });
+      const company = await resolveCompanyFromPortalSegment<{
+        id: string;
+        portal_default_language: string;
+        portal_enabled_languages: unknown;
+      }>(slug, { id: true, portal_default_language: true, portal_enabled_languages: true });
 
       if (!company) {
         return res.status(404).json({ error: 'Portal not found' });
       }
+
+      const enabledLanguages = normalizePortalLanguages(company.portal_enabled_languages);
+      const defaultLanguage = normalizePortalDefaultLanguage(company.portal_default_language, enabledLanguages);
+      const requestedLanguage = getRequestedLanguage(req);
 
       const workflow = await prisma.workflow.findFirst({
         where: {
@@ -377,7 +464,9 @@ export const portalController = {
         select: {
           id: true,
           name: true,
+          name_i18n: true,
           description: true,
+          description_i18n: true,
           icon: true,
           data_structure: true,
         },
@@ -421,17 +510,22 @@ export const portalController = {
       }
 
       return res.json({
+        selected_language: requestedLanguage || defaultLanguage,
+        default_language: defaultLanguage,
+        enabled_languages: enabledLanguages,
         workflow: {
           id: workflow.id,
-          name: workflow.name,
-          description: workflow.description,
+          name: resolveLocalizedText(workflow.name, workflow.name_i18n, requestedLanguage, defaultLanguage),
+          description: workflow.description
+            ? resolveLocalizedText(workflow.description, workflow.description_i18n, requestedLanguage, defaultLanguage)
+            : workflow.description,
           icon: workflow.icon,
-          data_structure: workflow.data_structure,
+          data_structure: localizeDataStructure(workflow.data_structure, requestedLanguage, defaultLanguage),
         },
         first_step: {
           id: firstStep.id,
           name: firstStep.name,
-          config: firstStep.config,
+          config: localizeFormStepConfig(firstStep.config, requestedLanguage, defaultLanguage),
         },
       });
     } catch (error) {
@@ -654,7 +748,7 @@ export const portalController = {
           execution_id: executionId,
           step_id: firstStep.id,
         },
-        select: { id: true },
+        select: { id: true, started_at: true },
       });
 
       if (!executionStep) {
@@ -682,16 +776,27 @@ export const portalController = {
       }
 
       // Mark first step as completed (use relocatedData so step_data has final paths)
+      const completedAt = new Date();
+      const stepDataWithMeta = attachStepCompletionMeta(
+        {
+          ...relocatedData,
+          _submitted_at: completedAt.toISOString(),
+          _submission_type: 'portal',
+        },
+        {
+          startedAt: executionStep.started_at,
+          completedAt,
+          closedBySource: 'portal',
+          closedByName: 'public',
+        }
+      );
+      await workflowService.cancelReminderForExecutionStep(executionStep.id);
       await prisma.workflowExecutionStep.update({
         where: { id: executionStep.id },
         data: {
           status: 'completed',
-          completed_at: new Date(),
-          step_data: {
-            ...relocatedData,
-            _submitted_at: new Date().toISOString(),
-            _submission_type: 'portal',
-          },
+          completed_at: completedAt,
+          step_data: stepDataWithMeta,
         },
       });
 

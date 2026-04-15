@@ -5,6 +5,13 @@ import { workflowService } from '../services/workflow.service';
 import { emailService } from '../services/email.service';
 import fetch from 'node-fetch';
 import crypto from 'crypto';
+import {
+  localizeDataStructure,
+  localizeFormStepConfig,
+  normalizePortalDefaultLanguage,
+  normalizePortalLanguages,
+  resolveLocalizedText,
+} from '../services/portalTranslation.service';
 
 // prisma is imported from ../lib/prisma
 
@@ -26,6 +33,40 @@ interface FieldValidationRule {
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const URL_RE = /^https?:\/\/.+/i;
 const PHONE_RE = /^\+?[\d\s\-().]{7,20}$/;
+
+function attachStepCompletionMeta(
+  rawStepData: unknown,
+  params: {
+    startedAt?: Date | null;
+    completedAt: Date;
+    closedBySource?: 'user' | 'company_api_key' | 'portal' | 'external' | 'system';
+    closedByName?: string;
+    closedByUserId?: string;
+    closedByEmail?: string;
+  }
+) {
+  const stepData =
+    rawStepData && typeof rawStepData === 'object' && !Array.isArray(rawStepData)
+      ? { ...(rawStepData as Record<string, unknown>) }
+      : {};
+  const existingMeta =
+    stepData._step_meta && typeof stepData._step_meta === 'object' && !Array.isArray(stepData._step_meta)
+      ? (stepData._step_meta as Record<string, unknown>)
+      : {};
+
+  return {
+    ...stepData,
+    _step_meta: {
+      ...existingMeta,
+      opened_at: params.startedAt ? params.startedAt.toISOString() : null,
+      closed_at: params.completedAt.toISOString(),
+      ...(params.closedBySource ? { closed_by_source: params.closedBySource } : {}),
+      ...(params.closedByName ? { closed_by_name: params.closedByName } : {}),
+      ...(params.closedByUserId ? { closed_by_user_id: params.closedByUserId } : {}),
+      ...(params.closedByEmail ? { closed_by_email: params.closedByEmail } : {}),
+    },
+  };
+}
 
 function evaluateFieldValidation(
   rule: FieldValidationRule,
@@ -213,6 +254,17 @@ async function runAiFormValidation(args: {
   }
 }
 
+function getRequestedLanguage(req: AuthRequest): string {
+  const queryLang = typeof req.query.lang === 'string' ? req.query.lang.trim().toLowerCase() : '';
+  if (queryLang) return queryLang;
+
+  const headerLang = typeof req.headers['accept-language'] === 'string'
+    ? req.headers['accept-language']
+    : '';
+  if (!headerLang) return '';
+  return headerLang.split(',')[0]?.split('-')[0]?.trim().toLowerCase() || '';
+}
+
 async function getStepInfoByToken(token: string) {
   const stepInfo = await prisma.$queryRaw<
     Array<{
@@ -220,8 +272,13 @@ async function getStepInfoByToken(token: string) {
       execution_step_id: string;
       workflow_step_id: string;
       company_id: string;
+      started_at: Date | null;
       data_structure: any;
       step_config: any;
+      workflow_name: string;
+      workflow_name_i18n: any;
+      portal_default_language: string;
+      portal_enabled_languages: any;
     }>
   >`
     SELECT 
@@ -229,12 +286,18 @@ async function getStepInfoByToken(token: string) {
       wes.id as execution_step_id,
       wes.step_id as workflow_step_id,
       wes.company_id,
+      wes.started_at,
+      w.name as workflow_name,
+      w.name_i18n as workflow_name_i18n,
       w.data_structure,
-      ws.config as step_config
+      ws.config as step_config,
+      c.portal_default_language,
+      c.portal_enabled_languages
     FROM public.workflow_execution_steps wes
     JOIN public.workflow_steps ws ON ws.id = wes.step_id
     JOIN public.workflow_executions we ON we.id = wes.execution_id
     JOIN public.workflows w ON w.id = we.workflow_id
+    JOIN public.companies c ON c.id = wes.company_id
     WHERE wes.external_token = ${token}
     LIMIT 1
   `;
@@ -261,7 +324,20 @@ export const externalController = {
         });
       }
 
-      return res.json(stepInfo[0]);
+      const step = stepInfo[0];
+      const enabledLanguages = normalizePortalLanguages(step.portal_enabled_languages);
+      const defaultLanguage = normalizePortalDefaultLanguage(step.portal_default_language, enabledLanguages);
+      const requestedLanguage = getRequestedLanguage(req);
+
+      return res.json({
+        ...step,
+        selected_language: requestedLanguage || defaultLanguage,
+        default_language: defaultLanguage,
+        enabled_languages: enabledLanguages,
+        workflow_name: resolveLocalizedText(step.workflow_name, step.workflow_name_i18n, requestedLanguage, defaultLanguage),
+        data_structure: localizeDataStructure(step.data_structure, requestedLanguage, defaultLanguage),
+        step_config: localizeFormStepConfig(step.step_config, requestedLanguage, defaultLanguage),
+      });
     } catch (error) {
       console.error('getStepByToken error:', error);
       return res.status(500).json({
@@ -389,16 +465,26 @@ export const externalController = {
       }
 
       // Mark step as completed
+      const completedAt = new Date();
+      const stepDataWithMeta = attachStepCompletionMeta(
+        {
+          ...data,
+          _submitted_at: completedAt.toISOString(),
+          _submission_type: 'external',
+        },
+        {
+          startedAt: currentStep.started_at,
+          completedAt,
+          closedBySource: 'external',
+        }
+      );
+      await workflowService.cancelReminderForExecutionStep(currentStep.execution_step_id);
       await prisma.workflowExecutionStep.update({
         where: { id: currentStep.execution_step_id },
         data: {
           status: 'completed',
-          completed_at: new Date(),
-          step_data: {
-            ...data,
-            _submitted_at: new Date().toISOString(),
-            _submission_type: 'external',
-          },
+          completed_at: completedAt,
+          step_data: stepDataWithMeta,
         },
       });
 

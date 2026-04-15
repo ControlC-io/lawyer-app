@@ -1,15 +1,77 @@
 import sgMail from '@sendgrid/mail';
 
 const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY || '';
-const FROM_EMAIL = process.env.FROM_EMAIL || 'noreply@floowly.app';
+const FROM_EMAIL = process.env.FROM_EMAIL || 'noreply@picobello.app'; 
 const APP_URL = process.env.APP_URL || 'http://localhost';
+let configuredApiKeyLength = 0;
+
+function resolveSendGridApiKey(): string {
+  // Prefer runtime value to surface late-loaded env values.
+  return process.env.SENDGRID_API_KEY || SENDGRID_API_KEY || '';
+}
+
+function getRuntimeEmailEnvState() {
+  const runtimeApiKey = process.env.SENDGRID_API_KEY || '';
+  const resolvedApiKey = resolveSendGridApiKey();
+  return {
+    module_api_key_present: !!SENDGRID_API_KEY,
+    module_api_key_length: SENDGRID_API_KEY.length,
+    runtime_api_key_present: !!runtimeApiKey,
+    runtime_api_key_length: runtimeApiKey.length,
+    resolved_api_key_present: !!resolvedApiKey,
+    resolved_api_key_length: resolvedApiKey.length,
+    from_email: FROM_EMAIL,
+    app_url: APP_URL,
+    node_env: process.env.NODE_ENV || 'unknown',
+  };
+}
+
+function ensureSendGridConfigured(context: string): boolean {
+  const apiKey = resolveSendGridApiKey();
+  if (!apiKey) {
+    console.warn(
+      `[email] SendGrid disabled in ${context}: SENDGRID_API_KEY not configured`,
+      getRuntimeEmailEnvState()
+    );
+    return false;
+  }
+
+  if (configuredApiKeyLength !== apiKey.length) {
+    sgMail.setApiKey(apiKey);
+    configuredApiKeyLength = apiKey.length;
+    console.log('[email] SendGrid client configured', getRuntimeEmailEnvState());
+  }
+
+  return true;
+}
+
+function logEmailAttempt(context: string, to: string, subject: string) {
+  console.log(`[email] Attempting ${context}`, {
+    to,
+    from: FROM_EMAIL,
+    subject,
+    env: getRuntimeEmailEnvState(),
+  });
+}
+
+function logEmailError(context: string, error: unknown, to: string, subject: string) {
+  const err = error as any;
+  console.error(`[email] ${context} failed`, {
+    to,
+    from: FROM_EMAIL,
+    subject,
+    message: err?.message,
+    code: err?.code,
+    statusCode: err?.response?.statusCode ?? null,
+    sendgridErrors: err?.response?.body?.errors ?? null,
+    sendgridResponseBody: err?.response?.body ?? null,
+    sendgridResponseHeaders: err?.response?.headers ?? null,
+    env: getRuntimeEmailEnvState(),
+  });
+}
 
 // Initialize SendGrid only if API key is provided
-if (SENDGRID_API_KEY) {
-  sgMail.setApiKey(SENDGRID_API_KEY);
-} else {
-  console.warn('SENDGRID_API_KEY not set. Email functionality will be disabled.');
-}
+ensureSendGridConfigured('module initialization');
 
 export const emailService = {
   /**
@@ -23,22 +85,22 @@ export const emailService = {
     companyName: string,
     token: string
   ): Promise<void> {
-    if (!SENDGRID_API_KEY) {
-      console.warn('Email not sent - SENDGRID_API_KEY not configured');
+    if (!ensureSendGridConfigured('sendInvitation')) {
       return;
     }
 
     const inviteLink = `${APP_URL}/accept-invitation?token=${token}`;
+    const subject = `You have been invited to join ${companyName} on Picobello`;
 
     const msg = {
       to: email,
-      from: { email: FROM_EMAIL, name: 'Floowly' },
-      subject: `You have been invited to join ${companyName} on Floowly`,
+      from: { email: FROM_EMAIL, name: 'Picobello' },
+      subject,
       html: `
         <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eee; border-radius: 8px;">
           <h2 style="color: #333;">Join ${companyName}</h2>
           <p style="color: #555; font-size: 16px;">Hello,</p>
-          <p style="color: #555; font-size: 16px;">You have been invited to join <strong>${companyName}</strong> on Floowly.</p>
+          <p style="color: #555; font-size: 16px;">You have been invited to join <strong>${companyName}</strong> on Picobello.</p>
           <p style="color: #555; font-size: 16px;">Click the button below to accept the invitation and get started:</p>
           <div style="margin: 35px 0; text-align: center;">
             <a href="${inviteLink}" style="background-color: #000; color: white; padding: 14px 28px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">Accept Invitation</a>
@@ -55,10 +117,11 @@ export const emailService = {
     };
 
     try {
+      logEmailAttempt('sendInvitation', email, subject);
       await sgMail.send(msg);
       console.log(`Invitation email sent to ${email}`);
     } catch (error) {
-      console.error('Error sending invitation email:', error);
+      logEmailError('sendInvitation', error, email, subject);
       throw new Error('Failed to send invitation email');
     }
   },
@@ -76,17 +139,17 @@ export const emailService = {
     stepName: string,
     executionId: string
   ): Promise<void> {
-    if (!SENDGRID_API_KEY) {
-      console.warn('Email not sent - SENDGRID_API_KEY not configured');
+    if (!ensureSendGridConfigured('sendAssignmentNotification')) {
       return;
     }
 
     const executionLink = `${APP_URL}/workflows/executions/${executionId}`;
+    const subject = `New task assigned: ${stepName}`;
 
     const msg = {
       to: email,
-      from: { email: FROM_EMAIL, name: 'Floowly' },
-      subject: `New task assigned: ${stepName}`,
+      from: { email: FROM_EMAIL, name: 'Picobello' },
+      subject,
       html: `
         <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eee; border-radius: 8px;">
           <h2 style="color: #333;">New Task Assigned</h2>
@@ -105,10 +168,11 @@ export const emailService = {
     };
 
     try {
+      logEmailAttempt('sendAssignmentNotification', email, subject);
       await sgMail.send(msg);
       console.log(`Assignment notification sent to ${email}`);
     } catch (error) {
-      console.error('Error sending assignment notification:', error);
+      logEmailError('sendAssignmentNotification', error, email, subject);
       throw new Error('Failed to send assignment notification');
     }
   },
@@ -126,16 +190,16 @@ export const emailService = {
     company: string,
     message?: string
   ): Promise<void> {
-    if (!SENDGRID_API_KEY) {
-      console.warn('Email not sent - SENDGRID_API_KEY not configured');
+    if (!ensureSendGridConfigured('sendDemoRequest')) {
       return;
     }
+    const subject = `Demo Request from ${name} (${company})`;
 
     const msg = {
       to: FROM_EMAIL, // Send to admin
-      from: { email: FROM_EMAIL, name: 'Floowly Demo Requests' },
+      from: { email: FROM_EMAIL, name: 'Picobello Demo Requests' },
       replyTo: email,
-      subject: `Demo Request from ${name} (${company})`,
+      subject,
       html: `
         <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eee; border-radius: 8px;">
           <h2 style="color: #333;">New Demo Request</h2>
@@ -148,10 +212,11 @@ export const emailService = {
     };
 
     try {
+      logEmailAttempt('sendDemoRequest', FROM_EMAIL, subject);
       await sgMail.send(msg);
       console.log(`Demo request notification sent for ${email}`);
     } catch (error) {
-      console.error('Error sending demo request:', error);
+      logEmailError('sendDemoRequest', error, FROM_EMAIL, subject);
       throw new Error('Failed to send demo request');
     }
   },
@@ -167,16 +232,16 @@ export const emailService = {
     subject: string,
     feedback: string
   ): Promise<void> {
-    if (!SENDGRID_API_KEY) {
-      console.warn('Email not sent - SENDGRID_API_KEY not configured');
+    if (!ensureSendGridConfigured('sendFeedback')) {
       return;
     }
+    const mailSubject = `Feedback: ${subject}`;
 
     const msg = {
       to: FROM_EMAIL, // Send to admin
-      from: { email: FROM_EMAIL, name: 'Floowly Feedback' },
+      from: { email: FROM_EMAIL, name: 'Picobello Feedback' },
       replyTo: email,
-      subject: `Feedback: ${subject}`,
+      subject: mailSubject,
       html: `
         <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eee; border-radius: 8px;">
           <h2 style="color: #333;">New Feedback</h2>
@@ -188,10 +253,11 @@ export const emailService = {
     };
 
     try {
+      logEmailAttempt('sendFeedback', FROM_EMAIL, mailSubject);
       await sgMail.send(msg);
       console.log(`Feedback sent from ${email}`);
     } catch (error) {
-      console.error('Error sending feedback:', error);
+      logEmailError('sendFeedback', error, FROM_EMAIL, mailSubject);
       throw new Error('Failed to send feedback');
     }
   },
@@ -207,17 +273,17 @@ export const emailService = {
     stepName: string,
     token: string
   ): Promise<void> {
-    if (!SENDGRID_API_KEY) {
-      console.warn('Email not sent - SENDGRID_API_KEY not configured');
+    if (!ensureSendGridConfigured('sendExternalFormLink')) {
       return;
     }
 
     const formLink = `${APP_URL}/external/steps/${token}`;
+    const subject = `Action Required: ${stepName}`;
 
     const msg = {
       to: email,
-      from: { email: FROM_EMAIL, name: 'Floowly' },
-      subject: `Action Required: ${stepName}`,
+      from: { email: FROM_EMAIL, name: 'Picobello' },
+      subject,
       html: `
         <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eee; border-radius: 8px;">
           <h2 style="color: #333;">Action Required</h2>
@@ -236,10 +302,11 @@ export const emailService = {
     };
 
     try {
+      logEmailAttempt('sendExternalFormLink', email, subject);
       await sgMail.send(msg);
       console.log(`External form link sent to ${email}`);
     } catch (error) {
-      console.error('Error sending external form link:', error);
+      logEmailError('sendExternalFormLink', error, email, subject);
       throw new Error('Failed to send external form link');
     }
   },

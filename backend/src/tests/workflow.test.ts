@@ -13,7 +13,7 @@ jest.mock('../lib/prisma', () => ({
     workflow: { findFirst: jest.fn(), findUnique: jest.fn(), create: jest.fn() },
     workflowExecution: { create: jest.fn(), findUnique: jest.fn(), findFirst: jest.fn(), update: jest.fn(), updateMany: jest.fn() },
     workflowExecutionData: { create: jest.fn(), findFirst: jest.fn(), update: jest.fn() },
-    workflowStep: { findFirst: jest.fn(), findMany: jest.fn() },
+    workflowStep: { findFirst: jest.fn(), findMany: jest.fn(), update: jest.fn(), create: jest.fn() },
     workflowExecutionStep: { create: jest.fn(), createMany: jest.fn(), findFirst: jest.fn(), update: jest.fn(), updateMany: jest.fn() },
     workflowConnection: { findMany: jest.fn() },
     agentConfiguration: { findUnique: jest.fn() },
@@ -27,6 +27,7 @@ jest.mock('../services/workflow.service', () => ({
   workflowService: {
     getExecutionDataSnapshot: jest.fn(),
     advanceWorkflow: jest.fn(),
+    cancelReminderForExecutionStep: jest.fn().mockResolvedValue(undefined),
     createExecutionAndStart: jest.fn().mockResolvedValue('exec-123'),
     triggerStepProcessing: jest.fn().mockResolvedValue(undefined),
     triggerFileProcessing: jest.fn().mockResolvedValue(undefined),
@@ -245,6 +246,85 @@ describe('Workflow Endpoints', () => {
         .send({});
       expect(response.status).toBe(403);
       expect(response.body.error).toBe('Workflow is not active');
+    });
+  });
+
+  describe('PUT /api/companies/:companyId/workflows/:workflowId/steps', () => {
+    const jwt = require('jsonwebtoken');
+    const mockUser = { id: 'user-1', email: 'user@example.com' };
+
+    beforeEach(() => {
+      jwt.verify.mockReturnValue({ userId: 'user-1' });
+      (prisma.user.findUnique as jest.Mock).mockResolvedValue(mockUser);
+      (prisma.userCompany.findFirst as jest.Mock).mockResolvedValue({
+        id: 'uc-1',
+        company_id: 'company-123',
+        role: 'company_admin',
+      });
+      (prisma.workflow.findFirst as jest.Mock).mockResolvedValue({ id: 'wf-123', company_id: 'company-123' });
+      (prisma.workflowStep.update as jest.Mock).mockResolvedValue({ id: 'step-1' });
+    });
+
+    it('keeps a non-empty rich-text explanation in step config', async () => {
+      (prisma.workflowStep.findMany as jest.Mock)
+        .mockResolvedValueOnce([{ id: 'step-1' }])
+        .mockResolvedValueOnce([{ id: 'step-1', config: { explanation: '<p>Review this carefully.</p>' } }]);
+
+      const response = await request(app)
+        .put('/api/companies/company-123/workflows/wf-123/steps')
+        .set('Authorization', 'Bearer token')
+        .send({
+          steps: [
+            {
+              id: 'step-1',
+              step_type: 'action',
+              action_type: 'automatic',
+              name: 'Auto step',
+              position_x: 100,
+              position_y: 200,
+              config: { explanation: '<p>Review this carefully.</p>' },
+            },
+          ],
+        });
+
+      expect(response.status).toBe(200);
+      expect(prisma.workflowStep.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'step-1' },
+          data: expect.objectContaining({
+            config: expect.objectContaining({
+              explanation: '<p>Review this carefully.</p>',
+            }),
+          }),
+        })
+      );
+    });
+
+    it('strips explanation when rich-text content is empty', async () => {
+      (prisma.workflowStep.findMany as jest.Mock)
+        .mockResolvedValueOnce([{ id: 'step-1' }])
+        .mockResolvedValueOnce([{ id: 'step-1', config: {} }]);
+
+      const response = await request(app)
+        .put('/api/companies/company-123/workflows/wf-123/steps')
+        .set('Authorization', 'Bearer token')
+        .send({
+          steps: [
+            {
+              id: 'step-1',
+              step_type: 'action',
+              action_type: 'automatic',
+              name: 'Auto step',
+              position_x: 100,
+              position_y: 200,
+              config: { explanation: '<p><br></p>' },
+            },
+          ],
+        });
+
+      expect(response.status).toBe(200);
+      const updateArgs = (prisma.workflowStep.update as jest.Mock).mock.calls.at(-1)?.[0];
+      expect(updateArgs?.data?.config).not.toHaveProperty('explanation');
     });
   });
 
@@ -538,7 +618,16 @@ describe('Workflow Endpoints', () => {
       expect(response.body.success).toBe(true);
       expect(response.body.triggered_steps).toEqual(['step-2']);
       expect(prisma.workflowExecutionStep.update).toHaveBeenCalledWith(expect.objectContaining({
-        data: expect.objectContaining({ status: 'completed' })
+        data: expect.objectContaining({
+          status: 'completed',
+          step_data: expect.objectContaining({
+            data: 'new',
+            _step_meta: expect.objectContaining({
+              closed_by_source: 'company_api_key',
+              closed_by_name: 'API',
+            }),
+          }),
+        })
       }));
     });
 
@@ -562,7 +651,15 @@ describe('Workflow Endpoints', () => {
       expect(workflowService.getExecutionDataSnapshot).toHaveBeenCalledWith('exec-123');
       expect(prisma.workflowExecutionStep.update).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: expect.objectContaining({ step_data: { snapshot: 'data' } }),
+          data: expect.objectContaining({
+            step_data: expect.objectContaining({
+              snapshot: 'data',
+              _step_meta: expect.objectContaining({
+                closed_by_source: 'company_api_key',
+                closed_by_name: 'API',
+              }),
+            }),
+          }),
         })
       );
     });
@@ -623,6 +720,18 @@ describe('Workflow Endpoints', () => {
       expect(response.body.success).toBe(true);
       expect(response.body.decision_choice).toBe('Approved');
       expect(workflowService.advanceWorkflow).toHaveBeenCalledWith('exec-123', 'step-decision', 'company-123', 'Approved');
+      expect(prisma.workflowExecutionStep.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            step_data: expect.objectContaining({
+              _step_meta: expect.objectContaining({
+                closed_by_source: 'company_api_key',
+                closed_by_name: 'API',
+              }),
+            }),
+          }),
+        })
+      );
     });
 
     it('should return 404 when step is not found', async () => {
@@ -759,6 +868,43 @@ describe('Workflow Endpoints', () => {
         .set(mockAuthHeaders);
       expect(response.status).toBe(200);
       expect(response.body.id).toBe('exec-123');
+    });
+
+    it('should expose closed_by_label as API or public in execution steps', async () => {
+      (prisma.workflowExecution.findFirst as jest.Mock).mockResolvedValue({
+        id: 'exec-123',
+        workflow: { data_structure: [] },
+        execution_steps: [
+          {
+            id: 'step-api',
+            step_data: {
+              _step_meta: {
+                closed_by_source: 'company_api_key',
+              },
+            },
+          },
+          {
+            id: 'step-portal',
+            step_data: {
+              _submission_type: 'portal',
+            },
+          },
+        ],
+        execution_data_records: [{ values: {} }],
+        execution_logs: [],
+      });
+
+      const response = await request(app)
+        .get('/api/workflows/executions/exec-123')
+        .set(mockAuthHeaders);
+
+      expect(response.status).toBe(200);
+      expect(response.body.execution_steps).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: 'step-api', closed_by_label: 'API' }),
+          expect.objectContaining({ id: 'step-portal', closed_by_label: 'public' }),
+        ])
+      );
     });
 
     it('should return 400 or 404 when executionId is empty', async () => {

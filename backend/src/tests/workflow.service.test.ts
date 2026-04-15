@@ -11,13 +11,35 @@ jest.mock('../lib/prisma', () => ({
       count: jest.fn(),
       findFirst: jest.fn(),
       create: jest.fn(),
+      update: jest.fn(),
+      updateMany: jest.fn(),
+      findUnique: jest.fn(),
     },
     workflowExecution: { findUnique: jest.fn(), update: jest.fn() },
     workflowExecutionData: { findMany: jest.fn() },
+    stepReminderJob: {
+      create: jest.fn(),
+      createMany: jest.fn(),
+      deleteMany: jest.fn(),
+      updateMany: jest.fn(),
+      findMany: jest.fn(),
+      update: jest.fn(),
+    },
   },
 }));
 
 jest.mock('node-fetch');
+jest.mock('../services/notification.service', () => ({
+  notificationService: {
+    dispatchAssignmentForExecutionStep: jest.fn().mockResolvedValue({
+      found: true,
+      message: 'mocked',
+      recipients_total: 0,
+      recipients_notified: 0,
+      recipients_emailed: 0,
+    }),
+  },
+}));
 
 describe('workflow.service', () => {
   beforeEach(() => {
@@ -301,6 +323,76 @@ describe('workflow.service', () => {
         expect.stringContaining('/process-file'),
         expect.any(Object)
       );
+    });
+  });
+
+  describe('handleStepActivation', () => {
+    it('should skip assignment dispatch when disabled and still schedule reminder', async () => {
+      const triggerSpy = jest
+        .spyOn(workflowService, 'triggerAssignmentNotification')
+        .mockResolvedValue(undefined);
+      (prisma.stepReminderJob.deleteMany as jest.Mock).mockResolvedValue({ count: 0 });
+      (prisma.stepReminderJob.createMany as jest.Mock).mockResolvedValue({ count: 2 });
+
+      await workflowService.handleStepActivation(
+        'exec-step-1',
+        {
+          step_type: 'edit_form',
+          config: {
+            notifications: {
+              assignment: { enabled: false },
+              reminder: { mode: 'schedule', schedule_minutes: [60, 180] },
+            },
+          },
+        },
+        'company-1'
+      );
+
+      expect(triggerSpy).not.toHaveBeenCalled();
+      expect(prisma.stepReminderJob.createMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.arrayContaining([
+            expect.objectContaining({ reminder_key: 'schedule-0', mode: 'schedule' }),
+            expect.objectContaining({ reminder_key: 'schedule-1', mode: 'schedule' }),
+          ]),
+        })
+      );
+      triggerSpy.mockRestore();
+    });
+
+    it('should dispatch assignment and schedule repeating reminder with max count', async () => {
+      const triggerSpy = jest
+        .spyOn(workflowService, 'triggerAssignmentNotification')
+        .mockResolvedValue(undefined);
+      (prisma.stepReminderJob.deleteMany as jest.Mock).mockResolvedValue({ count: 0 });
+      (prisma.stepReminderJob.create as jest.Mock).mockResolvedValue({ id: 'job-2' });
+
+      await workflowService.handleStepActivation(
+        'exec-step-2',
+        {
+          step_type: 'action',
+          action_type: 'manual',
+          config: {
+            notifications: {
+              assignment: { enabled: true },
+              reminder: { mode: 'repeat', delay_minutes: 60, repeat_every_minutes: 240, max_count: 3 },
+            },
+          },
+        },
+        'company-1'
+      );
+
+      expect(triggerSpy).toHaveBeenCalledWith('exec-step-2');
+      expect(prisma.stepReminderJob.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            mode: 'repeat',
+            repeat_every_minutes: 240,
+            max_count: 3,
+          }),
+        })
+      );
+      triggerSpy.mockRestore();
     });
   });
 

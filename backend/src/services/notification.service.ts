@@ -1,4 +1,13 @@
 import { prisma } from '../lib/prisma';
+import { emailService } from './email.service';
+
+type AssignmentDispatchResult = {
+  found: boolean;
+  message: string;
+  recipients_total: number;
+  recipients_notified: number;
+  recipients_emailed: number;
+};
 
 export const notificationService = {
   /**
@@ -136,6 +145,141 @@ export const notificationService = {
       console.error('Error creating assignment notification:', error);
       // Don't throw - notifications are not critical
     }
+  },
+
+  /**
+   * Dispatch assignment notifications (in-app + email) for an execution step.
+   * Returns a summary and never throws for per-recipient email failures.
+   */
+  async dispatchAssignmentForExecutionStep(executionStepId: string): Promise<AssignmentDispatchResult> {
+    const stepInstance = await prisma.workflowExecutionStep.findUnique({
+      where: { id: executionStepId },
+      include: {
+        execution: {
+          include: {
+            workflow: {
+              select: {
+                id: true,
+                name: true,
+              },
+            },
+          },
+        },
+        step: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+      },
+    });
+
+    if (!stepInstance) {
+      return {
+        found: false,
+        message: 'Step instance not found',
+        recipients_total: 0,
+        recipients_notified: 0,
+        recipients_emailed: 0,
+      };
+    }
+
+    const workflowName = stepInstance.execution.workflow.name || 'Workflow';
+    const stepName = stepInstance.step.name || 'Next Step';
+    const executionId = stepInstance.execution_id;
+    const companyId = stepInstance.company_id!;
+
+    let recipientIds: string[] = [];
+    if (stepInstance.assigned_to_user_id) {
+      recipientIds.push(stepInstance.assigned_to_user_id);
+    }
+
+    if (stepInstance.assigned_to_group_id) {
+      const groupMembers = await prisma.profileGroupMember.findMany({
+        where: { group_id: stepInstance.assigned_to_group_id },
+        select: { profile_id: true },
+      });
+      recipientIds.push(...groupMembers.map((gm) => gm.profile_id!));
+    }
+
+    recipientIds = [...new Set(recipientIds)];
+    if (recipientIds.length === 0) {
+      return {
+        found: true,
+        message: 'No recipients assigned',
+        recipients_total: 0,
+        recipients_notified: 0,
+        recipients_emailed: 0,
+      };
+    }
+
+    const profiles = await prisma.profile.findMany({
+      where: { id: { in: recipientIds } },
+      select: {
+        id: true,
+        email: true,
+        notifications_enabled: true,
+      },
+    });
+
+    const eligibleRecipients = profiles.filter((p) => p.notifications_enabled !== false);
+    const recipientsWithEmail = eligibleRecipients.filter((p) => !!p.email);
+
+    const internalNotifications = recipientIds.map((recipientId) => ({
+      user_id: recipientId,
+      company_id: companyId,
+      title: 'New Task Assigned',
+      message: `A new step "${stepName}" has been assigned to you in the workflow "${workflowName}".`,
+      type: 'assignment',
+      data: {
+        execution_id: executionId,
+        step_id: stepInstance.step.id,
+        execution_step_id: executionStepId,
+      },
+      is_read: false,
+    }));
+
+    if (internalNotifications.length > 0) {
+      await prisma.notification.createMany({
+        data: internalNotifications as any,
+      });
+    }
+
+    let recipientsEmailed = 0;
+    for (const recipient of recipientsWithEmail) {
+      try {
+        await emailService.sendAssignmentNotification(
+          recipient.email!,
+          workflowName,
+          stepName,
+          executionId
+        );
+        recipientsEmailed += 1;
+      } catch (error) {
+        console.error(
+          `[notifications] Error sending assignment email to ${recipient.email}:`,
+          error
+        );
+      }
+    }
+
+    if (eligibleRecipients.length === 0) {
+      return {
+        found: true,
+        message: 'Internal notifications created, but all recipients have email notifications disabled',
+        recipients_total: recipientIds.length,
+        recipients_notified: internalNotifications.length,
+        recipients_emailed: 0,
+      };
+    }
+
+    return {
+      found: true,
+      message: 'Assignment notifications dispatched',
+      recipients_total: recipientIds.length,
+      recipients_notified: internalNotifications.length,
+      recipients_emailed: recipientsEmailed,
+    };
   },
 
   /**
