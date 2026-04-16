@@ -6,7 +6,7 @@ GlobalWorkerOptions.workerSrc = pdfWorker;
 
 export const THUMB_WIDTH_DEFAULT = 108;
 export const THUMB_WIDTH_MIN = 64;
-export const THUMB_WIDTH_MAX = 220;
+export const THUMB_WIDTH_MAX = 720;
 
 export function usePdfPageThumbnails(
   pdfUrl: string | null,

@@ -1,16 +1,14 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { MetadataValueControl } from "@/components/documents/MetadataValueControl";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Slider } from "@/components/ui/slider";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Ban, Loader2, RotateCcw, Scissors } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useLanguage } from "@/contexts/LanguageContext";
 import {
   THUMB_WIDTH_DEFAULT,
-  THUMB_WIDTH_MAX,
-  THUMB_WIDTH_MIN,
   usePdfPageThumbnails,
 } from "@/hooks/usePdfPageThumbnails";
 
@@ -154,7 +152,39 @@ export default function SplitPdfPageStrip({
   onTogglePageExclude,
 }: Props) {
   const { t } = useLanguage();
-  const [thumbSize, setThumbSize] = useState(THUMB_WIDTH_DEFAULT);
+
+  type ThumbPreset = "small" | "medium" | "large";
+  const [thumbPreset, setThumbPreset] = useState<ThumbPreset>("medium");
+  const [thumbSize, setThumbSize] = useState<number>(THUMB_WIDTH_DEFAULT);
+  const stripRef = useRef<HTMLDivElement | null>(null);
+  const [stripWidth, setStripWidth] = useState<number>(0);
+
+  useEffect(() => {
+    const el = stripRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect?.width ?? 0;
+      setStripWidth(w);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const desiredThumbSize = useMemo(() => {
+    if (thumbPreset === "small") return 96;
+    if (thumbPreset === "medium") return 144;
+
+    // Large: aim for ~half the available page width (within clamp in hook).
+    // Quantize to reduce thumbnail re-render churn during resizing.
+    const raw = Math.max(0, Math.floor(stripWidth * 0.5) - 64);
+    const step = 16;
+    return Math.round(raw / step) * step;
+  }, [thumbPreset, stripWidth]);
+
+  useEffect(() => {
+    const next = desiredThumbSize || THUMB_WIDTH_DEFAULT;
+    setThumbSize(next);
+  }, [desiredThumbSize]);
 
   const { thumbnails, loading: thumbsLoading, error: thumbsError, thumbWidth } = usePdfPageThumbnails(
     pdfUrl && totalPages > 0 ? pdfUrl : null,
@@ -286,27 +316,37 @@ export default function SplitPdfPageStrip({
   }
 
   return (
-    <div className="space-y-3">
+    <div ref={stripRef} className="space-y-3">
       <p className="text-xs font-medium text-muted-foreground">{String(t("splitPdf.pageStrip"))}</p>
 
       {showVisualStrip && (
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4 rounded-lg border bg-muted/30 px-3 py-2.5">
-          <Label htmlFor="split-pdf-thumb-size" className="text-xs text-muted-foreground shrink-0">
+          <Label className="text-xs text-muted-foreground shrink-0">
             {String(t("splitPdf.previewSize"))}
           </Label>
           <div className="flex flex-1 items-center gap-3 min-w-0 max-w-md">
-            <Slider
-              id="split-pdf-thumb-size"
-              min={THUMB_WIDTH_MIN}
-              max={THUMB_WIDTH_MAX}
-              step={8}
-              value={[thumbSize]}
-              onValueChange={(v) => setThumbSize(v[0] ?? THUMB_WIDTH_DEFAULT)}
-              className="flex-1"
-            />
-            <span className="text-xs tabular-nums text-muted-foreground w-14 shrink-0 text-right">
-              {thumbWidth}px
-            </span>
+            <ToggleGroup
+              type="single"
+              value={thumbPreset}
+              onValueChange={(v) => {
+                if (!v) return;
+                setThumbPreset(v as ThumbPreset);
+              }}
+              variant="outline"
+              size="sm"
+              className="flex-1 justify-start"
+              aria-label={String(t("splitPdf.previewSize"))}
+            >
+              <ToggleGroupItem value="small" aria-label={String(t("splitPdf.previewSizeSmall"))}>
+                {String(t("splitPdf.previewSizeSmall"))}
+              </ToggleGroupItem>
+              <ToggleGroupItem value="medium" aria-label={String(t("splitPdf.previewSizeMedium"))}>
+                {String(t("splitPdf.previewSizeMedium"))}
+              </ToggleGroupItem>
+              <ToggleGroupItem value="large" aria-label={String(t("splitPdf.previewSizeLarge"))}>
+                {String(t("splitPdf.previewSizeLarge"))}
+              </ToggleGroupItem>
+            </ToggleGroup>
             {thumbsLoading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground shrink-0" />}
           </div>
         </div>
@@ -321,7 +361,10 @@ export default function SplitPdfPageStrip({
             >
               <div
                 className="flex shrink-0 flex-col items-center gap-0 overflow-y-auto max-h-[min(70vh,560px)] rounded-md border bg-muted/20 p-2 scrollbar-thin [scrollbar-width:thin] lg:w-[min(280px,42vw)]"
-                style={{ minWidth: Math.min(280, thumbWidth + 48) }}
+                style={{
+                  minWidth: thumbPreset === "large" ? thumbWidth + 48 : Math.min(280, thumbWidth + 48),
+                  width: thumbPreset === "large" ? thumbWidth + 48 : undefined,
+                }}
               >
                 {block.type === "segment" && segments.length > 1 && (
                   <div className="flex w-full shrink-0 justify-end pb-2">

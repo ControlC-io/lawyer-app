@@ -73,6 +73,47 @@ function sortSegments(segments: SplitPdfSegment[]): SplitPdfSegment[] {
   return [...segments].sort((a, b) => a.start_page - b.start_page);
 }
 
+function normalizeNonOverlappingSegments(
+  segments: SplitPdfSegment[],
+): { segments: SplitPdfSegment[]; hadOverlap: boolean; hadInvalid: boolean } {
+  const sorted = [...segments].sort((a, b) => a.start_page - b.start_page || a.end_page - b.end_page);
+  const out: SplitPdfSegment[] = [];
+  let prevEnd = 0;
+  let hadOverlap = false;
+  let hadInvalid = false;
+
+  for (const s of sorted) {
+    const start0 = Number.isFinite(s.start_page) ? s.start_page : NaN;
+    const end0 = Number.isFinite(s.end_page) ? s.end_page : NaN;
+    if (!Number.isFinite(start0) || !Number.isFinite(end0)) {
+      hadInvalid = true;
+      continue;
+    }
+
+    let start = Math.max(1, Math.floor(start0));
+    let end = Math.max(1, Math.floor(end0));
+    if (end < start) {
+      hadInvalid = true;
+      continue;
+    }
+
+    if (start <= prevEnd) {
+      hadOverlap = true;
+      start = prevEnd + 1;
+    }
+    if (end < start) {
+      // Fully overlapped; drop.
+      hadOverlap = true;
+      continue;
+    }
+
+    out.push({ ...s, start_page: start, end_page: end });
+    prevEnd = Math.max(prevEnd, end);
+  }
+
+  return { segments: out, hadOverlap, hadInvalid };
+}
+
 function segmentIndexForPage(segments: SplitPdfSegment[], page: number): number {
   return segments.findIndex((s) => s.start_page <= page && page <= s.end_page);
 }
@@ -628,11 +669,35 @@ export default function SplitPdfPage() {
     if (!fileId || segments.length === 0 || !companyId) return;
     setBusy(true);
     try {
+      const normalized = normalizeNonOverlappingSegments(segments);
+      if (normalized.hadInvalid || normalized.hadOverlap) {
+        setSegments(normalized.segments);
+      }
+      if (normalized.segments.length === 0) {
+        toast({
+          title: String(t("splitPdf.applyFailed")),
+          description: String(t("splitPdf.noValidSegmentsToCreate")),
+          variant: "destructive",
+        });
+        return;
+      }
+      if (normalized.hadOverlap) {
+        toast({
+          title: String(t("splitPdf.segmentsAdjustedTitle")),
+          description: String(t("splitPdf.segmentsAdjustedOverlap")),
+        });
+      } else if (normalized.hadInvalid) {
+        toast({
+          title: String(t("splitPdf.segmentsAdjustedTitle")),
+          description: String(t("splitPdf.segmentsAdjustedInvalid")),
+        });
+      }
+
       const applyResult = await api.post<{ warningCode?: string; ocrQueued?: boolean }>(
         `/api/companies/${companyId}/documents/split-pdf/apply`,
         {
           fileId,
-          segments,
+          segments: normalized.segments,
           keepOriginalFile,
           ocrCreatedFiles,
         },

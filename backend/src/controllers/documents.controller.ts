@@ -1250,6 +1250,249 @@ export const documentsController = {
     }
   },
 
+  /**
+   * POST /api/companies/:companyId/documents/split-pdf/auto
+   *
+   * Multipart form-data:
+   * - file (PDF)
+   * - presetId (UUID)
+   * - runOcr (default true)
+   * - keepOriginalFile (default false)
+   * - ocrCreatedFiles (default true)
+   * - currentDate (optional yyyy-mm-dd)
+   */
+  async splitPdfAuto(req: AuthRequest, res: Response) {
+    const { companyId } = req.params;
+
+    if (!(await assertFlatDocumentWriteAccess(req, companyId, res))) return;
+
+    const uploaded = (req as AuthRequest & { file?: Express.Multer.File }).file;
+    if (!uploaded) return res.status(400).json({ error: 'file is required' });
+    if (uploaded.mimetype !== 'application/pdf') {
+      return res.status(400).json({ error: 'file must be a PDF' });
+    }
+
+    const presetIdRaw = (req.body as Record<string, unknown> | undefined)?.presetId;
+    const presetId = typeof presetIdRaw === 'string' ? presetIdRaw.trim() : '';
+    if (!presetId) return res.status(400).json({ error: 'presetId is required' });
+
+    const keepSource = (req.body as Record<string, unknown> | undefined)?.keepOriginalFile === 'true';
+    const runOcr = (req.body as Record<string, unknown> | undefined)?.runOcr !== 'false';
+    const runOcrOnCreated = (req.body as Record<string, unknown> | undefined)?.ocrCreatedFiles !== 'false';
+    const currentDateRaw = (req.body as Record<string, unknown> | undefined)?.currentDate;
+    const dateStr =
+      typeof currentDateRaw === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(currentDateRaw)
+        ? currentDateRaw
+        : new Date().toISOString().slice(0, 10);
+
+    const preset = await prisma.documentSplitPreset.findFirst({
+      where: { id: presetId, company_id: companyId },
+      select: { id: true, naming_instructions: true, metadata_key_ids: true },
+    });
+    if (!preset) return res.status(404).json({ error: 'Preset not found' });
+
+    const presetKeyIds = splitPresetMetadataKeyIdsFromJson(preset.metadata_key_ids);
+    if (presetKeyIds.length === 0) {
+      return res.status(400).json({ error: 'Preset must define at least one metadata key' });
+    }
+
+    const userId = req.user?.id ?? null;
+
+    const { storageService } = await import('../services/storage.service');
+    const bucket = storageService.getDocumentsBucket();
+
+    const storageBase = sanitizeFlatFileName(uploaded.originalname.replace(/\.pdf$/i, '')) || 'file';
+    const storagePath = `companies/${companyId}/flat/${Date.now()}_source_${storageBase}.pdf`;
+    try {
+      await storageService.uploadFile(bucket, storagePath, uploaded.buffer, 'application/pdf');
+    } catch (e) {
+      console.error('splitPdfAuto upload source:', e);
+      return res.status(500).json({ error: 'Failed to upload source PDF' });
+    }
+
+    const sourceFile = await prisma.file.create({
+      data: {
+        company_id: companyId,
+        name: uploaded.originalname.length > 512 ? `${storageBase}.pdf` : uploaded.originalname,
+        storage_path: storagePath,
+        mime_type: 'application/pdf',
+        size_bytes: BigInt(uploaded.size),
+        uploaded_by: userId,
+        folder_id: null,
+      },
+      select: { id: true, storage_path: true },
+    });
+
+    let ocrMarkdown: string | null = null;
+    if (runOcr) {
+      const { runOcrAndGetMarkdown } = await import('../services/ocr.service');
+      await prisma.file.update({
+        where: { id: sourceFile.id },
+        data: { ocr_status: 'pending' },
+      });
+      try {
+        ocrMarkdown = await runOcrAndGetMarkdown(sourceFile.id);
+      } catch (e) {
+        return res.status(400).json({ error: e instanceof Error ? e.message : 'OCR failed' });
+      }
+    } else {
+      return res.status(400).json({ error: 'runOcr=false is not supported for auto split (OCR is required)' });
+    }
+
+    const dbKeys = await prisma.filesMetadataKey.findMany({
+      where: { company_id: companyId, id: { in: presetKeyIds } },
+    });
+    if (dbKeys.length !== presetKeyIds.length) {
+      return res.status(400).json({ error: 'Preset contains invalid metadata keys for this company' });
+    }
+    const byId = new Map(dbKeys.map((k) => [k.id, k]));
+    const orderedKeys = presetKeyIds.map((id) => byId.get(id)!);
+
+    const metadataKeys = orderedKeys.map((k) => ({
+      id: k.id,
+      name: k.name,
+      valueKind: (k.value_kind === FilesMetadataValueKind.predefined_list
+        ? 'predefined_list'
+        : 'free_text') as 'free_text' | 'predefined_list',
+      allowedValues: parseAllowedValuesJson(k.allowed_values),
+    }));
+
+    const { proposeSplitWithGemini, getPdfPageCount, validateSegments, applyPdfSplit } = await import(
+      '../services/pdf-split.service'
+    );
+
+    let pageCount = 0;
+    try {
+      pageCount = await getPdfPageCount(uploaded.buffer);
+    } catch (e) {
+      console.error('splitPdfAuto pageCount:', e);
+      return res.status(400).json({ error: 'Invalid PDF' });
+    }
+
+    let proposed;
+    try {
+      proposed = await proposeSplitWithGemini({
+        ocrMarkdown: ocrMarkdown ?? '',
+        metadataKeys,
+        namingInstructions: preset.naming_instructions.trim(),
+        currentDate: dateStr,
+      });
+    } catch (e) {
+      console.error('splitPdfAuto propose:', e);
+      return res.status(400).json({ error: e instanceof Error ? e.message : 'Failed to propose split' });
+    }
+
+    let validated;
+    try {
+      validated = validateSegments(proposed, presetKeyIds);
+    } catch (e) {
+      return res.status(400).json({ error: e instanceof Error ? e.message : 'Invalid segments' });
+    }
+
+    // Validate extracted metadata values (predefined list enforcement, etc.)
+    const metaById = new Map(orderedKeys.map((k) => [k.id, k]));
+    for (const seg of validated) {
+      if (!seg.metadata) continue;
+      for (const keyId of Object.keys(seg.metadata)) {
+        const row = metaById.get(keyId);
+        if (!row) return res.status(400).json({ error: `Unknown metadata key in segment: ${keyId}` });
+        const raw = seg.metadata[keyId];
+        const val = typeof raw === 'string' ? raw.trim() : String(raw).trim();
+        if (!val) continue;
+        const check = validateMetadataValueForKey(row, val);
+        if (!check.ok) {
+          return res.status(check.status).json({ error: check.error, details: check.details });
+        }
+      }
+    }
+
+    let parts: Array<{ buffer: Buffer; suggestedFileName: string }>;
+    try {
+      parts = await applyPdfSplit(uploaded.buffer, validated);
+    } catch (e) {
+      return res.status(400).json({ error: e instanceof Error ? e.message : 'Failed to split PDF' });
+    }
+
+    const created: Array<{ id: string; name: string }> = [];
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i];
+      const outBase = sanitizeFlatFileName(part.suggestedFileName.replace(/\.pdf$/i, ''));
+      const outPath = `companies/${companyId}/flat/${Date.now()}_${i}_${outBase}.pdf`;
+      const size = part.buffer.length;
+      await storageService.uploadFile(bucket, outPath, part.buffer, 'application/pdf');
+      const dbFile = await prisma.file.create({
+        data: {
+          company_id: companyId,
+          name: part.suggestedFileName.length > 512 ? `${outBase}.pdf` : part.suggestedFileName,
+          storage_path: outPath,
+          mime_type: 'application/pdf',
+          size_bytes: BigInt(size),
+          uploaded_by: userId,
+          folder_id: null,
+        },
+      });
+      const meta = validated[i]?.metadata;
+      if (meta) {
+        for (const [keyId, rawVal] of Object.entries(meta)) {
+          if (!metaById.has(keyId)) continue;
+          const strVal = typeof rawVal === 'string' ? rawVal.trim() : String(rawVal).trim();
+          if (!strVal) continue;
+          await prisma.filesMetadataValue.create({
+            data: {
+              files_id: dbFile.id,
+              metadata_id: keyId,
+              value: strVal,
+              company_id: companyId,
+            },
+          });
+        }
+      }
+      created.push({ id: dbFile.id, name: dbFile.name });
+    }
+
+    if (runOcrOnCreated && created.length > 0) {
+      const { processDocumentOcr } = await import('../services/ocr.service');
+      for (const row of created) {
+        await prisma.file.update({
+          where: { id: row.id },
+          data: { ocr_status: 'pending' },
+        });
+        processDocumentOcr(row.id).catch((err) => {
+          console.error(`OCR processing failed for split file ${row.id}:`, err);
+        });
+      }
+    }
+
+    let removedOriginal = false;
+    let originalRemoveFailed = false;
+    if (!keepSource) {
+      try {
+        try {
+          await storageService.deleteFile(bucket, storagePath);
+        } catch {
+          // Object may not exist in storage; proceed with DB cleanup
+        }
+        await prisma.workflowFile.deleteMany({ where: { file_id: sourceFile.id } });
+        await prisma.filesMetadataValue.deleteMany({ where: { files_id: sourceFile.id } });
+        await prisma.file.delete({ where: { id: sourceFile.id } });
+        removedOriginal = true;
+      } catch (e) {
+        console.error('splitPdfAuto: failed to remove source file:', e);
+        originalRemoveFailed = true;
+      }
+    }
+
+    return res.status(201).json({
+      created,
+      removedOriginal,
+      ocrQueued: runOcrOnCreated && created.length > 0,
+      segments: validated,
+      pageCount,
+      sourceFileId: sourceFile.id,
+      ...(originalRemoveFailed ? { warningCode: 'original_remove_failed' as const } : {}),
+    });
+  },
+
   async splitPdfApply(req: AuthRequest, res: Response) {
     const { companyId } = req.params;
     const { fileId, segments, keepOriginalFile, ocrCreatedFiles } = req.body || {};

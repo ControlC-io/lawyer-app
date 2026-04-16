@@ -128,3 +128,21 @@ export async function processDocumentOcr(fileId: string): Promise<void> {
     });
   }
 }
+
+/**
+ * Runs OCR and returns the resulting markdown (awaitable helper for synchronous flows).
+ *
+ * Note: `processDocumentOcr` is responsible for updating DB status fields.
+ */
+export async function runOcrAndGetMarkdown(fileId: string): Promise<string> {
+  await processDocumentOcr(fileId);
+  const row = await prisma.file.findUnique({
+    where: { id: fileId },
+    select: { ocr_status: true, ocr_markdown: true, ocr_error: true },
+  });
+  if (!row) throw new Error('File not found');
+  if (row.ocr_status !== 'completed' || !row.ocr_markdown?.trim()) {
+    throw new Error(row.ocr_error || 'OCR failed');
+  }
+  return row.ocr_markdown;
+}

@@ -198,6 +198,12 @@ router.post(
   requirePermission('documents.view'),
   asyncHandler(documentsController.splitPdfPropose),
 );
+router.post(
+  '/:companyId/documents/split-pdf/auto',
+  filesController.uploadMiddleware,
+  requirePermission('documents.view'),
+  asyncHandler(documentsController.splitPdfAuto),
+);
 router.get(
   '/:companyId/documents/split-pdf-presets',
   requirePermission('documents.view'),
