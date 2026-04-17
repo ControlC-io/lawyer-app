@@ -3,7 +3,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
-import { Loader2, ArrowRight, Lock, Eye, AlertCircle, UserCog, Bot, Mail, Save, ChevronLeft, ChevronRight, ChevronDown, ChevronUp } from "lucide-react";
+import { Loader2, ArrowRight, Lock, Eye, AlertCircle, UserCog, Bot, Mail, Save, ChevronLeft, ChevronRight, ChevronDown, Lightbulb } from "lucide-react";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
@@ -26,7 +26,6 @@ import { resolvePromptTemplate, type PromptValues } from "@/lib/promptTemplate";
 import { FormPageStepper } from "@/components/execution/FormPageStepper";
 import { getStepExecutionStyles } from "@/lib/stepTypeColors";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-
 const FIXED_FORM_PRIMARY_COLOR = "#2A5CE5";
 
 interface ExecutionDataPanelProps {
@@ -79,12 +78,12 @@ export const ExecutionDataPanel = ({
   const queryClient = useQueryClient();
   const [isReassignDialogOpen, setIsReassignDialogOpen] = useState(false);
   const [isSendLinkDialogOpen, setIsSendLinkDialogOpen] = useState(false);
-  const [isExplanationOpen, setIsExplanationOpen] = useState(false);
   const [reassignType, setReassignType] = useState<"user" | "group">("user");
   const [selectedReassignId, setSelectedReassignId] = useState<string>("");
   const [triggeringActions, setTriggeringActions] = useState<Record<string, boolean>>({});
   const [isSaving, setIsSaving] = useState(false);
   const [formPageIndex, setFormPageIndex] = useState(0);
+  const [isExplanationOpen, setIsExplanationOpen] = useState(false);
   const [aiFormValidation, setAiFormValidation] = useState<{
     status: "disabled" | "idle" | "validating" | "valid" | "invalid";
     comment?: string;
@@ -1490,82 +1489,60 @@ export const ExecutionDataPanel = ({
           borderColor: runningStepStyle.borderColor,
         }}
       >
-        <div className="p-2 sm:p-3 flex items-center justify-between gap-3 flex-wrap">
-          <div className="flex-1 min-w-0 space-y-2">
-            <div className="flex items-center gap-2 flex-wrap min-w-0">
-              <h3 className="text-base sm:text-lg font-semibold truncate" style={{ color: runningStepStyle.textColor }}>
-                {runningStep.workflow_steps?.name}
-              </h3>
-              {isApiProcessedAction && (
-                <Badge variant="secondary" className="gap-1 h-6 px-2 animate-pulse font-normal">
-                  <Loader2 className="h-3 w-3 animate-spin" />
-                  <span className="hidden sm:inline">Processing</span>
-                </Badge>
-              )}
-              {!canCompleteStep && !isApiProcessedAction && (
-                <Badge variant="outline" className="gap-1 h-6 px-2 text-muted-foreground font-normal">
-                  <Lock className="h-3 w-3" />
-                  <span className="hidden sm:inline">Read Only</span>
-                </Badge>
-              )}
-              {aiValidationEnabled && (
-                <Badge
-                  variant={
-                    aiFormValidation.status === "valid"
-                      ? "secondary"
-                      : aiFormValidation.status === "invalid"
-                      ? "destructive"
-                      : "outline"
-                  }
-                  className="gap-1 h-6 px-2 font-normal"
-                  title={aiFormValidation.comment || undefined}
-                >
-                  {aiFormValidation.status === "validating" ? (
+        {/* Same horizontal inset as form CardContent so explanation + header align with fields */}
+        <div className="px-2 sm:px-3 md:px-4 lg:px-6 pt-2 sm:pt-3 pb-2 sm:pb-3 space-y-2 sm:space-y-3">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-wrap min-w-0">
+                <h3 className="text-base sm:text-lg font-semibold truncate" style={{ color: runningStepStyle.textColor }}>
+                  {runningStep.workflow_steps?.name}
+                </h3>
+                {isApiProcessedAction && (
+                  <Badge variant="secondary" className="gap-1 h-6 px-2 animate-pulse font-normal">
                     <Loader2 className="h-3 w-3 animate-spin" />
-                  ) : aiFormValidation.status === "invalid" ? (
-                    <AlertCircle className="h-3 w-3" />
-                  ) : (
-                    <Bot className="h-3 w-3" />
-                  )}
-                  <span className="hidden sm:inline">
-                    {aiFormValidation.status === "valid"
-                      ? "AI validated"
-                      : aiFormValidation.status === "validating"
-                      ? "AI validating…"
-                      : aiFormValidation.status === "invalid"
-                      ? "AI invalid"
-                      : "AI not validated"}
-                  </span>
-                </Badge>
-              )}
+                    <span className="hidden sm:inline">Processing</span>
+                  </Badge>
+                )}
+                {!canCompleteStep && !isApiProcessedAction && (
+                  <Badge variant="outline" className="gap-1 h-6 px-2 text-muted-foreground font-normal">
+                    <Lock className="h-3 w-3" />
+                    <span className="hidden sm:inline">Read Only</span>
+                  </Badge>
+                )}
+                {aiValidationEnabled && (
+                  <Badge
+                    variant={
+                      aiFormValidation.status === "valid"
+                        ? "secondary"
+                        : aiFormValidation.status === "invalid"
+                        ? "destructive"
+                        : "outline"
+                    }
+                    className="gap-1 h-6 px-2 font-normal"
+                    title={aiFormValidation.comment || undefined}
+                  >
+                    {aiFormValidation.status === "validating" ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : aiFormValidation.status === "invalid" ? (
+                      <AlertCircle className="h-3 w-3" />
+                    ) : (
+                      <Bot className="h-3 w-3" />
+                    )}
+                    <span className="hidden sm:inline">
+                      {aiFormValidation.status === "valid"
+                        ? "AI validated"
+                        : aiFormValidation.status === "validating"
+                        ? "AI validating…"
+                        : aiFormValidation.status === "invalid"
+                        ? "AI invalid"
+                        : "AI not validated"}
+                    </span>
+                  </Badge>
+                )}
+              </div>
             </div>
 
-            {stepExplanation && (
-              <Collapsible open={isExplanationOpen} onOpenChange={setIsExplanationOpen}>
-                <div className="rounded-md border bg-background/80 px-2 py-1.5">
-                  <CollapsibleTrigger asChild>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="h-6 px-1 w-full justify-between text-[11px] font-medium text-muted-foreground"
-                    >
-                      <span>{t("executionDataPanel.stepExplanation")}</span>
-                      {isExplanationOpen ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-                    </Button>
-                  </CollapsibleTrigger>
-                  <CollapsibleContent className="pt-1">
-                    <div
-                      className="ql-editor !p-0 text-xs leading-snug [&_p]:!my-0 [&_ul]:!my-0 [&_ol]:!my-0 [&_li]:!my-0 [&_h1]:!my-0 [&_h2]:!my-0 [&_h3]:!my-0 [&_blockquote]:!my-0"
-                      dangerouslySetInnerHTML={{ __html: stepExplanation }}
-                    />
-                  </CollapsibleContent>
-                </div>
-              </Collapsible>
-            )}
-          </div>
-
-          <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end self-start">
+            <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end self-start">
             {aiValidationEnabled && !isApiProcessedAction && (
               <Button
                 size="sm"
@@ -2163,8 +2140,67 @@ export const ExecutionDataPanel = ({
             )}
           </div>
         </div>
+
+          {stepExplanation && (
+            <Collapsible open={isExplanationOpen} onOpenChange={setIsExplanationOpen}>
+              <div
+                className={cn(
+                  "relative w-full overflow-hidden rounded-lg border border-primary/20",
+                  "bg-gradient-to-br from-primary/[0.06] via-primary/[0.03] to-transparent"
+                )}
+              >
+                <span
+                  aria-hidden
+                  className="pointer-events-none absolute inset-y-0 left-0 w-0.5 bg-gradient-to-b from-primary/60 via-primary/40 to-primary/20"
+                />
+
+                <CollapsibleTrigger asChild>
+                  <button
+                    type="button"
+                    className={cn(
+                      "group flex w-full items-center gap-3 px-3.5 py-2.5 text-left",
+                      "outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-0"
+                    )}
+                  >
+                    <span
+                      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/15 text-primary ring-1 ring-inset ring-primary/20"
+                      title={t("executionDataPanel.stepExplanation")}
+                    >
+                      <Lightbulb className="h-4 w-4" />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm font-semibold text-foreground/90">
+                        {t("executionDataPanel.stepExplanation")}
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        {isExplanationOpen ? t("common.hide", "Hide") : t("common.show", "Show")}
+                      </div>
+                    </div>
+                    <ChevronDown
+                      className={cn(
+                        "h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200 group-hover:text-foreground",
+                        isExplanationOpen && "rotate-180"
+                      )}
+                    />
+                  </button>
+                </CollapsibleTrigger>
+
+                <CollapsibleContent className="overflow-hidden data-[state=closed]:animate-accordion-up data-[state=open]:animate-accordion-down">
+                  <div className="mx-3.5 border-t border-primary/15" />
+                  <div className="flex items-start gap-3 px-3.5 py-2.5">
+                    <div
+                      className="ql-editor !p-0 !min-h-0 !h-auto min-w-0 flex-1 text-sm leading-relaxed text-foreground/90 [&_p]:!my-0 [&_ul]:!my-0 [&_ol]:!my-0 [&_li]:!my-0 [&_h1]:!my-0 [&_h2]:!my-0 [&_h3]:!my-0 [&_blockquote]:!my-0 [&_a]:text-primary [&_a]:underline-offset-2 hover:[&_a]:underline"
+                      dangerouslySetInnerHTML={{ __html: stepExplanation }}
+                    />
+                  </div>
+                </CollapsibleContent>
+              </div>
+            </Collapsible>
+          )}
+        </div>
+
         {aiValidationEnabled && aiFormValidation.status === "invalid" && aiFormValidation.comment && (
-          <div className="px-2 sm:px-3 pb-2 sm:pb-3">
+          <div className="px-2 sm:px-3 md:px-4 lg:px-6 pb-2 sm:pb-3">
             <div className="flex items-start gap-2 text-xs text-destructive bg-destructive/5 border border-destructive/20 rounded-md p-2">
               <AlertCircle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
               <p className="whitespace-pre-wrap">{aiFormValidation.comment}</p>
@@ -2173,7 +2209,7 @@ export const ExecutionDataPanel = ({
         )}
         {/* Agent Decision Display for Agent_Human steps */}
         {isAgentPlusHumanDecision && agentDecisionChoice && (
-          <div className="px-2 sm:px-3 pb-2 sm:pb-3 pt-0 border-t border-border/50">
+          <div className="px-2 sm:px-3 md:px-4 lg:px-6 pb-2 sm:pb-3 pt-0 border-t border-border/50">
             <div className="space-y-2">
               <div className="flex items-center gap-2">
                 <Bot className="h-4 w-4 text-blue-600 dark:text-blue-400" />
@@ -2203,7 +2239,7 @@ export const ExecutionDataPanel = ({
           </div>
         )}
         {isDecisionStep && outgoingConnections.length > 0 && !isApiProcessedAction && (
-          <div className="px-2 sm:px-3 pb-2 sm:pb-3 pt-0">
+          <div className="px-2 sm:px-3 md:px-4 lg:px-6 pb-2 sm:pb-3 pt-0">
              <Textarea placeholder="Add a comment about your decision (optional)" value={form.decisionComments[`decision-${runningStep.id}`] || ""} onChange={e => form.setDecisionComments(prev => ({
                ...prev,
                [`decision-${runningStep.id}`]: e.target.value

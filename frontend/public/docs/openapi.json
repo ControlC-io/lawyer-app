@@ -105,6 +105,15 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "name": "includeArchived",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "Super-admin/API-key only. Include archived executions."
           }
         ],
         "responses": {
@@ -1198,6 +1207,15 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "name": "includeArchived",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "Company admin/super-admin only. Include archived executions."
           }
         ],
         "responses": {
@@ -1232,6 +1250,15 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "name": "includeArchived",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "Company admin/super-admin only. Include steps from archived executions."
           }
         ],
         "requestBody": {
@@ -1315,7 +1342,7 @@
     },
     "/companies/{companyId}/executions/{executionId}": {
       "delete": {
-        "summary": "Delete execution",
+        "summary": "Archive execution",
         "tags": [
           "Companies"
         ],
@@ -1345,8 +1372,8 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "Execution deleted"
+          "204": {
+            "description": "Execution archived (soft delete)"
           }
         }
       }
@@ -2855,6 +2882,15 @@
               "type": "string"
             },
             "description": "Comma-separated file IDs (e.g. from by-metadata). Only files in accessible folders are returned."
+          },
+          {
+            "name": "includeArchived",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "Company admin/super-admin only. Include archived files."
           }
         ],
         "responses": {
@@ -3093,6 +3129,184 @@
           },
           "403": {
             "description": "No write access"
+          }
+        }
+      }
+    },
+    "/companies/{companyId}/documents/split-pdf/auto": {
+      "post": {
+        "summary": "Auto split a PDF using a split preset",
+        "description": "Upload a PDF, automatically run OCR, propose a split with Gemini using the chosen preset, accept the proposition, and create the split PDFs.\nOptions can queue OCR for created PDFs and optionally delete the original uploaded file.\n",
+        "tags": [
+          "Companies"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "companyId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "file",
+                  "presetId"
+                ],
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "The PDF file to split"
+                  },
+                  "presetId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "The split preset to use"
+                  },
+                  "runOcr": {
+                    "type": "string",
+                    "enum": [
+                      "true",
+                      "false"
+                    ],
+                    "description": "When `true` (default), OCR is run on the uploaded source PDF before proposing a split"
+                  },
+                  "keepOriginalFile": {
+                    "type": "string",
+                    "enum": [
+                      "true",
+                      "false"
+                    ],
+                    "description": "When `true`, keep the uploaded source file; default is `false` (delete after split)"
+                  },
+                  "ocrCreatedFiles": {
+                    "type": "string",
+                    "enum": [
+                      "true",
+                      "false"
+                    ],
+                    "description": "When `true` (default), OCR is queued on each created split PDF"
+                  },
+                  "currentDate": {
+                    "type": "string",
+                    "description": "Optional yyyy-mm-dd reference date for the model"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Split files created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "created",
+                    "removedOriginal",
+                    "ocrQueued",
+                    "segments",
+                    "pageCount",
+                    "sourceFileId"
+                  ],
+                  "properties": {
+                    "created": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "name"
+                        ],
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "name": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "removedOriginal": {
+                      "type": "boolean",
+                      "description": "Whether the uploaded source file was deleted (when keepOriginalFile is false)"
+                    },
+                    "ocrQueued": {
+                      "type": "boolean",
+                      "description": "Whether OCR was queued for created files (when ocrCreatedFiles is true)"
+                    },
+                    "segments": {
+                      "type": "array",
+                      "description": "Accepted segments (Gemini proposition auto-accepted)",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "name",
+                          "start_page",
+                          "end_page"
+                        ],
+                        "properties": {
+                          "name": {
+                            "type": "string"
+                          },
+                          "start_page": {
+                            "type": "integer"
+                          },
+                          "end_page": {
+                            "type": "integer"
+                          },
+                          "metadata": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "pageCount": {
+                      "type": "integer"
+                    },
+                    "sourceFileId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "warningCode": {
+                      "type": "string",
+                      "nullable": true,
+                      "description": "Optional warning (e.g. original_remove_failed)"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input, OCR/proposition failed, or split validation failed"
+          },
+          "403": {
+            "description": "No write access"
+          },
+          "404": {
+            "description": "Preset not found"
           }
         }
       }
@@ -4222,6 +4436,15 @@
               "nullable": true
             },
             "description": "Filter by workflow category ID (empty string or \"null\" for uncategorized)"
+          },
+          {
+            "name": "includeArchived",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "Company admin/super-admin only. Include archived workflows."
           }
         ],
         "responses": {
@@ -4397,6 +4620,15 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "name": "includeArchived",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "Company admin/super-admin only. Include archived workflows."
           }
         ],
         "responses": {
@@ -4478,7 +4710,7 @@
         }
       },
       "delete": {
-        "summary": "Delete workflow",
+        "summary": "Archive workflow",
         "tags": [
           "Companies"
         ],
@@ -4508,8 +4740,8 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "Workflow deleted"
+          "204": {
+            "description": "Workflow archived (soft delete)"
           }
         }
       }
@@ -5120,6 +5352,17 @@
             "BearerAuth": []
           }
         ],
+        "parameters": [
+          {
+            "name": "includeArchived",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "Super-admin only. Include archived configurations."
+          }
+        ],
         "responses": {
           "200": {
             "description": "List of agent configurations"
@@ -5190,7 +5433,7 @@
         }
       },
       "delete": {
-        "summary": "Delete agent configuration",
+        "summary": "Archive agent configuration",
         "tags": [
           "Agents"
         ],
@@ -5211,8 +5454,8 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "Configuration deleted"
+          "204": {
+            "description": "Configuration archived (soft delete)"
           }
         }
       }
@@ -5237,6 +5480,15 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "name": "includeArchived",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "Super-admin/API-key only. Include archived configuration."
           }
         ],
         "responses": {

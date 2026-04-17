@@ -1,5 +1,5 @@
 import { Link, useLocation } from "react-router-dom";
-import { Workflow, Users, Building2, PlayCircle, FolderOpen, LogOut, Settings, Network, Play, Bot, BarChart2, Database, Sun, Globe, User, Table2, Variable } from "lucide-react";
+import { Workflow, Users, Building2, PlayCircle, FolderOpen, LogOut, Settings, Network, Play, Bot, BarChart2, Database, Sun, Globe, User, Table2, Variable, Archive } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -217,6 +217,14 @@ export function AppSidebar() {
                       <Link to="/companies">
                         <Building2 className="h-4 w-4" />
                         {open && <span>{t("sidebar.companies")}</span>}
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                  <SidebarMenuItem>
+                    <SidebarMenuButton asChild isActive={location.pathname === "/archived-records"}>
+                      <Link to="/archived-records">
+                        <Archive className="h-4 w-4" />
+                        {open && <span>{t("sidebar.archivedRecords")}</span>}
                       </Link>
                     </SidebarMenuButton>
                   </SidebarMenuItem>

@@ -205,7 +205,13 @@ export const workflowDefinitionController = {
       const userGroupIds = userId ? await getUserGroupIds(userId) : [];
 
       // Build the base where clause
-      const baseWhere: { company_id?: string; category_id?: string | null } = { ...companyFilter(companyId) };
+      const canIncludeArchived = req.user?.super_admin === true || access.userCompany?.role === 'company_admin' || (!!req.company && !req.user);
+      const includeArchivedParam = String(req.query.includeArchived ?? '').toLowerCase() === 'true';
+      const includeArchived = includeArchivedParam && canIncludeArchived;
+      const baseWhere: { company_id?: string; category_id?: string | null; is_archived?: boolean } = { ...companyFilter(companyId) };
+      if (!includeArchived) {
+        baseWhere.is_archived = false;
+      }
       if (rawCategoryId !== undefined) {
         baseWhere.category_id = (rawCategoryId === '' || rawCategoryId === 'null') ? null : rawCategoryId;
       }
@@ -254,9 +260,16 @@ export const workflowDefinitionController = {
       }
       const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
+      const canIncludeArchived = req.user?.super_admin === true || access.userCompany?.role === 'company_admin' || (!!req.company && !req.user);
+      const includeArchivedParam = String(req.query.includeArchived ?? '').toLowerCase() === 'true';
+      const includeArchived = includeArchivedParam && canIncludeArchived;
 
       const workflow = await prisma.workflow.findFirst({
-        where: { id: workflowId, ...companyFilter(companyId) },
+        where: {
+          id: workflowId,
+          ...companyFilter(companyId),
+          ...(includeArchived ? {} : { is_archived: false }),
+        },
         include: {
           steps: { orderBy: [{ position_x: 'asc' }, { position_y: 'asc' }] },
           connections: true,
@@ -292,7 +305,7 @@ export const workflowDefinitionController = {
       }
 
       const workflow = await prisma.workflow.findFirst({
-        where: { id: workflowId, company_id: companyId },
+        where: { id: workflowId, company_id: companyId, is_archived: false },
         select: { id: true, is_active: true, is_public: true, start_permission_scope: true },
       });
       if (!workflow) {
@@ -420,7 +433,7 @@ export const workflowDefinitionController = {
       if (body.default_status_id !== undefined) updateData.default_status_id = body.default_status_id || null;
 
       const workflow = await prisma.workflow.updateMany({
-        where: { id: workflowId, company_id: companyId },
+        where: { id: workflowId, company_id: companyId, is_archived: false },
         data: updateData,
       });
 
@@ -447,7 +460,7 @@ export const workflowDefinitionController = {
       if (access.error) return res.status(access.error.status).json(access.error.body);
 
       const workflow = await prisma.workflow.findFirst({
-        where: { id: workflowId, company_id: companyId },
+        where: { id: workflowId, company_id: companyId, is_archived: false },
         select: { id: true },
       });
       if (!workflow) {
@@ -455,58 +468,43 @@ export const workflowDefinitionController = {
       }
 
       await prisma.$transaction(async (tx) => {
+        const now = new Date();
         await tx.workflow.updateMany({
-          where: { id: workflowId, company_id: companyId },
-          data: { default_status_id: null },
+          where: { id: workflowId, company_id: companyId, is_archived: false },
+          data: {
+            default_status_id: null,
+            is_archived: true,
+            archived_datetime: now,
+          },
         });
-        await tx.workflowExecutionLog.deleteMany({
-          where: { execution: { workflow_id: workflowId } },
-        });
-        await tx.workflowExecutionData.deleteMany({
-          where: { execution: { workflow_id: workflowId } },
-        });
-        await tx.agentUsage.deleteMany({
-          where: { execution: { workflow_id: workflowId } },
-        });
-        await tx.workflowExecutionStep.deleteMany({
-          where: { execution: { workflow_id: workflowId } },
-        });
+
+        // Archive all executions linked to this workflow as requested.
         await tx.workflowExecution.updateMany({
           where: { workflow_id: workflowId },
-          data: { current_step_id: null },
+          data: {
+            current_step_id: null,
+            is_archived: true,
+            archived_datetime: now,
+          },
         });
-        await tx.workflowExecution.deleteMany({
-          where: { workflow_id: workflowId },
+
+        // Cancel reminders for all execution steps of archived executions.
+        await tx.stepReminderJob.updateMany({
+          where: {
+            status: 'pending',
+            execution_step: {
+              execution: {
+                workflow_id: workflowId,
+              },
+            },
+          },
+          data: { status: 'cancelled', last_error: null },
         });
-        await tx.workflowConnection.deleteMany({
-          where: { workflow_id: workflowId },
-        });
-        await tx.workflowStep.deleteMany({
-          where: { workflow_id: workflowId },
-        });
-        await tx.workflowStatus.deleteMany({
-          where: { workflow_id: workflowId },
-        });
-        await tx.workflowFile.deleteMany({
-          where: { workflow_id: workflowId },
-        });
-        await tx.workflowPermission.deleteMany({
-          where: { workflow_id: workflowId },
-        });
-        const result = await tx.workflow.deleteMany({
-          where: { id: workflowId, company_id: companyId },
-        });
-        if (result.count === 0) {
-          throw new Error('Workflow not found');
-        }
       });
 
       return res.status(204).send();
     } catch (error) {
       console.error('deleteWorkflow error:', error);
-      if (error instanceof Error && error.message === 'Workflow not found') {
-        return res.status(404).json({ error: 'Workflow not found', details: 'Workflow not found or access denied' });
-      }
       return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
     }
   },
@@ -523,7 +521,7 @@ export const workflowDefinitionController = {
       if (access.error) return res.status(access.error.status).json(access.error.body);
 
       const workflow = await prisma.workflow.findFirst({
-        where: { id: workflowId, company_id: companyId },
+        where: { id: workflowId, company_id: companyId, is_archived: false },
         select: { id: true },
       });
       if (!workflow) {
@@ -711,7 +709,7 @@ export const workflowDefinitionController = {
       if (access.error) return res.status(access.error.status).json(access.error.body);
 
       const workflow = await prisma.workflow.findFirst({
-        where: { id: workflowId, company_id: companyId },
+        where: { id: workflowId, company_id: companyId, is_archived: false },
         select: { id: true },
       });
       if (!workflow) {
@@ -952,7 +950,7 @@ export const workflowDefinitionController = {
       if (access.error) return res.status(access.error.status).json(access.error.body);
 
       const workflow = await prisma.workflow.findFirst({
-        where: { id: workflowId, company_id: companyId },
+        where: { id: workflowId, company_id: companyId, is_archived: false },
         select: { id: true },
       });
       if (!workflow) {
@@ -1149,7 +1147,7 @@ export const workflowDefinitionController = {
       if (access.error) return res.status(access.error.status).json(access.error.body);
 
       const workflow = await prisma.workflow.findFirst({
-        where: { id: workflowId, company_id: companyId },
+        where: { id: workflowId, company_id: companyId, is_archived: false },
         select: { id: true },
       });
       if (!workflow) {
@@ -1189,7 +1187,7 @@ export const workflowDefinitionController = {
       if (access.error) return res.status(access.error.status).json(access.error.body);
 
       const workflow = await prisma.workflow.findFirst({
-        where: { id: workflowId, company_id: companyId },
+        where: { id: workflowId, company_id: companyId, is_archived: false },
         select: { id: true },
       });
       if (!workflow) {

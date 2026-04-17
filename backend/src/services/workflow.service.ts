@@ -23,7 +23,7 @@ export const workflowService = {
     const { data = {}, createdBy = null } = options;
 
     const workflow = await prisma.workflow.findFirst({
-      where: { id: workflowId, company_id: companyId },
+      where: { id: workflowId, company_id: companyId, is_archived: false },
       select: { id: true, default_status_id: true },
     });
     if (!workflow) {

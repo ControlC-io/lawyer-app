@@ -221,6 +221,8 @@ const FIELD_TYPES = [
   { value: "signature", label: "Handwritten Signature" },
 ];
 
+const DEFAULT_DECISION_OUTPUTS = ["Yes", "No"];
+
 export default function WorkflowEditor() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -2012,7 +2014,7 @@ export default function WorkflowEditor() {
 
       <DecisionOutputsDialog
         open={decisionOutputsDialogOpen}
-        initialOutputs={["Yes", "No"]}
+        initialOutputs={DEFAULT_DECISION_OUTPUTS}
         onCancel={() => setDecisionOutputsDialogOpen(false)}
         onConfirm={(outputs) => {
           addStep("decision", outputs);

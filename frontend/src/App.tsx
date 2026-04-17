@@ -30,6 +30,7 @@ import ApiConfigurations from "./pages/ApiConfigurations";
 import AgentConfigurations from "./pages/AgentConfigurations";
 import AgentUsage from "./pages/AgentUsage";
 import Companies from "./pages/Companies";
+import ArchivedRecords from "./pages/ArchivedRecords";
 import NoOrganization from "./pages/NoOrganization";
 import { ExternalForm } from "./pages/ExternalForm";
 import CompanyPortal from "./pages/CompanyPortal";
@@ -201,6 +202,7 @@ const App = () => (
                             <Route path="/api-configurations" element={<ApiConfigurations />} />
                             <Route path="/agent-configurations" element={<SuperAdminRoute><AgentConfigurations /></SuperAdminRoute>} />
                             <Route path="/companies" element={<SuperAdminRoute><Companies /></SuperAdminRoute>} />
+                            <Route path="/archived-records" element={<SuperAdminRoute><ArchivedRecords /></SuperAdminRoute>} />
                             <Route path="/agent-usage" element={<PermissionRoute permission="usage.view"><AgentUsage /></PermissionRoute>} />
                             <Route path="*" element={<NotFound />} />
                           </Routes>

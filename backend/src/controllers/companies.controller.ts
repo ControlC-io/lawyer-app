@@ -13,6 +13,7 @@ import {
 import { canUserAccessFolder, getUserGroupIdsInCompany } from '../lib/folderAccess';
 import { getAccessibleFileIds, canUserAccessFileByMetadata } from '../lib/documentAccess';
 import { storageService } from '../services/storage.service';
+import { stepReminderService } from '../services/stepReminder.service';
 import bcrypt from 'bcryptjs';
 import {
   SUPPORTED_PORTAL_LANGUAGES,
@@ -1225,7 +1226,7 @@ export const companiesController = {
       const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
 
-      const file = await prisma.file.findFirst({ where: { id: fileId, company_id: companyId } });
+      const file = await prisma.file.findFirst({ where: { id: fileId, company_id: companyId, is_archived: false } });
       if (!file) return res.status(404).json({ error: 'File not found' });
 
       const list = Array.isArray(entries) ? entries.filter((e) => e && typeof e.key === 'string' && e.key.trim() !== '') : [];
@@ -1309,14 +1310,21 @@ export const companiesController = {
       if (access.error) {
         return res.status(access.error.status).json(access.error.body);
       }
+      const canIncludeArchived = req.user?.super_admin === true || access.userCompany?.role === 'company_admin' || (!!req.company && !req.user);
+      const includeArchivedParam = String(req.query.includeArchived ?? '').toLowerCase() === 'true';
+      const includeArchived = includeArchivedParam && canIncludeArchived;
 
       const where: Prisma.WorkflowExecutionWhereInput = {
         ...companyFilter(companyId),
+        ...(includeArchived ? {} : { is_archived: false }),
       };
       if (workflowId) where.workflow_id = workflowId;
       if (status) where.status = status as 'pending' | 'running' | 'completed' | 'failed' | 'paused';
       if (categoryId !== undefined) {
-        where.workflow = { category_id: categoryId || null };
+        where.workflow = {
+          category_id: categoryId || null,
+          ...(includeArchived ? {} : { is_archived: false }),
+        };
       }
 
       const isPrivileged = req.user?.super_admin === true || (!!req.company && !req.user);
@@ -1477,11 +1485,15 @@ export const companiesController = {
       if (!companyId) return res.status(400).json({ error: 'Missing company ID' });
       const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
+      const canIncludeArchived = req.user?.super_admin === true || access.userCompany?.role === 'company_admin' || (!!req.company && !req.user);
+      const includeArchivedParam = String(req.query.includeArchived ?? '').toLowerCase() === 'true';
+      const includeArchived = includeArchivedParam && canIncludeArchived;
 
       const isPrivileged = req.user?.super_admin === true || (!!req.company && !req.user);
       const stepWhere: Prisma.WorkflowExecutionStepWhereInput = {
         ...companyFilter(companyId),
         status: status as any,
+        ...(includeArchived ? {} : { execution: { is_archived: false } }),
       };
 
       if (!isPrivileged && userId) {
@@ -1524,17 +1536,20 @@ export const companiesController = {
       if (access.error) return res.status(access.error.status).json(access.error.body);
 
       const execution = await prisma.workflowExecution.findFirst({
-        where: { id: executionId, company_id: companyId },
+        where: { id: executionId, company_id: companyId, is_archived: false },
         select: { id: true },
       });
       if (!execution) return res.status(404).json({ error: 'Execution not found' });
 
-      await prisma.$transaction(async (tx) => {
-        await tx.workflowExecutionLog.deleteMany({ where: { execution_id: executionId } });
-        await tx.workflowExecutionStep.deleteMany({ where: { execution_id: executionId } });
-        await tx.workflowExecutionData.deleteMany({ where: { execution_id: executionId } });
-        await tx.agentUsage.deleteMany({ where: { workflow_execution_id: executionId } });
-        await tx.workflowExecution.delete({ where: { id: executionId } });
+      await stepReminderService.cancelForExecution(executionId);
+
+      await prisma.workflowExecution.updateMany({
+        where: { id: executionId, company_id: companyId, is_archived: false },
+        data: {
+          current_step_id: null,
+          is_archived: true,
+          archived_datetime: new Date(),
+        },
       });
       return res.status(204).send();
     } catch (error) {
@@ -2343,6 +2358,8 @@ export const companiesController = {
       const userId = req.user?.id;
       if (!userId) return res.status(401).json({ error: 'Unauthorized' });
       const isCompanyAdmin = access.userCompany?.role === 'company_admin' || !!req.user?.super_admin;
+      const includeArchivedParam = String(req.query.includeArchived ?? '').toLowerCase() === 'true';
+      const includeArchived = includeArchivedParam && isCompanyAdmin;
       const userGroupIds = await getUserGroupIdsInCompany(userId, companyId);
 
       const isRootList = parentFolderId === undefined || parentFolderId === '';
@@ -2548,6 +2565,8 @@ export const companiesController = {
       const userId = req.user?.id;
       if (!userId) return res.status(401).json({ error: 'Unauthorized' });
       const isCompanyAdmin = access.userCompany?.role === 'company_admin' || !!req.user?.super_admin;
+      const includeArchivedParam = String(req.query.includeArchived ?? '').toLowerCase() === 'true';
+      const includeArchived = includeArchivedParam && isCompanyAdmin;
       const userGroupIds = await getUserGroupIdsInCompany(userId, companyId);
 
       if (companyId !== ALL_COMPANIES && folderId !== undefined && folderId !== '') {
@@ -2555,7 +2574,10 @@ export const companiesController = {
         if (!allowed) return res.status(403).json({ error: 'You do not have access to this folder' });
       }
 
-      const where: { company_id?: string; folder_id?: string | { in: string[] }; id?: { in: string[] } } = { ...companyFilter(companyId) };
+      const where: { company_id?: string; folder_id?: string | { in: string[] }; id?: { in: string[] }; is_archived?: boolean } = { ...companyFilter(companyId) };
+      if (!includeArchived) {
+        where.is_archived = false;
+      }
       if (folderId !== undefined) {
         if (folderId === '') {
           // At root: show no files (only folders). Files are shown when viewing a specific folder.
@@ -2670,7 +2692,7 @@ export const companiesController = {
       let fileIds = [...new Set(rows.map((r) => r.files_id))];
       if (fileIds.length > 0) {
         const filesWithFolder = await prisma.file.findMany({
-          where: { id: { in: fileIds }, ...companyFilter(companyId) },
+          where: { id: { in: fileIds }, ...companyFilter(companyId), is_archived: false },
           select: { id: true, folder_id: true },
         });
         const isCompanyAdmin = access.userCompany?.role === 'company_admin' || !!req.user?.super_admin;
@@ -2725,8 +2747,14 @@ export const companiesController = {
       if (!companyId) return res.status(400).json({ error: 'Missing company ID' });
       const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
+      const canIncludeArchived = req.user?.super_admin === true || access.userCompany?.role === 'company_admin' || (!!req.company && !req.user);
+      const includeArchivedParam = String(req.query.includeArchived ?? '').toLowerCase() === 'true';
+      const includeArchived = includeArchivedParam && canIncludeArchived;
       const list = await prisma.agentPermission.findMany({
-        where: { ...companyFilter(companyId) },
+        where: {
+          ...companyFilter(companyId),
+          ...(includeArchived ? {} : { agent_configuration: { is_archived: false } }),
+        },
         include: {
           agent_configuration: { select: { id: true, name: true, agent_type: true } },
           company: { select: { id: true, name: true } },

@@ -19,6 +19,7 @@ export const agentsController = {
   async getAgent(req: AuthRequest, res: Response) {
     try {
       const { agentId } = req.params;
+      const includeArchivedParam = String(req.query.includeArchived ?? '').toLowerCase() === 'true';
 
       if (!agentId) {
         return res.status(400).json({
@@ -28,6 +29,8 @@ export const agentsController = {
       }
 
       const isSuperAdmin = req.user?.super_admin === true;
+      const canIncludeArchived = isSuperAdmin || (!!req.company && !req.user);
+      const includeArchived = includeArchivedParam && canIncludeArchived;
 
       if (!isSuperAdmin) {
         if (!(await resolveCompanyForRequest(req, res))) return;
@@ -51,6 +54,12 @@ export const agentsController = {
       });
 
       if (!agent) {
+        return res.status(404).json({
+          error: 'Agent not found',
+          details: 'Could not find the specified agent configuration',
+        });
+      }
+      if (agent.is_archived && !includeArchived) {
         return res.status(404).json({
           error: 'Agent not found',
           details: 'Could not find the specified agent configuration',
@@ -494,7 +503,10 @@ Les détails de structure sont identiques aux spécifications Supabase originale
   async listConfigurations(req: AuthRequest, res: Response) {
     try {
       if (!req.user?.id) return res.status(401).json({ error: 'Unauthorized' });
+      const includeArchivedParam = String(req.query.includeArchived ?? '').toLowerCase() === 'true';
+      const includeArchived = includeArchivedParam && req.user?.super_admin === true;
       const list = await prisma.agentConfiguration.findMany({
+        where: includeArchived ? undefined : { is_archived: false },
         include: { category: true },
         orderBy: { name: 'asc' },
       });
@@ -513,11 +525,14 @@ Les détails de structure sont identiques aux spécifications Supabase originale
     try {
       if (!req.user?.id) return res.status(401).json({ error: 'Unauthorized' });
       const { configId } = req.params;
+      const includeArchivedParam = String(req.query.includeArchived ?? '').toLowerCase() === 'true';
+      const includeArchived = includeArchivedParam && req.user?.super_admin === true;
       const config = await prisma.agentConfiguration.findUnique({
         where: { id: configId },
         include: { category: true },
       });
       if (!config) return res.status(404).json({ error: 'Configuration not found' });
+      if (config.is_archived && !includeArchived) return res.status(404).json({ error: 'Configuration not found' });
       return res.json(config);
     } catch (error) {
       console.error('getConfigurationById error:', error);
@@ -676,7 +691,13 @@ Les détails de structure sont identiques aux spécifications Supabase originale
     try {
       if (!req.user?.id) return res.status(401).json({ error: 'Unauthorized' });
       const { configId } = req.params;
-      const result = await prisma.agentConfiguration.deleteMany({ where: { id: configId } });
+      const result = await prisma.agentConfiguration.updateMany({
+        where: { id: configId, is_archived: false },
+        data: {
+          is_archived: true,
+          archived_datetime: new Date(),
+        },
+      });
       if (result.count === 0) return res.status(404).json({ error: 'Configuration not found' });
       return res.status(204).send();
     } catch (error) {

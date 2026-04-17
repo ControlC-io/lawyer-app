@@ -257,6 +257,8 @@ export const documentsController = {
 
     const userId = req.user?.id ?? '';
     const isCompanyAdmin = access.userCompany?.role === 'company_admin' || !!req.user?.super_admin;
+    const includeArchivedParam = String(req.query.includeArchived ?? '').toLowerCase() === 'true';
+    const includeArchived = includeArchivedParam && isCompanyAdmin;
     const userGroupIds = userId
       ? await getUserGroupIdsInCompany(userId, companyId)
       : [];
@@ -264,6 +266,7 @@ export const documentsController = {
     // Super admin 'all': return all files across companies without permission filtering
     if (companyId === ALL_COMPANIES && req.user?.super_admin) {
       const files = await prisma.file.findMany({
+        where: includeArchived ? undefined : { is_archived: false },
         orderBy: { name: 'asc' },
         include: {
           metadata_values: { include: { metadata: { select: { id: true, name: true } } } },
@@ -346,6 +349,7 @@ export const documentsController = {
         FROM "files" f
         WHERE f.company_id = ${companyId}::uuid
           AND f.id = ANY(${accessibleIds}::uuid[])
+          ${includeArchived ? Prisma.empty : Prisma.sql`AND f.is_archived = false`}
           AND to_tsvector('simple', coalesce(f.ocr_markdown, '')) @@ to_tsquery('simple', ${prefixQuery})
         ORDER BY rank DESC
         LIMIT 100
@@ -354,7 +358,11 @@ export const documentsController = {
       const searchResultIds = searchResults.map((r: any) => r.id as string);
       const filesWithMetadata = searchResultIds.length > 0
         ? await prisma.file.findMany({
-            where: { id: { in: searchResultIds }, ...companyFilter(companyId) },
+            where: {
+              id: { in: searchResultIds },
+              ...companyFilter(companyId),
+              ...(includeArchived ? {} : { is_archived: false }),
+            },
             include: {
               metadata_values: {
                 include: { metadata: { select: { id: true, name: true } } },
@@ -394,7 +402,11 @@ export const documentsController = {
     });
 
     const files = await prisma.file.findMany({
-      where: { id: { in: accessibleIds }, ...companyFilter(companyId) },
+      where: {
+        id: { in: accessibleIds },
+        ...companyFilter(companyId),
+        ...(includeArchived ? {} : { is_archived: false }),
+      },
       orderBy: { name: 'asc' },
       include: {
         metadata_values: {
@@ -427,10 +439,15 @@ export const documentsController = {
 
     const userId = req.user?.id ?? '';
     const isCompanyAdmin = access.userCompany?.role === 'company_admin' || !!req.user?.super_admin;
+    const includeArchivedParam = String(req.query.includeArchived ?? '').toLowerCase() === 'true';
+    const includeArchived = includeArchivedParam && isCompanyAdmin;
 
     let accessibleIds: string[];
     if (companyId === ALL_COMPANIES && req.user?.super_admin) {
-      const allFiles = await prisma.file.findMany({ select: { id: true } });
+      const allFiles = await prisma.file.findMany({
+        where: includeArchived ? undefined : { is_archived: false },
+        select: { id: true },
+      });
       accessibleIds = allFiles.map((f) => f.id);
     } else {
       const userGroupIds = userId ? await getUserGroupIdsInCompany(userId, companyId) : [];
@@ -460,7 +477,11 @@ export const documentsController = {
 
     // Get files
     const files = await prisma.file.findMany({
-      where: { id: { in: accessibleIds }, ...companyFilter(companyId) },
+      where: {
+        id: { in: accessibleIds },
+        ...companyFilter(companyId),
+        ...(includeArchived ? {} : { is_archived: false }),
+      },
       select: { id: true, name: true },
     });
 
@@ -765,7 +786,7 @@ export const documentsController = {
     if (access.error) return res.status(access.error.status).json(access.error.body);
 
     const file = await prisma.file.findFirst({
-      where: { id: fileId, company_id: companyId },
+      where: { id: fileId, company_id: companyId, is_archived: false },
       include: {
         metadata_values: {
           include: { metadata: { select: { name: true } } },
@@ -833,7 +854,7 @@ export const documentsController = {
     if (access.error) return res.status(access.error.status).json(access.error.body);
 
     const file = await prisma.file.findFirst({
-      where: { id: fileId, company_id: companyId },
+      where: { id: fileId, company_id: companyId, is_archived: false },
       select: {
         id: true,
         ragie_document_id: true,
@@ -948,7 +969,7 @@ export const documentsController = {
     const userGroupIds = userId ? await getUserGroupIdsInCompany(userId, companyId) : [];
 
     const files = await prisma.file.findMany({
-      where: { id: { in: file_ids }, company_id: companyId },
+      where: { id: { in: file_ids }, company_id: companyId, is_archived: false },
       select: { id: true },
     });
     let validFileIds = files.map((f) => f.id);
@@ -1183,7 +1204,7 @@ export const documentsController = {
     }
 
     const file = await prisma.file.findFirst({
-      where: { id: fileId, company_id: companyId },
+      where: { id: fileId, company_id: companyId, is_archived: false },
       select: {
         id: true,
         mime_type: true,
@@ -1542,7 +1563,7 @@ export const documentsController = {
     }
 
     const file = await prisma.file.findFirst({
-      where: { id: fileId, company_id: companyId },
+      where: { id: fileId, company_id: companyId, is_archived: false },
       select: {
         id: true,
         mime_type: true,

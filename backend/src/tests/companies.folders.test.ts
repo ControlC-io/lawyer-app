@@ -18,7 +18,7 @@ jest.mock('../lib/prisma', () => ({
       deleteMany: jest.fn(),
     },
     profileGroupMember: { findMany: jest.fn() },
-    file: { findMany: jest.fn(), findFirst: jest.fn(), delete: jest.fn() },
+    file: { findMany: jest.fn(), findFirst: jest.fn(), updateMany: jest.fn() },
     filesMetadataValue: { findMany: jest.fn() },
   },
 }));
@@ -291,6 +291,11 @@ describe('Companies folders and folder permissions', () => {
         .query({ ids: 'file-1' });
       expect(res.status).toBe(200);
       expect(Array.isArray(res.body)).toBe(true);
+      expect(prisma.file.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ is_archived: false }),
+        }),
+      );
     });
   });
 
@@ -359,11 +364,17 @@ describe('Companies folders and folder permissions', () => {
         company_id: companyId,
         storage_path: 'companies/c1/f1/x',
       });
-      (prisma.file.delete as jest.Mock).mockResolvedValue({});
+      (prisma.file.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
       const res = await request(app)
         .delete(`/api/companies/${companyId}/files/file-1`)
         .set(authHeader);
       expect(res.status).toBe(204);
+      expect(prisma.file.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ id: 'file-1', company_id: companyId }),
+          data: expect.objectContaining({ is_archived: true }),
+        }),
+      );
     });
   });
 });

@@ -11,6 +11,7 @@ if (!process.env.DATABASE_URL) {
 import { app } from './app';
 import { storageService } from './services/storage.service';
 import { stepReminderService } from './services/stepReminder.service';
+import { archivePurgeService } from './services/archivePurge.service';
 
 const port = process.env.PORT || 3001;
 
@@ -27,4 +28,5 @@ app.listen(port, async () => {
 
   // Start background reminder worker for open workflow steps.
   stepReminderService.startWorker();
+  archivePurgeService.startWorker();
 });

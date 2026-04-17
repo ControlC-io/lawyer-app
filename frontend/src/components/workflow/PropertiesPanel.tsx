@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { X, Plus, Trash2, Link2, Settings, ChevronDown, ChevronRight } from "lucide-react";
+import { X, Plus, Trash2, Link2, Settings, ChevronDown, ChevronRight, MessageSquare } from "lucide-react";
 import { WorkflowStep } from "@/pages/WorkflowEditor";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -219,6 +219,8 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
     !step.config.api_configuration_id || step.config.api_configuration_id === "none"
   );
 
+  const [stepExplanationOpen, setStepExplanationOpen] = useState(false);
+
   const [headers, setHeaders] = useState<KeyValuePair[]>(
     step.config.api_headers ? (typeof step.config.api_headers === 'string' ? JSON.parse(step.config.api_headers) : step.config.api_headers) : [{ key: "", value: "" }]
   );
@@ -234,6 +236,10 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
       mode: d.value?.startsWith("{{") ? "bind" : "static"
     })) : [{ key: "", value: "", mode: "static" }]
   );
+
+  useEffect(() => {
+    setStepExplanationOpen(false);
+  }, [step.id]);
 
   useEffect(() => {
     const fetchUsersAndGroups = async () => {
@@ -783,6 +789,8 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
     });
   };
 
+  const hasStepExplanation = Boolean(normalizeStepExplanation(step.config.explanation));
+
   return (
     <div className="flex flex-col h-full p-6">
       <div className="space-y-6">
@@ -807,23 +815,50 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
         </div>
 
         {!isStartOrEnd && (
-          <div className="space-y-2">
-            <Label>{t("workflowEditor.stepExplanationLabel")}</Label>
-            <div className="bg-background rounded-md">
-              <ReactQuill
-                theme="snow"
-                value={step.config.explanation || ""}
-                onChange={handleExplanationChange}
-                modules={EXPLANATION_EDITOR_MODULES}
-                formats={EXPLANATION_EDITOR_FORMATS}
-                placeholder={t("workflowEditor.stepExplanationPlaceholder")}
-                className="min-h-[130px]"
-              />
+          <Collapsible open={stepExplanationOpen} onOpenChange={setStepExplanationOpen}>
+            <div
+              className={`overflow-hidden rounded-md border bg-muted/20 ${
+                hasStepExplanation && !stepExplanationOpen ? "border-primary/40" : "border-border"
+              }`}
+            >
+              <CollapsibleTrigger className="flex w-full items-center gap-2 px-3 py-2.5 text-left hover:bg-muted/50 transition-colors">
+                <ChevronRight
+                  className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200 ${
+                    stepExplanationOpen ? "rotate-90" : ""
+                  }`}
+                  aria-hidden
+                />
+                <span className="min-w-0 flex-1 truncate text-sm font-medium">
+                  {t("workflowEditor.stepExplanationLabel")}
+                </span>
+                {hasStepExplanation && (
+                  <span
+                    className="inline-flex shrink-0 items-center justify-center rounded-md border border-primary/35 bg-primary/10 p-1 text-primary"
+                    title={t("workflowEditor.stepExplanationFilledHint")}
+                  >
+                    <MessageSquare className="h-3.5 w-3.5" aria-hidden />
+                    <span className="sr-only">{t("workflowEditor.stepExplanationFilledHint")}</span>
+                  </span>
+                )}
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <div className="space-y-2 px-3 pb-3 pt-0">
+                  <div className="bg-background rounded-md">
+                    <ReactQuill
+                      theme="snow"
+                      value={step.config.explanation || ""}
+                      onChange={handleExplanationChange}
+                      modules={EXPLANATION_EDITOR_MODULES}
+                      formats={EXPLANATION_EDITOR_FORMATS}
+                      placeholder={t("workflowEditor.stepExplanationPlaceholder")}
+                      className="min-h-[130px]"
+                    />
+                  </div>
+                  <p className="text-xs text-muted-foreground">{t("workflowEditor.stepExplanationDescription")}</p>
+                </div>
+              </CollapsibleContent>
             </div>
-            <p className="text-xs text-muted-foreground">
-              {t("workflowEditor.stepExplanationDescription")}
-            </p>
-          </div>
+          </Collapsible>
         )}
 
         <Tabs defaultValue="configuration" className="w-full">

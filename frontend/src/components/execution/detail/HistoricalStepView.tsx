@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { AlertCircle, ArrowLeft, Eye, ChevronDown, ChevronUp } from "lucide-react";
+import { AlertCircle, ArrowLeft, ChevronDown, ChevronUp, CheckCircle, Clock, User } from "lucide-react";
 import { format } from "date-fns";
 import { fr, enUS } from "date-fns/locale";
 import { api } from "@/lib/api";
@@ -56,6 +56,7 @@ export const HistoricalStepView = ({
   const openedAt = step?.started_at ?? stepMeta?.opened_at;
   const closedAt = step?.completed_at ?? stepMeta?.closed_at;
   const closedBy = stepMeta?.closed_by_name ?? stepMeta?.closed_by_email ?? stepMeta?.closed_by_user_id;
+  const isClosed = Boolean(closedAt);
   const [signedUrls, setSignedUrls] = useState<Record<string, string>>({});
   const [isExplanationOpen, setIsExplanationOpen] = useState(false);
   
@@ -267,25 +268,38 @@ export const HistoricalStepView = ({
           <CardTitle className="text-sm sm:text-base md:text-lg break-words min-w-0 max-w-full">
             {step?.workflow_steps?.name} - {t("executionHistoricalStep.historicalDataTitle")}
           </CardTitle>
-          <CardDescription className="text-xs sm:text-sm break-words min-w-0 max-w-full space-y-1">
-            <p>
-              {t("executionHistoricalStep.openedAt")}{" "}
-              {openedAt
-                ? format(new Date(openedAt), "PPpp", { locale: dateLocale })
-                : t("executionHistoricalStep.unknownDate")}
-            </p>
-            <p>
-              {t("executionHistoricalStep.closedAt")}{" "}
-              {closedAt
-                ? format(new Date(closedAt), "PPpp", { locale: dateLocale })
-                : t("executionHistoricalStep.unknownDate")}
-            </p>
-            <p>
-              {t("executionHistoricalStep.closedBy")}{" "}
-              {closedBy || t("executionHistoricalStep.unknownCloser")}
-            </p>
+          <CardDescription className="text-xs sm:text-sm min-w-0 max-w-full">
+            <div className="mt-1 grid grid-cols-1 sm:grid-cols-3 gap-1.5 sm:gap-2">
+              <div className="flex items-start gap-2 min-w-0 rounded-md border bg-muted/30 px-2 py-1.5">
+                <Clock className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0 mt-0.5" />
+                <div className="min-w-0">
+                  <div className="text-[11px] font-medium text-muted-foreground">{t("executionHistoricalStep.openedAt")}</div>
+                  <div className="text-xs break-words">
+                    {openedAt ? format(new Date(openedAt), "PPpp", { locale: dateLocale }) : t("executionHistoricalStep.unknownDate")}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-start gap-2 min-w-0 rounded-md border bg-muted/30 px-2 py-1.5">
+                <CheckCircle className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0 mt-0.5" />
+                <div className="min-w-0">
+                  <div className="text-[11px] font-medium text-muted-foreground">{t("executionHistoricalStep.closedAt")}</div>
+                  <div className="text-xs break-words">
+                    {closedAt ? format(new Date(closedAt), "PPpp", { locale: dateLocale }) : t("executionHistoricalStep.unknownDate")}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-start gap-2 min-w-0 rounded-md border bg-muted/30 px-2 py-1.5">
+                <User className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0 mt-0.5" />
+                <div className="min-w-0">
+                  <div className="text-[11px] font-medium text-muted-foreground">{t("executionHistoricalStep.closedBy")}</div>
+                  <div className="text-xs break-words">{closedBy || t("executionHistoricalStep.unknownCloser")}</div>
+                </div>
+              </div>
+            </div>
           </CardDescription>
-          {stepExplanation && (
+          {stepExplanation && !isClosed && (
             <Collapsible open={isExplanationOpen} onOpenChange={setIsExplanationOpen}>
               <div className="rounded-md border bg-muted/30 px-2 py-1.5">
                 <CollapsibleTrigger asChild>

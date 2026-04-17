@@ -480,7 +480,7 @@ export const filesController = {
         return res.status(400).json({ error: 'Missing fileId' });
       }
       const fileRecord = await prisma.file.findFirst({
-        where: { id: fileId },
+        where: { id: fileId, is_archived: false },
         select: { storage_path: true, company_id: true, folder_id: true },
       });
       if (!fileRecord || !fileRecord.company_id) {
@@ -1056,7 +1056,7 @@ export const filesController = {
       }
 
       const fileRecord = await prisma.file.findFirst({
-        where: { id: fileId, company_id: companyId },
+        where: { id: fileId, company_id: companyId, is_archived: false },
       });
       if (!fileRecord) {
         return res.status(404).json({ error: 'File not found', details: 'File not found or access denied' });
@@ -1082,14 +1082,13 @@ export const filesController = {
         }
       }
 
-      // Delete from storage (ignore if object doesn't exist)
-      try {
-        await storageService.deleteFile(storageService.getDocumentsBucket(), fileRecord.storage_path);
-      } catch {
-        // Object may not exist in storage; proceed with DB cleanup
-      }
-      await prisma.filesMetadataValue.deleteMany({ where: { files_id: fileId } });
-      await prisma.file.delete({ where: { id: fileId } });
+      await prisma.file.updateMany({
+        where: { id: fileId, company_id: companyId },
+        data: {
+          is_archived: true,
+          archived_datetime: new Date(),
+        },
+      });
 
       return res.status(204).send();
     } catch (error) {

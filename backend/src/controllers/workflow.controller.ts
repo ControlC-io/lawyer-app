@@ -113,7 +113,7 @@ export const workflowController = {
       }
 
       const workflow = await prisma.workflow.findFirst({
-        where: { id: workflowId, company_id: companyId },
+        where: { id: workflowId, company_id: companyId, is_archived: false },
         select: { id: true, api_enabled: true },
       });
 
@@ -190,8 +190,8 @@ export const workflowController = {
         });
       }
 
-      const execution = await prisma.workflowExecution.findUnique({
-        where: { id: executionId },
+      const execution = await prisma.workflowExecution.findFirst({
+        where: { id: executionId, is_archived: false },
         select: { company_id: true },
       });
       const executionCompanyId = execution?.company_id;
@@ -740,14 +740,20 @@ export const workflowController = {
       let companyId = req.company?.id;
       const userId = req.user?.id;
       const isSuperAdmin = !!req.user?.super_admin;
+      const includeArchivedParam = String(req.query.includeArchived ?? '').toLowerCase() === 'true';
+      const canIncludeArchived = isSuperAdmin || (!!req.company && !req.user);
+      const includeArchived = includeArchivedParam && canIncludeArchived;
 
       if (!executionId) {
         return res.status(400).json({ error: 'missing execution_id' });
       }
 
       if (!companyId && userId) {
-        const execution = await prisma.workflowExecution.findUnique({
-          where: { id: executionId },
+        const execution = await prisma.workflowExecution.findFirst({
+          where: {
+            id: executionId,
+            ...(includeArchived ? {} : { is_archived: false }),
+          },
           select: { company_id: true },
         });
         if (!execution?.company_id) {
@@ -772,6 +778,7 @@ export const workflowController = {
         where: {
           id: executionId,
           company_id: companyId,
+          ...(includeArchived ? {} : { is_archived: false }),
         },
         include: {
           workflow: { include: { connections: true } },
@@ -993,6 +1000,7 @@ export const workflowController = {
         where: {
           id: executionId,
           company_id: companyId,
+          is_archived: false,
         },
         include: {
           workflow: true,
@@ -1178,7 +1186,7 @@ export const workflowController = {
 
       // Fetch execution with workflow
       const execution = await prisma.workflowExecution.findFirst({
-        where: { id: executionId, company_id: companyId },
+        where: { id: executionId, company_id: companyId, is_archived: false },
         include: { workflow: true },
       });
 
@@ -1296,6 +1304,7 @@ export const workflowController = {
         where: {
           id: executionId,
           company_id: companyId,
+          is_archived: false,
         },
         data: { name },
       });
@@ -1342,6 +1351,7 @@ export const workflowController = {
         where: {
           id: executionId,
           company_id: companyId,
+          is_archived: false,
         },
       });
 
@@ -1417,6 +1427,7 @@ export const workflowController = {
           id: stepId,
           execution_id: executionId,
           company_id: companyId,
+          execution: { is_archived: false },
         },
       });
 

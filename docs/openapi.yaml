@@ -336,6 +336,12 @@ paths:
           schema:
             type: string
             format: uuid
+        - name: includeArchived
+          in: query
+          required: false
+          schema:
+            type: boolean
+          description: Super-admin/API-key only. Include archived executions.
       responses:
         200:
           description: Execution with workflow, steps, logs, and execution_data (file URLs are full proxy URLs)
@@ -1012,6 +1018,12 @@ paths:
           schema:
             type: string
             format: uuid
+        - name: includeArchived
+          in: query
+          required: false
+          schema:
+            type: boolean
+          description: Company admin/super-admin only. Include archived executions.
       responses:
         200:
           description: Company details
@@ -1031,6 +1043,12 @@ paths:
           schema:
             type: string
             format: uuid
+        - name: includeArchived
+          in: query
+          required: false
+          schema:
+            type: boolean
+          description: Company admin/super-admin only. Include steps from archived executions.
       requestBody:
         content:
           application/json:
@@ -1076,7 +1094,7 @@ paths:
           description: List of execution steps
   /companies/{companyId}/executions/{executionId}:
     delete:
-      summary: Delete execution
+      summary: Archive execution
       tags: [Companies]
       security:
         - BearerAuth: []
@@ -1094,8 +1112,8 @@ paths:
             type: string
             format: uuid
       responses:
-        200:
-          description: Execution deleted
+        204:
+          description: Execution archived (soft delete)
 
   /companies/{companyId}/users:
     get:
@@ -1974,6 +1992,12 @@ paths:
           schema:
             type: string
           description: Comma-separated file IDs (e.g. from by-metadata). Only files in accessible folders are returned.
+        - name: includeArchived
+          in: query
+          required: false
+          schema:
+            type: boolean
+          description: Company admin/super-admin only. Include archived files.
       responses:
         200:
           description: List of files (filtered by folder access when using ids)
@@ -2882,6 +2906,12 @@ paths:
             format: uuid
             nullable: true
           description: Filter by workflow category ID (empty string or "null" for uncategorized)
+        - name: includeArchived
+          in: query
+          required: false
+          schema:
+            type: boolean
+          description: Company admin/super-admin only. Include archived workflows.
       responses:
         200:
           description: List of workflows
@@ -2986,6 +3016,12 @@ paths:
           schema:
             type: string
             format: uuid
+        - name: includeArchived
+          in: query
+          required: false
+          schema:
+            type: boolean
+          description: Company admin/super-admin only. Include archived workflows.
       responses:
         200:
           description: Workflow details
@@ -3031,7 +3067,7 @@ paths:
         200:
           description: Workflow updated
     delete:
-      summary: Delete workflow
+      summary: Archive workflow
       tags: [Companies]
       security:
         - BearerAuth: []
@@ -3049,8 +3085,8 @@ paths:
             type: string
             format: uuid
       responses:
-        200:
-          description: Workflow deleted
+        204:
+          description: Workflow archived (soft delete)
   /companies/{companyId}/workflows/{workflowId}/steps:
     put:
       summary: Put workflow steps
@@ -3397,6 +3433,13 @@ paths:
       tags: [Agents]
       security:
         - BearerAuth: []
+      parameters:
+        - name: includeArchived
+          in: query
+          required: false
+          schema:
+            type: boolean
+          description: Super-admin only. Include archived configurations.
       responses:
         200:
           description: List of agent configurations
@@ -3435,7 +3478,7 @@ paths:
         200:
           description: Configuration updated
     delete:
-      summary: Delete agent configuration
+      summary: Archive agent configuration
       tags: [Agents]
       security:
         - BearerAuth: []
@@ -3447,8 +3490,8 @@ paths:
             type: string
             format: uuid
       responses:
-        200:
-          description: Configuration deleted
+        204:
+          description: Configuration archived (soft delete)
 
   /agents/{agentId}:
     get:
@@ -3463,6 +3506,12 @@ paths:
           schema:
             type: string
             format: uuid
+        - name: includeArchived
+          in: query
+          required: false
+          schema:
+            type: boolean
+          description: Super-admin/API-key only. Include archived configuration.
       responses:
         200:
           description: Agent config retrieved

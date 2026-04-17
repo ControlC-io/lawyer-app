@@ -10,6 +10,7 @@ import publicRoutes from './public';
 import externalRoutes from './external';
 import portalRoutes from './portal';
 import ocrRoutes from './ocr';
+import adminRoutes from './admin';
 
 const router = Router();
 
@@ -36,6 +37,9 @@ router.use('/companies', companiesRoutes);
 
 // Agent/AI routes (JWT or API key)
 router.use('/agents', agentsRoutes);
+
+// Super admin routes
+router.use('/admin', adminRoutes);
 
 // Notification routes (JWT)
 router.use('/notifications', notificationsRoutes);

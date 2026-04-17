@@ -88,6 +88,11 @@ describe('Workflow Endpoints', () => {
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
       expect(response.body.execution_id).toBe('exec-123');
+      expect(prisma.workflow.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ is_archived: false }),
+        }),
+      );
     });
 
     it('should return 401 when x-api-key is missing', async () => {
@@ -214,6 +219,11 @@ describe('Workflow Endpoints', () => {
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
       expect(response.body.execution_id).toBe('exec-123');
+      expect(prisma.workflow.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ is_archived: false }),
+        }),
+      );
       expect(workflowService.createExecutionAndStart).toHaveBeenCalledWith(
         'company-123',
         'wf-123',

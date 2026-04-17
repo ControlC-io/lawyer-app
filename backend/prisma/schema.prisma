@@ -175,12 +175,15 @@ model AgentConfiguration {
   prompt_template   String?           @db.Text
   created_at        DateTime          @default(now()) @db.Timestamptz(6)
   updated_at        DateTime          @default(now()) @db.Timestamptz(6)
+  is_archived       Boolean           @default(false)
+  archived_datetime DateTime?         @db.Timestamptz(6)
   category_id       String?           @db.Uuid
   agent_type        String?
   category          AgentCategory?    @relation(fields: [category_id], references: [id])
   permissions       AgentPermission[]
   usage             AgentUsage[]
 
+  @@index([is_archived, archived_datetime], map: "idx_agent_configurations_archive")
   @@map("agent_configurations")
   @@schema("public")
 }
@@ -319,6 +322,8 @@ model File {
   company_id      String?              @db.Uuid
   created_at      DateTime             @default(now()) @db.Timestamptz(6)
   updated_at      DateTime             @default(now()) @db.Timestamptz(6)
+  is_archived     Boolean              @default(false)
+  archived_datetime DateTime?          @db.Timestamptz(6)
 
   // OCR fields
   ocr_markdown     String?   @db.Text
@@ -344,6 +349,7 @@ model File {
   metadata_values FilesMetadataValue[]
   workflow_files  WorkflowFile[]
 
+  @@index([is_archived, archived_datetime], map: "idx_files_archive")
   @@map("files")
   @@schema("public")
 }
@@ -643,6 +649,8 @@ model Workflow {
   icon              String?
   default_status_id String?            @db.Uuid
   is_active         Boolean?           @default(false)
+  is_archived       Boolean            @default(false)
+  archived_datetime DateTime?          @db.Timestamptz(6)
   portal_enabled    Boolean            @default(false)
   canvas_comments   Json?
   company           Company?           @relation(fields: [company_id], references: [id])
@@ -655,6 +663,7 @@ model Workflow {
   workflow_files    WorkflowFile[]
   permissions       WorkflowPermission[]
 
+  @@index([is_archived, archived_datetime], map: "idx_workflows_archive")
   @@map("workflows")
   @@schema("public")
 }
@@ -714,6 +723,8 @@ model WorkflowExecution {
   created_by      String?           @db.Uuid
   created_at      DateTime          @default(now()) @db.Timestamptz(6)
   updated_at      DateTime          @default(now()) @db.Timestamptz(6)
+  is_archived     Boolean           @default(false)
+  archived_datetime DateTime?       @db.Timestamptz(6)
   company_id      String?           @db.Uuid
   execution_data  Json?             @default("{}")
   name            String?
@@ -726,6 +737,7 @@ model WorkflowExecution {
   execution_data_records WorkflowExecutionData[]
   execution_logs   WorkflowExecutionLog[]
 
+  @@index([is_archived, archived_datetime], map: "idx_workflow_executions_archive")
   @@map("workflow_executions")
   @@schema("public")
 }

@@ -24,21 +24,32 @@ function normalizeOutputs(outputs: string[]) {
   return outputs.map((o) => o.trim()).filter((o) => o.length > 0);
 }
 
+type OutputRow = { id: string; value: string };
+
+function newRowId() {
+  return crypto.randomUUID();
+}
+
+function rowsFromStrings(values: string[]): OutputRow[] {
+  return values.map((value) => ({ id: newRowId(), value }));
+}
+
 export function DecisionOutputsDialog({
   open,
   initialOutputs = ["Yes", "No"],
   onCancel,
   onConfirm,
 }: DecisionOutputsDialogProps) {
-  const [outputs, setOutputs] = useState<string[]>(initialOutputs);
+  const [rows, setRows] = useState<OutputRow[]>(() => rowsFromStrings(initialOutputs));
   const [error, setError] = useState<string>("");
 
   useEffect(() => {
     if (!open) return;
-    setOutputs(initialOutputs);
+    setRows(rowsFromStrings(initialOutputs));
     setError("");
   }, [open, initialOutputs]);
 
+  const outputs = useMemo(() => rows.map((r) => r.value), [rows]);
   const normalized = useMemo(() => normalizeOutputs(outputs), [outputs]);
 
   const validation = useMemo(() => {
@@ -82,16 +93,16 @@ export function DecisionOutputsDialog({
 
         <div className="space-y-4 py-2">
           <div className="space-y-3">
-            {outputs.map((output, index) => (
-              <div key={`${index}-${output}`} className="flex items-center gap-3">
+            {rows.map((row, index) => (
+              <div key={row.id} className="flex items-center gap-3">
                 <div className="flex-1 space-y-1">
-                  <Label htmlFor={`decision-output-${index}`}>Output {index + 1}</Label>
+                  <Label htmlFor={`decision-output-${row.id}`}>Output {index + 1}</Label>
                   <Input
-                    id={`decision-output-${index}`}
-                    value={output}
+                    id={`decision-output-${row.id}`}
+                    value={row.value}
                     onChange={(e) => {
                       const value = e.target.value;
-                      setOutputs((prev) => prev.map((o, i) => (i === index ? value : o)));
+                      setRows((prev) => prev.map((r, i) => (i === index ? { ...r, value } : r)));
                     }}
                     placeholder={`Output ${index + 1}`}
                   />
@@ -103,11 +114,11 @@ export function DecisionOutputsDialog({
                   size="icon"
                   className="h-9 w-9 shrink-0"
                   onClick={() => {
-                    if (outputs.length <= 2) return;
-                    setOutputs((prev) => prev.filter((_, i) => i !== index));
+                    if (rows.length <= 2) return;
+                    setRows((prev) => prev.filter((_, i) => i !== index));
                   }}
-                  disabled={outputs.length <= 2}
-                  title={outputs.length <= 2 ? "At least 2 outputs are required" : "Remove output"}
+                  disabled={rows.length <= 2}
+                  title={rows.length <= 2 ? "At least 2 outputs are required" : "Remove output"}
                 >
                   <Trash2 className="h-4 w-4" />
                 </Button>
@@ -121,7 +132,7 @@ export function DecisionOutputsDialog({
               variant="outline"
               className="gap-2"
               onClick={() => {
-                setOutputs((prev) => [...prev, `Output ${prev.length + 1}`]);
+                setRows((prev) => [...prev, { id: newRowId(), value: `Output ${prev.length + 1}` }]);
               }}
             >
               <Plus className="h-4 w-4" />
