@@ -885,10 +885,22 @@
     "user": "Utilisateur",
     "tabs": {
       "api": "API",
+      "mcp": "MCP",
       "metadata": "Métadonnées",
       "portal": "Portail",
       "members": "Membres",
       "branding": "Identité visuelle"
+    },
+    "mcp": {
+      "title": "Model Context Protocol (MCP)",
+      "description": "Connectez des clients et outils IA à votre organisation via une couche d'intégration standardisée.",
+      "whatIsTitle": "Qu'est-ce que le MCP",
+      "whatIsBody": "Le MCP fournit un standard permettant aux assistants IA d'accéder à des outils et sources de données autorisés, sans créer d'intégration spécifique pour chaque client.",
+      "howToUseTitle": "Comment le configurer",
+      "step1": "Générez et stockez de manière sécurisée la clé API de votre organisation avant de connecter un client MCP.",
+      "step2": "Configurez votre client compatible MCP avec l'endpoint de votre organisation et les identifiants associés.",
+      "step3": "Limitez les outils exposés au strict nécessaire et révisez les accès régulièrement.",
+      "securityNote": "Traitez les identifiants MCP comme des secrets de production : régénérez immédiatement toute clé compromise et évitez de les exposer dans le frontend ou dans des dépôts publics."
     },
     "branding": {
       "title": "Identité visuelle",
@@ -945,6 +957,7 @@
     "headers": "En-têtes",
     "keyPlaceholder": "Clé",
     "valuePlaceholder": "Valeur",
+    "noConfigurationsInType": "Aucune configuration pour ce type pour le moment.",
     "apiReturnsArrayNote": "L'API doit retourner un tableau JSON de chaînes (ex. [\"Option 1\", \"Option 2\"]).",
     "update": "Mettre à jour",
     "create": "Créer"

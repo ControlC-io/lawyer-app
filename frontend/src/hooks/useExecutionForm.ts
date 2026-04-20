@@ -31,7 +31,6 @@ export const useExecutionForm = (
   const [decisionComments, setDecisionComments] = useState<Record<string, string>>({});
 
   const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
-  const fetchAttemptsRef = useRef<Record<string, boolean>>({});
   const pendingConnectionRef = useRef<{ targetStepId?: string; choice?: string } | null>(null);
 
   // Helper function to sanitize a file path for Supabase Storage
@@ -88,6 +87,177 @@ export const useExecutionForm = (
       }
     }
     return null;
+  };
+
+  const extractStoredValue = (rawValue: any) => {
+    if (rawValue && typeof rawValue === "object" && "value" in rawValue) {
+      return rawValue.value;
+    }
+    return rawValue;
+  };
+
+  const getCurrentFieldValue = (executionDataId: string, fieldId: string) => {
+    const editingKey = `${executionDataId}-${fieldId}`;
+    if (editingValues[editingKey] !== undefined) {
+      return extractStoredValue(editingValues[editingKey]);
+    }
+    const executionRow = executionDataStructures.find((entry: any) => entry.id === executionDataId);
+    const rawValue = (executionRow?.values as Record<string, any> | undefined)?.[fieldId];
+    return extractStoredValue(rawValue);
+  };
+
+  const resolveBoundParamValue = (executionDataId: string, queryParam: { value?: string; mode?: "static" | "bind" }) => {
+    const rawValue = (queryParam.value || "").trim();
+    if (!rawValue) return "";
+
+    if (queryParam.mode !== "bind") {
+      return rawValue;
+    }
+
+    const templateMatch = rawValue.match(/^\{\{(.+)\}\}$/);
+    const boundFieldId = (templateMatch?.[1] || rawValue).trim();
+    if (!boundFieldId) return "";
+
+    const boundValue = getCurrentFieldValue(executionDataId, boundFieldId);
+    return boundValue == null ? "" : String(boundValue);
+  };
+
+  const parseKeyValuePairs = (raw: unknown): Array<{ key: string; value: string; mode?: "static" | "bind" }> => {
+    let parsed = raw;
+    if (typeof raw === "string") {
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        return [];
+      }
+    }
+
+    if (!Array.isArray(parsed)) return [];
+
+    return parsed
+      .filter((item) => item && typeof item === "object")
+      .map((item: any) => ({
+        key: typeof item.key === "string" ? item.key : "",
+        value: typeof item.value === "string" ? item.value : "",
+        mode: item.mode === "bind" ? "bind" : "static",
+      }))
+      .filter((item) => item.key.trim().length > 0);
+  };
+
+  const buildDynamicRequestUrl = (
+    apiUrl: string,
+    apiParams: unknown,
+    fieldQueryParams: unknown,
+    executionDataId: string
+  ) => {
+    const isAbsoluteUrl = /^https?:\/\//i.test(apiUrl);
+    const parsedUrl = new URL(apiUrl, "http://placeholder.local");
+
+    const mergedParams = new URLSearchParams(parsedUrl.search);
+    parseKeyValuePairs(apiParams).forEach((param) => {
+      mergedParams.set(param.key, param.value);
+    });
+    parseKeyValuePairs(fieldQueryParams).forEach((param) => {
+      mergedParams.set(param.key, resolveBoundParamValue(executionDataId, param));
+    });
+
+    parsedUrl.search = mergedParams.toString();
+    if (isAbsoluteUrl) {
+      return parsedUrl.toString();
+    }
+
+    return `${parsedUrl.pathname}${parsedUrl.search}${parsedUrl.hash}`;
+  };
+
+  const fetchDynamicOptionsForField = async (fieldId: string) => {
+    const fieldInfo = findFieldDefinition(fieldId);
+    const field = fieldInfo?.def;
+    const executionDataId = fieldInfo?.execRow?.id;
+    const apiConfigId = field?.api_configuration_id;
+
+    if (!field || !executionDataId || field.options_source !== "dynamic" || !apiConfigId) {
+      console.error(`No dynamic API configuration found for field ${fieldId}`);
+      return;
+    }
+
+    setLoadingDynamicOptions((prev) => ({ ...prev, [fieldId]: true }));
+    setDynamicOptionsErrors((prev) => {
+      const updated = { ...prev };
+      delete updated[fieldId];
+      return updated;
+    });
+
+    try {
+      if (!companyId) throw new Error("Company not set");
+      const configs = await api.get<{
+        id: string;
+        api_url: string;
+        api_method?: string;
+        api_headers?: unknown;
+        api_params?: unknown;
+      }[]>(`/api/companies/${companyId}/api-configurations`);
+
+      const apiConfig = Array.isArray(configs) ? configs.find((c) => c.id === apiConfigId) : null;
+      if (!apiConfig) {
+        throw new Error("API configuration not found");
+      }
+
+      const requestUrl = buildDynamicRequestUrl(
+        apiConfig.api_url,
+        apiConfig.api_params,
+        field.api_query_params,
+        executionDataId
+      );
+
+      const headers: Record<string, string> = {};
+      parseKeyValuePairs(apiConfig.api_headers).forEach(({ key, value }) => {
+        headers[key] = value;
+      });
+
+      const response = await fetch(requestUrl, {
+        method: apiConfig.api_method || "GET",
+        headers: { "Content-Type": "application/json", ...headers },
+      });
+
+      if (!response.ok) {
+        throw new Error(`API request failed: ${response.status} ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      if (!Array.isArray(data)) {
+        throw new Error("API response must be an array");
+      }
+
+      const options = data.map((item: any) => {
+        if (typeof item === "string") return item;
+        if (item && typeof item === "object") {
+          return item.value || item.label || item.name || String(item);
+        }
+        return String(item);
+      });
+
+      setDynamicOptions((prev) => ({ ...prev, [fieldId]: options }));
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Failed to fetch options";
+      setDynamicOptionsErrors((prev) => ({
+        ...prev,
+        [fieldId]: {
+          message,
+          type: message.includes("API") ? "api_error" : "format_error",
+        },
+      }));
+      setDynamicOptions((prev) => {
+        const updated = { ...prev };
+        delete updated[fieldId];
+        return updated;
+      });
+    } finally {
+      setLoadingDynamicOptions((prev) => {
+        const updated = { ...prev };
+        delete updated[fieldId];
+        return updated;
+      });
+    }
   };
 
   // Initialize array items from execution data when it loads
@@ -204,142 +374,6 @@ export const useExecutionForm = (
     generateSignedUrls();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [executionDataStructures]);
-
-  // Fetch dynamic options for fields with options_source === "dynamic"
-  useEffect(() => {
-    if (!executionDataStructures) return;
-
-    const fetchDynamicOptions = async () => {
-      // Collect all fields that need dynamic options
-      const fieldsToFetch: Array<{ fieldId: string; apiConfigId: string }> = [];
-
-      for (const eds of executionDataStructures) {
-        const ds: any = eds.data_structures;
-        const fields: any[] = (ds?.fields ?? []) as any[];
-
-        for (const field of fields) {
-          const fieldType = field.field_type || field.type;
-          const optionsSource = field.options_source;
-          const apiConfigId = field.api_configuration_id;
-
-          // Check if this field needs dynamic options
-          if (
-            (fieldType === "option" || fieldType === "multiple_option") &&
-            optionsSource === "dynamic" &&
-            apiConfigId &&
-            !fetchAttemptsRef.current[field.id] // Only fetch if not already attempted
-          ) {
-            fieldsToFetch.push({ fieldId: field.id, apiConfigId });
-          }
-        }
-      }
-
-      // Fetch options for each field
-      for (const { fieldId, apiConfigId } of fieldsToFetch) {
-        // Mark as attempted to prevent duplicate fetches
-        fetchAttemptsRef.current[fieldId] = true;
-
-        // Set loading state
-        setLoadingDynamicOptions((prev) => ({ ...prev, [fieldId]: true }));
-        setDynamicOptionsErrors((prev) => {
-          const updated = { ...prev };
-          delete updated[fieldId];
-          return updated;
-        });
-
-        try {
-          if (!companyId) throw new Error("Company not set");
-          const configs = await api.get<{ id: string; api_url: string; api_method?: string; api_headers?: unknown }[]>(`/api/companies/${companyId}/api-configurations`);
-          const apiConfig = Array.isArray(configs) ? configs.find((c) => c.id === apiConfigId) : null;
-          if (!apiConfig) {
-            throw new Error("API configuration not found");
-          }
-
-          // Parse headers
-          let headers: Record<string, string> = {};
-          if (apiConfig.api_headers) {
-            const parsedHeaders = typeof apiConfig.api_headers === 'string'
-              ? JSON.parse(apiConfig.api_headers)
-              : apiConfig.api_headers;
-
-            if (Array.isArray(parsedHeaders)) {
-              parsedHeaders.forEach((h: { key: string; value: string }) => {
-                if (h.key && h.value) {
-                  headers[h.key] = h.value;
-                }
-              });
-            }
-          }
-
-          // Make API request
-          const method = apiConfig.api_method || "GET";
-          const url = apiConfig.api_url;
-
-          const fetchOptions: RequestInit = {
-            method,
-            headers: {
-              "Content-Type": "application/json",
-              ...headers,
-            },
-          };
-
-          const response = await fetch(url, fetchOptions);
-
-          if (!response.ok) {
-            throw new Error(`API request failed: ${response.status} ${response.statusText}`);
-          }
-
-          const data = await response.json();
-
-          // Validate response format - should be an array of strings
-          if (!Array.isArray(data)) {
-            throw new Error("API response must be an array");
-          }
-
-          // Convert all items to strings (in case API returns objects with value/label)
-          const options = data.map((item: any) => {
-            if (typeof item === "string") {
-              return item;
-            } else if (typeof item === "object" && item !== null) {
-              // Handle objects with value or label property
-              return item.value || item.label || item.name || String(item);
-            }
-            return String(item);
-          });
-
-          // Store options
-          setDynamicOptions((prev) => ({ ...prev, [fieldId]: options }));
-        } catch (error: any) {
-          console.error(`Error fetching dynamic options for field ${fieldId}:`, error);
-
-          // Store error
-          setDynamicOptionsErrors((prev) => ({
-            ...prev,
-            [fieldId]: {
-              message: error.message || "Failed to fetch options",
-              type: error.message?.includes("API") ? "api_error" : "format_error",
-            },
-          }));
-
-          // Clear options on error
-          setDynamicOptions((prev) => {
-            const updated = { ...prev };
-            delete updated[fieldId];
-            return updated;
-          });
-        } finally {
-          // Clear loading state
-          setLoadingDynamicOptions((prev) => {
-            const updated = { ...prev };
-            delete updated[fieldId];
-            return updated;
-          });
-        }
-      }
-    };
-
-    fetchDynamicOptions();
-  }, [executionDataStructures, companyId]);
 
   /** Convert ArrayBuffer to base64 in chunks to avoid "Maximum call stack size exceeded" on large files (e.g. PDFs). */
   const arrayBufferToBase64 = (buffer: ArrayBuffer): string => {
@@ -479,65 +513,7 @@ export const useExecutionForm = (
 
   // Function to retry fetching dynamic options for a field
   const retryDynamicOptions = async (fieldId: string) => {
-    // Reset fetch attempt flag to allow retry
-    fetchAttemptsRef.current[fieldId] = false;
-
-    // Find the field and its API configuration
-    let apiConfigId: string | null = null;
-    for (const eds of executionDataStructures) {
-      const ds: any = eds.data_structures;
-      const fields: any[] = (ds?.fields ?? []) as any[];
-      const field = fields.find((f) => f.id === fieldId);
-      if (field && field.options_source === "dynamic" && field.api_configuration_id) {
-        apiConfigId = field.api_configuration_id;
-        break;
-      }
-    }
-
-    if (!apiConfigId) {
-      console.error(`No API configuration found for field ${fieldId}`);
-      return;
-    }
-
-    // Mark as attempted
-    fetchAttemptsRef.current[fieldId] = true;
-
-    // Set loading state
-    setLoadingDynamicOptions((prev) => ({ ...prev, [fieldId]: true }));
-    setDynamicOptionsErrors((prev) => {
-      const updated = { ...prev };
-      delete updated[fieldId];
-      return updated;
-    });
-
-    try {
-      if (!companyId) throw new Error("Company not set");
-      const configs = await api.get<{ id: string; api_url: string; api_method?: string; api_headers?: unknown }[]>(`/api/companies/${companyId}/api-configurations`);
-      const apiConfig = Array.isArray(configs) ? configs.find((c) => c.id === apiConfigId) : null;
-      if (!apiConfig) throw new Error("API configuration not found");
-      let headers: Record<string, string> = {};
-      if (apiConfig.api_headers) {
-        const parsed = typeof apiConfig.api_headers === "string" ? JSON.parse(apiConfig.api_headers) : apiConfig.api_headers;
-        if (Array.isArray(parsed)) parsed.forEach((h: { key: string; value: string }) => { if (h.key && h.value) headers[h.key] = h.value; });
-      }
-      const response = await fetch(apiConfig.api_url, {
-        method: apiConfig.api_method || "GET",
-        headers: { "Content-Type": "application/json", ...headers },
-      });
-      if (!response.ok) throw new Error(`API request failed: ${response.status} ${response.statusText}`);
-      const data = await response.json();
-      if (!Array.isArray(data)) throw new Error("API response must be an array");
-      const options = data.map((item: any) =>
-        typeof item === "string" ? item : (item && typeof item === "object" ? item.value || item.label || item.name || String(item) : String(item))
-      );
-      setDynamicOptions((prev) => ({ ...prev, [fieldId]: options }));
-    } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : "Failed to fetch options";
-      setDynamicOptionsErrors((prev) => ({ ...prev, [fieldId]: { message: msg, type: msg.includes("API") ? "api_error" : "format_error" } }));
-      setDynamicOptions((prev) => { const u = { ...prev }; delete u[fieldId]; return u; });
-    } finally {
-      setLoadingDynamicOptions((prev) => { const u = { ...prev }; delete u[fieldId]; return u; });
-    }
+    await fetchDynamicOptionsForField(fieldId);
   };
 
   /**
@@ -656,7 +632,6 @@ export const useExecutionForm = (
     decisionComments,
     setDecisionComments,
     fileInputRefs,
-    fetchAttemptsRef,
     pendingConnectionRef,
     handleFileUpload,
     updateValueMutation,

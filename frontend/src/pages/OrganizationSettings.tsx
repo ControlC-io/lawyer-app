@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { Copy, Eye, EyeOff, RefreshCw, Key, Shield, Building, FileText, Trash2, Plus, Globe, ExternalLink, Upload, Pencil, Palette } from "lucide-react";
+import { Copy, Eye, EyeOff, RefreshCw, Key, Shield, Building, FileText, Trash2, Plus, Globe, ExternalLink, Upload, Pencil, Palette, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -180,6 +180,41 @@ export default function OrganizationSettings() {
       toast.error(t("organizationSettings.failedToRegenerateApiKey"));
     } finally {
       setRegeneratingKey(false);
+    }
+  };
+
+  const handleDownloadApiDocs = async () => {
+    try {
+      const response = await fetch("/docs/openapi.json");
+      if (!response.ok) {
+        throw new Error("Failed to fetch API documentation");
+      }
+      const json = await response.json();
+      const normalizedSpec = {
+        ...json,
+        info: {
+          ...(json?.info ?? {}),
+          title: "PicoBello API",
+        },
+        // Ensure external tools import the intended default base URL.
+        servers: [
+          { url: "https://go.picobello.app/api" },
+          ...(Array.isArray(json?.servers) ? json.servers.slice(1) : []),
+        ],
+      };
+      const blob = new Blob([JSON.stringify(normalizedSpec, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "picobello-api-documentation.json";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast.success("API documentation downloaded");
+    } catch (error) {
+      console.error("Error downloading API documentation:", error);
+      toast.error("Failed to download API documentation");
     }
   };
 
@@ -666,8 +701,9 @@ export default function OrganizationSettings() {
       </div>
 
       <Tabs defaultValue="api" className="space-y-6">
-        <TabsList className="grid h-auto w-full grid-cols-2 gap-2 md:grid-cols-4">
+        <TabsList className="grid h-auto w-full grid-cols-2 gap-2 md:grid-cols-5">
           <TabsTrigger value="api">{t("organizationSettings.tabs.api")}</TabsTrigger>
+          <TabsTrigger value="mcp">{t("organizationSettings.tabs.mcp")}</TabsTrigger>
           <TabsTrigger value="metadata">{t("organizationSettings.tabs.metadata")}</TabsTrigger>
           <TabsTrigger value="portal">{t("organizationSettings.tabs.portal")}</TabsTrigger>
           <TabsTrigger value="branding">{t("organizationSettings.tabs.branding")}</TabsTrigger>
@@ -833,6 +869,76 @@ export default function OrganizationSettings() {
                   {t("organizationSettings.copyExample")}
                 </Button>
               </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <FileText className="h-5 w-5" />
+                API Documentation
+              </CardTitle>
+              <CardDescription>
+                Download the complete OpenAPI/Swagger specification for the Picobello API
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+                <div className="flex-1">
+                  <p className="mb-2 text-sm text-muted-foreground">
+                    The API documentation includes detailed information about all API endpoints including:
+                  </p>
+                  <ul className="list-inside list-disc space-y-1 text-sm text-muted-foreground">
+                    <li>Workflow triggering and execution management</li>
+                    <li>Decision making and step completion</li>
+                    <li>Execution data updates and retrieval</li>
+                    <li>User information and utility functions</li>
+                    <li>AI-powered workflow creation and audio transcription</li>
+                  </ul>
+                </div>
+                <Button variant="outline" onClick={handleDownloadApiDocs} className="md:ml-4">
+                  <Download className="h-4 w-4 mr-2" />
+                  Download OpenAPI Spec
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="mcp" className="space-y-6 mt-0">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <FileText className="h-5 w-5" />
+                {t("organizationSettings.mcp.title")}
+              </CardTitle>
+              <CardDescription>
+                {t("organizationSettings.mcp.description")}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="space-y-2">
+                <h3 className="text-sm font-medium">{t("organizationSettings.mcp.whatIsTitle")}</h3>
+                <p className="text-sm text-muted-foreground">
+                  {t("organizationSettings.mcp.whatIsBody")}
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <h3 className="text-sm font-medium">{t("organizationSettings.mcp.howToUseTitle")}</h3>
+                <ul className="list-inside list-disc space-y-1 text-sm text-muted-foreground">
+                  <li>{t("organizationSettings.mcp.step1")}</li>
+                  <li>{t("organizationSettings.mcp.step2")}</li>
+                  <li>{t("organizationSettings.mcp.step3")}</li>
+                </ul>
+              </div>
+
+              <Alert>
+                <Shield className="h-4 w-4" />
+                <AlertDescription>
+                  {t("organizationSettings.mcp.securityNote")}
+                </AlertDescription>
+              </Alert>
             </CardContent>
           </Card>
         </TabsContent>

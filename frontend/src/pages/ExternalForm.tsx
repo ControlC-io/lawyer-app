@@ -40,6 +40,9 @@ export const ExternalForm = () => {
     const [isPreviewOpen, setIsPreviewOpen] = useState(false);
     const [previewFile, setPreviewFile] = useState<{ url: string; name: string } | null>(null);
     const [signedUrls, setSignedUrls] = useState<Record<string, string>>({}); // fieldId -> signedUrl for files
+    const [dynamicOptions, setDynamicOptions] = useState<Record<string, string[]>>({});
+    const [loadingDynamicOptions, setLoadingDynamicOptions] = useState<Record<string, boolean>>({});
+    const [dynamicOptionsErrors, setDynamicOptionsErrors] = useState<Record<string, { message: string; type: "api_error" | "format_error" }>>({});
     const [formPageIndex, setFormPageIndex] = useState(0);
     const [selectedLanguage, setSelectedLanguage] = useState<PortalLanguageCode>("en");
     const [enabledLanguages, setEnabledLanguages] = useState<PortalLanguageCode[]>(["en"]);
@@ -192,6 +195,28 @@ export const ExternalForm = () => {
             return value.value;
         }
         return value;
+    };
+
+    const parseKeyValuePairs = (raw: unknown): Array<{ key: string; value: string; mode?: "static" | "bind" }> => {
+        let parsed = raw;
+        if (typeof raw === "string") {
+            try {
+                parsed = JSON.parse(raw);
+            } catch {
+                return [];
+            }
+        }
+
+        if (!Array.isArray(parsed)) return [];
+
+        return parsed
+            .filter((item) => item && typeof item === "object")
+            .map((item: any) => ({
+                key: typeof item.key === "string" ? item.key : "",
+                value: typeof item.value === "string" ? item.value : "",
+                mode: item.mode === "bind" ? "bind" : "static",
+            }))
+            .filter((item) => item.key.trim().length > 0);
     };
 
     const buildCurrentValues = (values: Record<string, any>): Record<string, any> => {
@@ -391,6 +416,138 @@ export const ExternalForm = () => {
     const formFields = data.step_config?.form_fields || {};
     const currentValues = buildCurrentValues(formData);
 
+    const resolveBoundParamValue = (
+        queryParam: { value?: string; mode?: "static" | "bind" },
+        values: Record<string, any>
+    ) => {
+        const rawValue = (queryParam.value || "").trim();
+        if (!rawValue) return "";
+
+        if (queryParam.mode !== "bind") {
+            return rawValue;
+        }
+
+        const templateMatch = rawValue.match(/^\{\{(.+)\}\}$/);
+        const boundFieldId = (templateMatch?.[1] || rawValue).trim();
+        if (!boundFieldId) return "";
+
+        const boundValue = values[boundFieldId];
+        return boundValue == null ? "" : String(boundValue);
+    };
+
+    const buildDynamicRequestUrl = (
+        apiUrl: string,
+        apiParams: unknown,
+        fieldQueryParams: unknown,
+        values: Record<string, any>
+    ) => {
+        const isAbsoluteUrl = /^https?:\/\//i.test(apiUrl);
+        const parsedUrl = new URL(apiUrl, "http://placeholder.local");
+        const mergedParams = new URLSearchParams(parsedUrl.search);
+
+        parseKeyValuePairs(apiParams).forEach((param) => {
+            mergedParams.set(param.key, param.value);
+        });
+        parseKeyValuePairs(fieldQueryParams).forEach((param) => {
+            mergedParams.set(param.key, resolveBoundParamValue(param, values));
+        });
+
+        parsedUrl.search = mergedParams.toString();
+        if (isAbsoluteUrl) {
+            return parsedUrl.toString();
+        }
+        return `${parsedUrl.pathname}${parsedUrl.search}${parsedUrl.hash}`;
+    };
+
+    const fetchDynamicOptionsForField = async (fieldId: string) => {
+        if (!data?.company_id) return;
+
+        const fieldDef = allFields.find((field: any) => field.id === fieldId);
+        if (!fieldDef || fieldDef.options_source !== "dynamic" || !fieldDef.api_configuration_id) {
+            return;
+        }
+
+        setLoadingDynamicOptions((prev) => ({ ...prev, [fieldId]: true }));
+        setDynamicOptionsErrors((prev) => {
+            const updated = { ...prev };
+            delete updated[fieldId];
+            return updated;
+        });
+
+        try {
+            const configs = await api.get<{
+                id: string;
+                api_url: string;
+                api_method?: string;
+                api_headers?: unknown;
+                api_params?: unknown;
+            }[]>(`/api/companies/${data.company_id}/api-configurations`, { skipAuth: true });
+
+            const apiConfig = Array.isArray(configs)
+                ? configs.find((config) => config.id === fieldDef.api_configuration_id)
+                : null;
+            if (!apiConfig) {
+                throw new Error("API configuration not found");
+            }
+
+            const requestUrl = buildDynamicRequestUrl(
+                apiConfig.api_url,
+                apiConfig.api_params,
+                fieldDef.api_query_params,
+                buildCurrentValues(formData)
+            );
+
+            const headers: Record<string, string> = {};
+            parseKeyValuePairs(apiConfig.api_headers).forEach(({ key, value }) => {
+                headers[key] = value;
+            });
+
+            const response = await fetch(requestUrl, {
+                method: apiConfig.api_method || "GET",
+                headers: { "Content-Type": "application/json", ...headers },
+            });
+
+            if (!response.ok) {
+                throw new Error(`API request failed: ${response.status} ${response.statusText}`);
+            }
+
+            const responseData = await response.json();
+            if (!Array.isArray(responseData)) {
+                throw new Error("API response must be an array");
+            }
+
+            const options = responseData.map((item: any) => {
+                if (typeof item === "string") return item;
+                if (item && typeof item === "object") {
+                    return item.value || item.label || item.name || String(item);
+                }
+                return String(item);
+            });
+
+            setDynamicOptions((prev) => ({ ...prev, [fieldId]: options }));
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : "Failed to fetch options";
+            setDynamicOptionsErrors((prev) => ({
+                ...prev,
+                [fieldId]: {
+                    message,
+                    type: message.includes("API") ? "api_error" : "format_error",
+                },
+            }));
+            setDynamicOptions((prev) => {
+                const updated = { ...prev };
+                delete updated[fieldId];
+                return updated;
+            });
+        } finally {
+            setLoadingDynamicOptions((prev) => {
+                const updated = { ...prev };
+                delete updated[fieldId];
+                return updated;
+            });
+        }
+    };
+
     const uploadFile = async (file: File) => {
         try {
             const formDataUpload = new FormData();
@@ -484,6 +641,10 @@ export const ExternalForm = () => {
                     fieldConfig={fieldConfig}
                     getSignedUrl={generateSignedUrl}
                     childFields={allFields}
+                    dynamicOptions={dynamicOptions[fieldId]}
+                    isLoadingDynamic={loadingDynamicOptions[fieldId]}
+                    dynamicError={dynamicOptionsErrors[fieldId]}
+                    onRetryDynamic={() => fetchDynamicOptionsForField(fieldId)}
                     renderChild={(childField, childValue, onChildChange, hideLabel, requiredChild, readonly) => {
                         const isRequired =
                             requiredChild !== undefined ? requiredChild : (childField.required || false);
@@ -522,6 +683,10 @@ export const ExternalForm = () => {
                                 disabled={isDisabled}
                                 required={isRequired}
                                 labelPosition={hideLabel ? "hidden" : "top"}
+                                dynamicOptions={dynamicOptions[childField.id]}
+                                isLoadingDynamic={loadingDynamicOptions[childField.id]}
+                                dynamicError={dynamicOptionsErrors[childField.id]}
+                                onRetryDynamic={() => fetchDynamicOptionsForField(childField.id)}
                                 onUpload={isFileChild || isSignatureChild ? uploadForChild : undefined}
                                 onViewFile={handleViewFile}
                                 onDelete={

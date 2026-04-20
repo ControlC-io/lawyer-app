@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Plus, Trash2, Edit, ArrowLeft, Save, X, Settings, Download, FileText, Copy } from "lucide-react";
+import { Plus, Trash2, Edit, ArrowLeft, Save, X, Settings, Copy } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
@@ -16,12 +16,13 @@ import { useCompanyId } from "@/hooks/useCompanyId";
 import { useLanguage } from "@/contexts/LanguageContext";
 
 type KeyValuePair = { key: string; value: string; mode?: "static" | "bind" };
+type ApiConfigurationType = "automatic_action" | "agent_decision" | "dynamic_options";
 
 interface ApiConfiguration {
   id: string;
   name: string;
   description: string | null;
-  config_type: "automatic_action" | "agent_decision" | "dynamic_options";
+  config_type: ApiConfigurationType;
   api_url: string;
   api_method: string;
   api_headers: KeyValuePair[];
@@ -40,14 +41,16 @@ export default function ApiConfigurations() {
   const [loading, setLoading] = useState(true);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingConfig, setEditingConfig] = useState<ApiConfiguration | null>(null);
+  const [activeTypeTab, setActiveTypeTab] = useState<ApiConfigurationType>("automatic_action");
   
   // Form state
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [configType, setConfigType] = useState<"automatic_action" | "agent_decision" | "dynamic_options">("automatic_action");
+  const [configType, setConfigType] = useState<ApiConfigurationType>("automatic_action");
   const [apiUrl, setApiUrl] = useState("");
   const [apiMethod, setApiMethod] = useState("GET");
   const [headers, setHeaders] = useState<KeyValuePair[]>([{ key: "", value: "" }]);
+  const configurationTypeTabs: ApiConfigurationType[] = ["automatic_action", "agent_decision", "dynamic_options"];
 
   useEffect(() => {
     if (companyId) {
@@ -211,27 +214,78 @@ export default function ApiConfigurations() {
     setHeaders(updated);
   };
 
-  const handleDownloadApiDocs = async () => {
-    try {
-      const response = await fetch('/docs/openapi.json');
-      if (!response.ok) {
-        throw new Error('Failed to fetch API documentation');
-      }
-      const json = await response.json();
-      const blob = new Blob([JSON.stringify(json, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'picobello-api-documentation.json';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      toast.success(t("apiConfigurations.docDownloaded"));
-    } catch (error) {
-      console.error("Error downloading API documentation:", error);
-      toast.error(t("apiConfigurations.failedToDownloadDoc"));
+  const renderConfigurationGrid = (type: ApiConfigurationType) => {
+    const typedConfigurations = configurations.filter((config) => config.config_type === type);
+    if (typedConfigurations.length === 0) {
+      return (
+        <div className="py-10 text-center text-sm text-muted-foreground">
+          {t("apiConfigurations.noConfigurationsInType")}
+        </div>
+      );
     }
+
+    return (
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        {typedConfigurations.map((config) => (
+          <Card
+            key={config.id}
+            className="group border-border/60 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md"
+          >
+            <CardHeader className="pb-3">
+              <div className="flex items-start gap-1.5">
+                <div className="flex-1 min-w-0">
+                  <CardTitle className="text-lg leading-tight break-words pr-1">
+                    {config.name}
+                  </CardTitle>
+                  {config.description?.trim() && (
+                    <CardDescription className="mt-1.5 break-words leading-relaxed text-xs">
+                      {config.description}
+                    </CardDescription>
+                  )}
+                </div>
+                <div className="flex shrink-0 gap-0.5">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                    onClick={() => handleOpenDialog(config)}
+                    title="Edit"
+                  >
+                    <Edit className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                    onClick={() => handleDuplicate(config)}
+                    title="Duplicate"
+                  >
+                    <Copy className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                    onClick={() => handleDelete(config.id)}
+                    title="Delete"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="pt-0">
+              <div className="rounded-md border bg-muted/30 px-3 py-2 text-sm space-y-1.5">
+                <p className="font-medium">Method: {config.api_method}</p>
+                <p className="text-muted-foreground text-xs break-all" title={config.api_url}>
+                  URL: {config.api_url}
+                  </p>
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+    );
   };
 
   if (loading) {
@@ -256,48 +310,12 @@ export default function ApiConfigurations() {
             <ArrowLeft className="h-4 w-4 mr-2" />
             {t("common.back")}
           </Button>
-          <Button variant="outline" onClick={handleDownloadApiDocs}>
-            <Download className="h-4 w-4 mr-2" />
-            Download API Docs
-          </Button>
           <Button onClick={() => handleOpenDialog()}>
             <Plus className="h-4 w-4 mr-2" />
             {t("apiConfigurations.newConfiguration")}
           </Button>
         </div>
       </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <FileText className="h-5 w-5" />
-            API Documentation
-          </CardTitle>
-          <CardDescription>
-            Download the complete OpenAPI/Swagger specification for the Picobello API
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="flex items-center justify-between">
-            <div className="flex-1">
-              <p className="text-sm text-muted-foreground mb-2">
-                The API documentation includes detailed information about all API endpoints including:
-              </p>
-              <ul className="text-sm text-muted-foreground list-disc list-inside space-y-1">
-                <li>Workflow triggering and execution management</li>
-                <li>Decision making and step completion</li>
-                <li>Execution data updates and retrieval</li>
-                <li>User information and utility functions</li>
-                <li>AI-powered workflow creation and audio transcription</li>
-              </ul>
-            </div>
-            <Button variant="outline" onClick={handleDownloadApiDocs} className="ml-4">
-              <Download className="h-4 w-4 mr-2" />
-              Download OpenAPI Spec
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
 
       {configurations.length === 0 ? (
         <Card>
@@ -314,69 +332,18 @@ export default function ApiConfigurations() {
           </CardContent>
         </Card>
       ) : (
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {configurations.map((config) => (
-            <Card key={config.id}>
-              <CardHeader>
-                <div className="flex items-start justify-between">
-                  <div className="flex-1">
-                    <CardTitle className="text-lg">{config.name}</CardTitle>
-                    <CardDescription className="mt-1">
-                      {config.description || t("apiConfigurations.noDescription")}
-                    </CardDescription>
-                  </div>
-                  <div className="flex gap-1">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => handleOpenDialog(config)}
-                      title="Edit"
-                    >
-                      <Edit className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => handleDuplicate(config)}
-                      title="Duplicate"
-                    >
-                      <Copy className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => handleDelete(config.id)}
-                      title="Delete"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <Badge variant={
-                      config.config_type === "automatic_action" ? "default" : 
-                      config.config_type === "agent_decision" ? "secondary" : 
-                      "outline"
-                    }>
-                      {config.config_type === "automatic_action" ? t("apiConfigurations.automaticAction") : 
-                       config.config_type === "agent_decision" ? t("apiConfigurations.agentDecision") : 
-                       t("apiConfigurations.dynamicOptions")}
-                    </Badge>
-                  </div>
-                  <div className="text-sm space-y-1">
-                    <p className="font-medium">Method: {config.api_method}</p>
-                    <p className="text-muted-foreground truncate" title={config.api_url}>
-                      URL: {config.api_url}
-                    </p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+        <Tabs value={activeTypeTab} onValueChange={(value) => setActiveTypeTab(value as ApiConfigurationType)} className="space-y-4">
+          <TabsList className="grid h-auto w-full grid-cols-1 sm:grid-cols-3">
+            <TabsTrigger value="automatic_action">{t("apiConfigurations.automaticAction")}</TabsTrigger>
+            <TabsTrigger value="agent_decision">{t("apiConfigurations.agentDecision")}</TabsTrigger>
+            <TabsTrigger value="dynamic_options">{t("apiConfigurations.dynamicOptions")}</TabsTrigger>
+          </TabsList>
+          {configurationTypeTabs.map((type) => (
+            <TabsContent key={type} value={type} className="mt-0">
+              {renderConfigurationGrid(type)}
+            </TabsContent>
           ))}
-        </div>
+        </Tabs>
       )}
 
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>

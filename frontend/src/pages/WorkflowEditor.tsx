@@ -1754,15 +1754,22 @@ export default function WorkflowEditor() {
               <div>
                 <Label htmlFor="field-api-config">API Configuration</Label>
                 <Select
-                  value={fieldFormData.api_configuration_id || ""}
-                  onValueChange={(value) => setFieldFormData({ ...fieldFormData, api_configuration_id: value || null })}
+                  value={fieldFormData.api_configuration_id || "__no_api_config__"}
+                  onValueChange={(value) =>
+                    setFieldFormData({
+                      ...fieldFormData,
+                      api_configuration_id: value === "__no_api_config__" ? null : value,
+                    })
+                  }
                 >
                   <SelectTrigger id="field-api-config">
                     <SelectValue placeholder="Select API configuration" />
                   </SelectTrigger>
                   <SelectContent>
                     {apiConfigurations.length === 0 ? (
-                      <SelectItem value="" disabled>No API configurations available</SelectItem>
+                      <SelectItem value="__no_api_config__" disabled>
+                        No API configurations available
+                      </SelectItem>
                     ) : (
                       apiConfigurations.map((config) => (
                         <SelectItem key={config.id} value={config.id}>

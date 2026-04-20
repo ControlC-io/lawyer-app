@@ -70,7 +70,7 @@ export const OptionField = ({
   const options = getOptions();
   const getLabelByValue = (optionValue: string) => options.find((opt) => opt.value === optionValue)?.label || optionValue;
   const isDynamic = field.options_source === "dynamic";
-  const hasFetchedOptions = isDynamic && (dynamicOptions !== undefined && dynamicOptions.length > 0);
+  const hasFetchedOptions = isDynamic && dynamicOptions !== undefined;
   const shouldShowFetchButton = isDynamic && !hasFetchedOptions && !isLoadingDynamic && !dynamicError;
   // For read-only dynamic fields, just show the value
   const isReadOnlyDynamic = disabled && isDynamic && !hasFetchedOptions;

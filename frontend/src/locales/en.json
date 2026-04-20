@@ -885,10 +885,22 @@
     "user": "User",
     "tabs": {
       "api": "API",
+      "mcp": "MCP",
       "metadata": "Metadata",
       "portal": "Portal",
       "members": "Members",
       "branding": "Branding"
+    },
+    "mcp": {
+      "title": "Model Context Protocol (MCP)",
+      "description": "Connect AI clients and tools to your organization with a standardized integration layer.",
+      "whatIsTitle": "What MCP is",
+      "whatIsBody": "MCP provides a standard way for AI assistants to access approved tools and data sources without building custom integrations for each client.",
+      "howToUseTitle": "How to set it up",
+      "step1": "Generate and store your organization API key securely before connecting any MCP client.",
+      "step2": "Configure your MCP-compatible client with your organization endpoint and credentials.",
+      "step3": "Limit available tools to the minimum required set and review access regularly.",
+      "securityNote": "Treat MCP credentials like production secrets: rotate compromised keys immediately and avoid exposing them in frontend code or public repositories."
     },
     "branding": {
       "title": "Branding",
@@ -945,6 +957,7 @@
     "headers": "Headers",
     "keyPlaceholder": "Key",
     "valuePlaceholder": "Value",
+    "noConfigurationsInType": "No configurations in this type yet.",
     "apiReturnsArrayNote": "The API should return a JSON array of strings (e.g., [\"Option 1\", \"Option 2\"]).",
     "update": "Update",
     "create": "Create"
