@@ -27,6 +27,8 @@ services:
       - OCR_API_KEY=${OCR_API_KEY:-}
       - OCR_MODEL=${OCR_MODEL:-mistral-ocr-latest}
       - OCR_API_URL=${OCR_API_URL:-https://api.mistral.ai/v1/ocr}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.0-flash}
     command: sh -c "npm install && npm run dev -w backend"
     volumes:
       - .:/usr/src/app
