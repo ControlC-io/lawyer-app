@@ -825,7 +825,7 @@ function FieldSettingsDialog({
                 <div className="space-y-3">
                   <Label className="text-xs font-medium">Allowed File Types</Label>
                   <p className="text-xs text-muted-foreground">
-                    Choose &quot;All&quot; or one or more specific types; &quot;All&quot; cannot be combined with specific types. At least one option must be selected.
+                    Choose &quot;All&quot; or one or more specific types; &quot;All&quot; cannot be combined with specific types. At least one option must be selected. Video allows uploads and, on supported phones, recording from the camera.
                   </p>
                   <div className="flex flex-wrap gap-4">
                     <label className="flex items-center gap-2 text-sm cursor-pointer">
@@ -857,6 +857,21 @@ function FieldSettingsDialog({
                         }}
                       />
                       PDF
+                    </label>
+                    <label className="flex items-center gap-2 text-sm cursor-pointer">
+                      <Checkbox
+                        checked={fieldConfig.allowed_file_types?.includes("video")}
+                        onCheckedChange={(checked) => {
+                          const current = fieldConfig.allowed_file_types || ["all"];
+                          const withoutAll = current.filter((t) => t !== "all");
+                          let updated = checked
+                            ? [...withoutAll, "video"]
+                            : withoutAll.filter((t) => t !== "video");
+                          if (updated.length === 0) updated = ["all"];
+                          onUpdate({ allowed_file_types: updated });
+                        }}
+                      />
+                      Video
                     </label>
                     <label className="flex items-center gap-2 text-sm cursor-pointer">
                       <Checkbox

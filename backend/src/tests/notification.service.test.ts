@@ -1,5 +1,6 @@
 import { prisma } from '../lib/prisma';
 import { notificationService } from '../services/notification.service';
+import { emailService } from '../services/email.service';
 
 jest.mock('../lib/prisma', () => ({
   prisma: {
@@ -12,6 +13,21 @@ jest.mock('../lib/prisma', () => ({
     profileGroupMember: {
       findMany: jest.fn(),
     },
+    workflowExecutionStep: {
+      findUnique: jest.fn(),
+    },
+    workflowExecutionData: {
+      findMany: jest.fn(),
+    },
+    profile: {
+      findMany: jest.fn(),
+    },
+  },
+}));
+
+jest.mock('../services/email.service', () => ({
+  emailService: {
+    sendAssignmentNotification: jest.fn().mockResolvedValue(undefined),
   },
 }));
 
@@ -311,6 +327,263 @@ describe('notification.service', () => {
       await expect(
         notificationService.getUnreadNotifications('u')
       ).rejects.toThrow('Failed to get unread notifications');
+    });
+  });
+
+  describe('dispatchAssignmentForExecutionStep', () => {
+    beforeEach(() => {
+      (prisma.workflowExecutionData.findMany as jest.Mock).mockResolvedValue([]);
+      (prisma.profileGroupMember.findMany as jest.Mock).mockResolvedValue([]);
+      (prisma.profile.findMany as jest.Mock).mockResolvedValue([
+        { id: 'recipient-1', email: 'recipient@example.com', notifications_enabled: true },
+      ]);
+      (prisma.notification.createMany as jest.Mock).mockResolvedValue({ count: 1 });
+    });
+
+    it('renders subject/content templates using field names and execution link', async () => {
+      (prisma.workflowExecutionStep.findUnique as jest.Mock).mockResolvedValue({
+        id: 'ex-step-1',
+        execution_id: 'exec-1',
+        company_id: 'company-1',
+        assigned_to_user_id: 'recipient-1',
+        assigned_to_group_id: null,
+        execution: {
+          workflow: {
+            id: 'wf-1',
+            name: 'Workflow A',
+            data_structure: [
+              { id: 'field-1', name: 'Customer Name' },
+            ],
+          },
+        },
+        step: {
+          id: 'step-1',
+          name: 'Review',
+          config: {
+            notifications: {
+              assignment: {
+                enabled: true,
+                use_custom_notification: true,
+                subject_template: 'Task for {{Customer Name}}',
+                content_template: 'Execution: {{execution_link}}',
+              },
+            },
+          },
+        },
+      });
+      (prisma.workflowExecutionData.findMany as jest.Mock).mockResolvedValue([
+        {
+          values: {
+            'field-1': { value: 'Acme Corp' },
+          },
+        },
+      ]);
+
+      const result = await notificationService.dispatchAssignmentForExecutionStep('ex-step-1');
+
+      expect(result.found).toBe(true);
+      expect(prisma.notification.createMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: [
+            expect.objectContaining({
+              title: 'Task for Acme Corp',
+              message: 'Execution: http://localhost/workflows/executions/exec-1',
+            }),
+          ],
+        })
+      );
+      expect(emailService.sendAssignmentNotification).toHaveBeenCalledWith(
+        'recipient@example.com',
+        'Workflow A',
+        'Review',
+        'exec-1',
+        expect.objectContaining({
+          subject: 'Task for Acme Corp',
+          content: 'Execution: http://localhost/workflows/executions/exec-1',
+        })
+      );
+    });
+
+    it('returns empty replacement for missing or ambiguous field names', async () => {
+      (prisma.workflowExecutionStep.findUnique as jest.Mock).mockResolvedValue({
+        id: 'ex-step-1',
+        execution_id: 'exec-1',
+        company_id: 'company-1',
+        assigned_to_user_id: 'recipient-1',
+        assigned_to_group_id: null,
+        execution: {
+          workflow: {
+            id: 'wf-1',
+            name: 'Workflow A',
+            data_structure: [
+              { id: 'field-1', name: 'Owner' },
+              { id: 'field-2', name: 'Owner' },
+            ],
+          },
+        },
+        step: {
+          id: 'step-1',
+          name: 'Review',
+          config: {
+            notifications: {
+              assignment: {
+                enabled: true,
+                use_custom_notification: true,
+                subject_template: 'For {{Owner}}',
+                content_template: 'Missing {{NotExisting}}',
+              },
+            },
+          },
+        },
+      });
+      (prisma.workflowExecutionData.findMany as jest.Mock).mockResolvedValue([
+        {
+          values: {
+            'field-1': { value: 'Alice' },
+            'field-2': { value: 'Bob' },
+          },
+        },
+      ]);
+
+      await notificationService.dispatchAssignmentForExecutionStep('ex-step-1');
+
+      expect(emailService.sendAssignmentNotification).toHaveBeenCalledWith(
+        'recipient@example.com',
+        'Workflow A',
+        'Review',
+        'exec-1',
+        expect.objectContaining({
+          subject: 'For ',
+          content: 'Missing ',
+        })
+      );
+    });
+
+    it('infers custom templates when use_custom_notification is omitted but templates are non-empty', async () => {
+      (prisma.workflowExecutionStep.findUnique as jest.Mock).mockResolvedValue({
+        id: 'ex-step-1',
+        execution_id: 'exec-1',
+        company_id: 'company-1',
+        assigned_to_user_id: 'recipient-1',
+        assigned_to_group_id: null,
+        execution: {
+          workflow: {
+            id: 'wf-1',
+            name: 'Workflow A',
+            data_structure: [{ id: 'field-1', name: 'Customer Name' }],
+          },
+        },
+        step: {
+          id: 'step-1',
+          name: 'Review',
+          config: {
+            notifications: {
+              assignment: {
+                enabled: true,
+                subject_template: 'Hello {{Customer Name}}',
+                content_template: '',
+              },
+            },
+          },
+        },
+      });
+      (prisma.workflowExecutionData.findMany as jest.Mock).mockResolvedValue([
+        { values: { 'field-1': { value: 'Legacy' } } },
+      ]);
+
+      await notificationService.dispatchAssignmentForExecutionStep('ex-step-1');
+
+      expect(emailService.sendAssignmentNotification).toHaveBeenCalledWith(
+        'recipient@example.com',
+        'Workflow A',
+        'Review',
+        'exec-1',
+        expect.objectContaining({
+          subject: 'Hello Legacy',
+        })
+      );
+    });
+
+    it('ignores templates when use_custom_notification is false', async () => {
+      (prisma.workflowExecutionStep.findUnique as jest.Mock).mockResolvedValue({
+        id: 'ex-step-1',
+        execution_id: 'exec-1',
+        company_id: 'company-1',
+        assigned_to_user_id: 'recipient-1',
+        assigned_to_group_id: null,
+        execution: {
+          workflow: {
+            id: 'wf-1',
+            name: 'Workflow A',
+            data_structure: [{ id: 'field-1', name: 'Customer Name' }],
+          },
+        },
+        step: {
+          id: 'step-1',
+          name: 'Review',
+          config: {
+            notifications: {
+              assignment: {
+                enabled: true,
+                use_custom_notification: false,
+                subject_template: 'Ignored {{Customer Name}}',
+                content_template: 'Also ignored {{execution_link}}',
+              },
+            },
+          },
+        },
+      });
+      (prisma.workflowExecutionData.findMany as jest.Mock).mockResolvedValue([
+        { values: { 'field-1': { value: 'Acme Corp' } } },
+      ]);
+
+      await notificationService.dispatchAssignmentForExecutionStep('ex-step-1');
+
+      expect(emailService.sendAssignmentNotification).toHaveBeenCalledWith(
+        'recipient@example.com',
+        'Workflow A',
+        'Review',
+        'exec-1',
+        expect.objectContaining({
+          subject: 'New task assigned: Review',
+          content: 'You have been assigned to complete a step in Workflow A.\nStep: Review',
+        })
+      );
+    });
+
+    it('falls back to default subject/content when no templates are configured', async () => {
+      (prisma.workflowExecutionStep.findUnique as jest.Mock).mockResolvedValue({
+        id: 'ex-step-1',
+        execution_id: 'exec-1',
+        company_id: 'company-1',
+        assigned_to_user_id: 'recipient-1',
+        assigned_to_group_id: null,
+        execution: {
+          workflow: {
+            id: 'wf-1',
+            name: 'Workflow A',
+            data_structure: [],
+          },
+        },
+        step: {
+          id: 'step-1',
+          name: 'Review',
+          config: {},
+        },
+      });
+
+      await notificationService.dispatchAssignmentForExecutionStep('ex-step-1');
+
+      expect(emailService.sendAssignmentNotification).toHaveBeenCalledWith(
+        'recipient@example.com',
+        'Workflow A',
+        'Review',
+        'exec-1',
+        expect.objectContaining({
+          subject: 'New task assigned: Review',
+          content: 'You have been assigned to complete a step in Workflow A.\nStep: Review',
+        })
+      );
     });
   });
 });

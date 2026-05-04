@@ -19,4 +19,11 @@ router.post(
   asyncHandler(adminArchiveController.unarchiveRecord),
 );
 
+router.post(
+  '/archived/:entity/bulk-delete',
+  authMiddleware,
+  requireSuperAdmin,
+  asyncHandler(adminArchiveController.bulkDeleteArchived),
+);
+
 export default router;

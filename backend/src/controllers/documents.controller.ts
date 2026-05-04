@@ -13,7 +13,11 @@ import {
   extractAndApplyMetadataFromOcr,
   type ExtractMetadataFromOcrHttpError,
 } from '../services/metadata-from-ocr-extraction.service';
-import { ragieService, RagieServiceError } from '../services/ragie.service';
+import {
+  appendFileHistoryEvent,
+  FILE_HISTORY_EVENT_TYPE,
+  normalizeFileHistoryActorId,
+} from '../lib/fileHistory';
 
 async function ensureCompanyAccess(req: AuthRequest, companyId: string) {
   if (req.company && !req.user) {
@@ -47,6 +51,29 @@ function sanitizeFlatFileName(original: string): string {
     .replace(/[^a-zA-Z0-9._-]/g, '_')
     .replace(/_{2,}/g, '_')
     .replace(/^_+|_+$/g, '') || 'file';
+}
+
+function splitNameAndExtension(fileName: string): { base: string; extension: string } {
+  const trimmed = fileName.trim();
+  const lastDot = trimmed.lastIndexOf('.');
+  if (lastDot <= 0 || lastDot === trimmed.length - 1) {
+    return { base: trimmed, extension: '' };
+  }
+  return {
+    base: trimmed.slice(0, lastDot),
+    extension: trimmed.slice(lastDot),
+  };
+}
+
+function sanitizeFileRenameBase(raw: string): string {
+  return raw
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[\\/:*?"<>|]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/[. ]+$/g, '')
+    .replace(/^[. ]+/g, '')
+    .trim();
 }
 
 async function assertFlatDocumentWriteAccess(
@@ -430,6 +457,75 @@ export const documentsController = {
     return res.json({ files: serialized, hasWriteAccess: hasAnyWriteRule });
   },
 
+  async listMetadataValueSuggestions(req: AuthRequest, res: Response) {
+    const { companyId } = req.params;
+    const access = await ensureCompanyAccess(req, companyId);
+    if (access.error) return res.status(access.error.status).json(access.error.body);
+
+    const metadataKeyId = String(req.query.metadata_key_id ?? '').trim();
+    if (!metadataKeyId) {
+      return res.status(400).json({ error: 'metadata_key_id is required' });
+    }
+
+    const userId = req.user?.id ?? '';
+    const isCompanyAdmin = access.userCompany?.role === 'company_admin' || !!req.user?.super_admin;
+    const userGroupIds = userId ? await getUserGroupIdsInCompany(userId, companyId) : [];
+    const queryText = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+
+    const key = await prisma.filesMetadataKey.findFirst({
+      where: { id: metadataKeyId, ...companyFilter(companyId) },
+      select: { id: true },
+    });
+    if (!key) {
+      return res.status(404).json({ error: 'Metadata key not found' });
+    }
+
+    const { fileIds: accessibleIds } = await getAccessibleFileIdsWithLevels({
+      userId,
+      companyId,
+      isCompanyAdmin,
+      userGroupIds,
+    });
+
+    if (accessibleIds.length === 0) {
+      return res.json({ values: [] });
+    }
+
+    const valueRows = await prisma.filesMetadataValue.findMany({
+      where: {
+        company_id: companyId,
+        metadata_id: metadataKeyId,
+        files_id: { in: accessibleIds },
+        ...(queryText
+          ? {
+              value: {
+                contains: queryText,
+                mode: 'insensitive',
+              },
+            }
+          : {}),
+      },
+      select: { value: true },
+      distinct: ['value'],
+      orderBy: { value: 'asc' },
+      take: 400,
+    });
+
+    const allowedValues = await getAllowedMetadataValues({
+      userId,
+      companyId,
+      isCompanyAdmin,
+      userGroupIds,
+    });
+    const allowedForKey = allowedValues?.get(metadataKeyId);
+
+    const values = allowedForKey
+      ? valueRows.map((row) => row.value).filter((value) => allowedForKey.has(value))
+      : valueRows.map((row) => row.value);
+
+    return res.json({ values });
+  },
+
   // ─── Virtual Tree ───
 
   async getVirtualTree(req: AuthRequest, res: Response) {
@@ -664,6 +760,10 @@ export const documentsController = {
     const { storageService: storage } = await import('../services/storage.service');
     const ocrRequested = req.body?.ocr === 'true';
     const { processDocumentOcr } = await import('../services/ocr.service');
+    const extractMetadataRenameInstructions =
+      typeof req.body?.extractMetadataRenameInstructions === 'string' && req.body.extractMetadataRenameInstructions.trim().length > 0
+        ? req.body.extractMetadataRenameInstructions.trim()
+        : undefined;
 
     let pendingExtractKeyIds: string[] | null = null;
     if (ocrRequested) {
@@ -734,11 +834,24 @@ export const documentsController = {
           folder_id: null,
           ...(pendingExtractKeyIds && pendingExtractKeyIds.length > 0
             ? {
-                ocr_pending_metadata_key_ids: pendingExtractKeyIds,
+                ocr_pending_metadata_key_ids: {
+                  metadataKeyIds: pendingExtractKeyIds,
+                  ...(extractMetadataRenameInstructions
+                    ? { renameInstructions: extractMetadataRenameInstructions }
+                    : {}),
+                },
                 metadata_ai_extract_status: 'pending',
               }
             : {}),
         },
+      });
+
+      await appendFileHistoryEvent({
+        companyId,
+        fileId: dbFile.id,
+        eventType: FILE_HISTORY_EVENT_TYPE.FILE_UPLOADED,
+        actorId: normalizeFileHistoryActorId(userId),
+        details: { name: dbFile.name },
       });
 
       if (parsedMetadata && parsedMetadata.length > 0) {
@@ -752,9 +865,35 @@ export const documentsController = {
             },
           });
         }
+        const keyIds = [...new Set(parsedMetadata.map((e) => e.key_id))];
+        const metaKeys = await prisma.filesMetadataKey.findMany({
+          where: { id: { in: keyIds } },
+          select: { id: true, name: true },
+        });
+        const idToName = new Map(metaKeys.map((k) => [k.id, k.name?.trim() || k.id]));
+        const changes = parsedMetadata.map((e) => ({
+          key: idToName.get(e.key_id) || e.key_id,
+          keyId: e.key_id,
+          action: 'add' as const,
+          next: e.value.trim(),
+        }));
+        await appendFileHistoryEvent({
+          companyId,
+          fileId: dbFile.id,
+          eventType: FILE_HISTORY_EVENT_TYPE.METADATA_CHANGED,
+          actorId: normalizeFileHistoryActorId(userId),
+          details: { source: 'upload', changes },
+        });
       }
 
       if (ocrRequested) {
+        await appendFileHistoryEvent({
+          companyId,
+          fileId: dbFile.id,
+          eventType: FILE_HISTORY_EVENT_TYPE.OCR_REQUESTED,
+          actorId: normalizeFileHistoryActorId(userId),
+          details: {},
+        });
         await prisma.file.update({
           where: { id: dbFile.id },
           data: { ocr_status: 'pending' },
@@ -780,131 +919,6 @@ export const documentsController = {
     return res.status(201).json({ files: created });
   },
 
-  async uploadFileToRagie(req: AuthRequest, res: Response) {
-    const { companyId, fileId } = req.params;
-    const access = await ensureCompanyAccess(req, companyId);
-    if (access.error) return res.status(access.error.status).json(access.error.body);
-
-    const file = await prisma.file.findFirst({
-      where: { id: fileId, company_id: companyId, is_archived: false },
-      include: {
-        metadata_values: {
-          include: { metadata: { select: { name: true } } },
-        },
-      },
-    });
-    if (!file) return res.status(404).json({ error: 'File not found' });
-
-    const userId = req.user?.id ?? '';
-    const isCompanyAdmin = access.userCompany?.role === 'company_admin' || !!req.user?.super_admin;
-    if (!isCompanyAdmin) {
-      if (!userId) return res.status(401).json({ error: 'Unauthorized' });
-      const userGroupIds = await getUserGroupIdsInCompany(userId, companyId);
-      const accessLevel = await canUserAccessFileByMetadata({ userId, companyId, fileId, isCompanyAdmin, userGroupIds });
-      if (accessLevel !== 'write') {
-        return res.status(403).json({ error: 'Forbidden', details: 'No write access to this file' });
-      }
-    }
-
-    if (file.ragie_document_id) {
-      return res.status(409).json({ error: 'File is already uploaded to Ragie' });
-    }
-
-    try {
-      const uploaded = await ragieService.uploadFileDocument({
-        companyId,
-        file: {
-          id: file.id,
-          name: file.name,
-          mime_type: file.mime_type,
-          created_at: file.created_at,
-          storage_path: file.storage_path,
-          metadata_values: file.metadata_values,
-        },
-      });
-
-      await prisma.file.update({
-        where: { id: file.id },
-        data: {
-          ragie_document_id: uploaded.documentId,
-          ragie_partition: uploaded.partition,
-          ragie_uploaded_at: new Date(),
-          ragie_status: uploaded.status,
-          ragie_metadata: uploaded.metadata as Prisma.InputJsonValue,
-        },
-      });
-
-      return res.status(200).json({
-        documentId: uploaded.documentId,
-        partition: uploaded.partition,
-        status: uploaded.status,
-      });
-    } catch (error) {
-      if (error instanceof RagieServiceError) {
-        return res.status(error.statusCode).json({ error: error.message });
-      }
-      console.error('uploadFileToRagie:', error);
-      return res.status(500).json({ error: 'Failed to upload document to Ragie' });
-    }
-  },
-
-  async removeFileFromRagie(req: AuthRequest, res: Response) {
-    const { companyId, fileId } = req.params;
-    const access = await ensureCompanyAccess(req, companyId);
-    if (access.error) return res.status(access.error.status).json(access.error.body);
-
-    const file = await prisma.file.findFirst({
-      where: { id: fileId, company_id: companyId, is_archived: false },
-      select: {
-        id: true,
-        ragie_document_id: true,
-        ragie_partition: true,
-      },
-    });
-    if (!file) return res.status(404).json({ error: 'File not found' });
-
-    const userId = req.user?.id ?? '';
-    const isCompanyAdmin = access.userCompany?.role === 'company_admin' || !!req.user?.super_admin;
-    if (!isCompanyAdmin) {
-      if (!userId) return res.status(401).json({ error: 'Unauthorized' });
-      const userGroupIds = await getUserGroupIdsInCompany(userId, companyId);
-      const accessLevel = await canUserAccessFileByMetadata({ userId, companyId, fileId, isCompanyAdmin, userGroupIds });
-      if (accessLevel !== 'write') {
-        return res.status(403).json({ error: 'Forbidden', details: 'No write access to this file' });
-      }
-    }
-
-    if (!file.ragie_document_id) {
-      return res.status(400).json({ error: 'File is not linked to Ragie' });
-    }
-
-    try {
-      await ragieService.deleteFileDocument({
-        documentId: file.ragie_document_id,
-        partition: file.ragie_partition,
-      });
-
-      await prisma.file.update({
-        where: { id: file.id },
-        data: {
-          ragie_document_id: null,
-          ragie_partition: null,
-          ragie_uploaded_at: null,
-          ragie_status: null,
-          ragie_metadata: Prisma.JsonNull,
-        },
-      });
-
-      return res.status(204).send();
-    } catch (error) {
-      if (error instanceof RagieServiceError) {
-        return res.status(error.statusCode).json({ error: error.message });
-      }
-      console.error('removeFileFromRagie:', error);
-      return res.status(500).json({ error: 'Failed to remove document from Ragie' });
-    }
-  },
-
   // ─── Bulk Metadata Assignment ───
 
   async bulkUpdateMetadata(req: AuthRequest, res: Response) {
@@ -918,6 +932,12 @@ export const documentsController = {
     }
     if (!Array.isArray(entries)) {
       return res.status(400).json({ error: 'entries is required and must be an array' });
+    }
+    if (mode === 'replace') {
+      return res.status(400).json({
+        error: 'Bulk metadata replace mode is no longer supported',
+        details: 'Bulk metadata updates only modify provided keys and preserve all others',
+      });
     }
 
     const validEntries = entries.filter(
@@ -992,19 +1012,41 @@ export const documentsController = {
       }
     }
 
-    for (const fileId of validFileIds) {
-      if (mode === 'replace') {
-        await prisma.filesMetadataValue.deleteMany({
-          where: { files_id: fileId, company_id: companyId },
-        });
-      }
+    const actorId = normalizeFileHistoryActorId(userId);
 
+    for (const fileId of validFileIds) {
+      const changes: Array<{
+        key: string;
+        keyId: string;
+        action: 'add' | 'edit';
+        previous?: string;
+        next: string;
+      }> = [];
       for (const entry of validEntries) {
         const e = entry as { key: string; value: string };
         const keyId = keyMap.get(e.key.trim())!;
+        const keyLabel = e.key.trim();
         const strVal = typeof e.value === 'string' ? e.value.trim() : String(e.value).trim();
 
-        if (mode === 'replace') {
+        const existing = await prisma.filesMetadataValue.findFirst({
+          where: { files_id: fileId, metadata_id: keyId },
+        });
+        if (existing) {
+          if (existing.value !== strVal) {
+            changes.push({
+              key: keyLabel,
+              keyId,
+              action: 'edit',
+              previous: existing.value,
+              next: strVal,
+            });
+          }
+          await prisma.filesMetadataValue.update({
+            where: { id: existing.id },
+            data: { value: strVal },
+          });
+        } else {
+          changes.push({ key: keyLabel, keyId, action: 'add', next: strVal });
           await prisma.filesMetadataValue.create({
             data: {
               files_id: fileId,
@@ -1013,30 +1055,76 @@ export const documentsController = {
               company_id: companyId,
             },
           });
-        } else {
-          const existing = await prisma.filesMetadataValue.findFirst({
-            where: { files_id: fileId, metadata_id: keyId },
-          });
-          if (existing) {
-            await prisma.filesMetadataValue.update({
-              where: { id: existing.id },
-              data: { value: strVal },
-            });
-          } else {
-            await prisma.filesMetadataValue.create({
-              data: {
-                files_id: fileId,
-                metadata_id: keyId,
-                value: strVal,
-                company_id: companyId,
-              },
-            });
-          }
         }
+      }
+      if (changes.length > 0) {
+        await appendFileHistoryEvent({
+          companyId,
+          fileId,
+          eventType: FILE_HISTORY_EVENT_TYPE.METADATA_CHANGED,
+          actorId,
+          details: { bulk: true, changes },
+        });
       }
     }
 
     return res.json({ updated: validFileIds.length });
+  },
+
+  async renameFlatFile(req: AuthRequest, res: Response) {
+    const { companyId, fileId } = req.params;
+    const { name } = req.body || {};
+
+    if (!(await assertFlatDocumentWriteAccess(req, companyId, res))) return;
+
+    if (!fileId || typeof fileId !== 'string') {
+      return res.status(400).json({ error: 'fileId is required' });
+    }
+
+    const requestedBase = typeof name === 'string' ? name.trim() : '';
+    if (!requestedBase) {
+      return res.status(400).json({ error: 'name is required' });
+    }
+
+    const file = await prisma.file.findFirst({
+      where: { id: fileId, company_id: companyId, is_archived: false },
+      select: { id: true, name: true },
+    });
+    if (!file) {
+      return res.status(404).json({ error: 'File not found' });
+    }
+
+    const { base: currentBase, extension } = splitNameAndExtension(file.name);
+    const nextBase = sanitizeFileRenameBase(requestedBase);
+    if (!nextBase) {
+      return res.status(400).json({ error: 'name is invalid' });
+    }
+
+    const updatedName = `${nextBase}${extension}`;
+    if (updatedName === file.name) {
+      return res.json({ name: file.name });
+    }
+
+    await prisma.file.update({
+      where: { id: file.id },
+      data: { name: updatedName },
+    });
+
+    const actorId = normalizeFileHistoryActorId(req.user?.id);
+    await appendFileHistoryEvent({
+      companyId,
+      fileId: file.id,
+      eventType: FILE_HISTORY_EVENT_TYPE.FILE_RENAMED,
+      actorId,
+      details: { from: file.name, to: updatedName },
+    });
+
+    return res.json({
+      name: updatedName,
+      baseName: nextBase,
+      extension,
+      previousBaseName: currentBase,
+    });
   },
 
   async listSplitPdfPresets(req: AuthRequest, res: Response) {
@@ -1344,9 +1432,24 @@ export const documentsController = {
       select: { id: true, storage_path: true },
     });
 
+    await appendFileHistoryEvent({
+      companyId,
+      fileId: sourceFile.id,
+      eventType: FILE_HISTORY_EVENT_TYPE.FILE_UPLOADED,
+      actorId: normalizeFileHistoryActorId(userId),
+      details: { source: 'split_pdf_auto', name: uploaded.originalname },
+    });
+
     let ocrMarkdown: string | null = null;
     if (runOcr) {
       const { runOcrAndGetMarkdown } = await import('../services/ocr.service');
+      await appendFileHistoryEvent({
+        companyId,
+        fileId: sourceFile.id,
+        eventType: FILE_HISTORY_EVENT_TYPE.OCR_REQUESTED,
+        actorId: normalizeFileHistoryActorId(userId),
+        details: { source: 'split_pdf_auto' },
+      });
       await prisma.file.update({
         where: { id: sourceFile.id },
         data: { ocr_status: 'pending' },
@@ -1452,8 +1555,16 @@ export const documentsController = {
           folder_id: null,
         },
       });
+      await appendFileHistoryEvent({
+        companyId,
+        fileId: dbFile.id,
+        eventType: FILE_HISTORY_EVENT_TYPE.FILE_UPLOADED,
+        actorId: normalizeFileHistoryActorId(userId),
+        details: { source: 'split_pdf_auto' },
+      });
       const meta = validated[i]?.metadata;
       if (meta) {
+        const metaChanges: Array<{ key: string; keyId: string; action: 'add'; next: string }> = [];
         for (const [keyId, rawVal] of Object.entries(meta)) {
           if (!metaById.has(keyId)) continue;
           const strVal = typeof rawVal === 'string' ? rawVal.trim() : String(rawVal).trim();
@@ -1466,6 +1577,22 @@ export const documentsController = {
               company_id: companyId,
             },
           });
+          const keyRow = metaById.get(keyId);
+          metaChanges.push({
+            key: keyRow?.name?.trim() || keyId,
+            keyId,
+            action: 'add',
+            next: strVal,
+          });
+        }
+        if (metaChanges.length > 0) {
+          await appendFileHistoryEvent({
+            companyId,
+            fileId: dbFile.id,
+            eventType: FILE_HISTORY_EVENT_TYPE.METADATA_CHANGED,
+            actorId: normalizeFileHistoryActorId(userId),
+            details: { source: 'split_pdf_auto', changes: metaChanges },
+          });
         }
       }
       created.push({ id: dbFile.id, name: dbFile.name });
@@ -1474,6 +1601,13 @@ export const documentsController = {
     if (runOcrOnCreated && created.length > 0) {
       const { processDocumentOcr } = await import('../services/ocr.service');
       for (const row of created) {
+        await appendFileHistoryEvent({
+          companyId,
+          fileId: row.id,
+          eventType: FILE_HISTORY_EVENT_TYPE.OCR_REQUESTED,
+          actorId: null,
+          details: { source: 'split_pdf_auto_child' },
+        });
         await prisma.file.update({
           where: { id: row.id },
           data: { ocr_status: 'pending' },
@@ -1542,7 +1676,7 @@ export const documentsController = {
 
     const companyMetaKeys = await prisma.filesMetadataKey.findMany({
       where: { company_id: companyId },
-      select: { id: true, value_kind: true, allowed_values: true },
+      select: { id: true, name: true, value_kind: true, allowed_values: true },
     });
     const companyMetaById = new Map(companyMetaKeys.map((k) => [k.id, k]));
     for (const seg of validated) {
@@ -1616,8 +1750,16 @@ export const documentsController = {
           folder_id: null,
         },
       });
+      await appendFileHistoryEvent({
+        companyId,
+        fileId: dbFile.id,
+        eventType: FILE_HISTORY_EVENT_TYPE.FILE_UPLOADED,
+        actorId: normalizeFileHistoryActorId(userId),
+        details: { source: 'split_pdf_apply' },
+      });
       const meta = validated[i]?.metadata;
       if (meta && companyMetaById.size > 0) {
+        const metaChanges: Array<{ key: string; keyId: string; action: 'add'; next: string }> = [];
         for (const [keyId, rawVal] of Object.entries(meta)) {
           if (!companyMetaById.has(keyId)) continue;
           const strVal = typeof rawVal === 'string' ? rawVal.trim() : String(rawVal).trim();
@@ -1630,6 +1772,22 @@ export const documentsController = {
               company_id: companyId,
             },
           });
+          const keyRow = companyMetaById.get(keyId);
+          metaChanges.push({
+            key: keyRow?.name?.trim() || keyId,
+            keyId,
+            action: 'add',
+            next: strVal,
+          });
+        }
+        if (metaChanges.length > 0) {
+          await appendFileHistoryEvent({
+            companyId,
+            fileId: dbFile.id,
+            eventType: FILE_HISTORY_EVENT_TYPE.METADATA_CHANGED,
+            actorId: normalizeFileHistoryActorId(userId),
+            details: { source: 'split_pdf_apply', changes: metaChanges },
+          });
         }
       }
       created.push({ id: dbFile.id, name: dbFile.name });
@@ -1638,6 +1796,13 @@ export const documentsController = {
     if (runOcrOnCreated && created.length > 0) {
       const { processDocumentOcr } = await import('../services/ocr.service');
       for (const row of created) {
+        await appendFileHistoryEvent({
+          companyId,
+          fileId: row.id,
+          eventType: FILE_HISTORY_EVENT_TYPE.OCR_REQUESTED,
+          actorId: null,
+          details: { source: 'split_pdf_apply_child' },
+        });
         await prisma.file.update({
           where: { id: row.id },
           data: { ocr_status: 'pending' },
@@ -1677,7 +1842,7 @@ export const documentsController = {
 
   async extractMetadataFromOcr(req: AuthRequest, res: Response) {
     const { companyId } = req.params;
-    const { fileId, metadataKeyIds, currentDate } = req.body || {};
+    const { fileId, metadataKeyIds, currentDate, renameInstructions } = req.body || {};
 
     if (!(await assertFlatDocumentWriteAccess(req, companyId, res))) return;
 
@@ -1697,15 +1862,23 @@ export const documentsController = {
       typeof currentDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(currentDate)
         ? currentDate
         : new Date().toISOString().slice(0, 10);
+    const normalizedRenameInstructions =
+      typeof renameInstructions === 'string' && renameInstructions.trim().length > 0
+        ? renameInstructions.trim()
+        : undefined;
 
     try {
       const result = await extractAndApplyMetadataFromOcr({
         companyId,
         fileId,
         metadataKeyIds: requestedIds,
+        renameInstructions: normalizedRenameInstructions,
         currentDate: dateStr,
       });
-      return res.json({ values: result.values });
+      return res.json({
+        values: result.values,
+        ...(result.renamedTo ? { renamedTo: result.renamedTo } : {}),
+      });
     } catch (e) {
       const http = e as ExtractMetadataFromOcrHttpError;
       if (typeof http?.status === 'number' && typeof http?.error === 'string') {

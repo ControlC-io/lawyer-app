@@ -12,6 +12,7 @@ import {
 } from '../services/files-metadata-validation';
 import { canUserAccessFolder, getUserGroupIdsInCompany } from '../lib/folderAccess';
 import { getAccessibleFileIds, canUserAccessFileByMetadata } from '../lib/documentAccess';
+import { appendFileHistoryEvent, FILE_HISTORY_EVENT_TYPE, normalizeFileHistoryActorId } from '../lib/fileHistory';
 import { storageService } from '../services/storage.service';
 import { stepReminderService } from '../services/stepReminder.service';
 import bcrypt from 'bcryptjs';
@@ -1268,6 +1269,51 @@ export const companiesController = {
         }
       }
 
+      const existingMeta = await prisma.filesMetadataValue.findMany({
+        where: { files_id: fileId, company_id: companyId },
+        include: { metadata: { select: { id: true, name: true } } },
+      });
+      const prevByKeyId = new Map(
+        existingMeta.map((r) => [
+          r.metadata_id,
+          { value: r.value, keyName: r.metadata.name?.trim() || r.metadata_id },
+        ]),
+      );
+
+      const desired = list.map((entry) => {
+        const keyId = keyMap.get(entry.key.trim())!;
+        const value = typeof entry.value === 'string' ? entry.value.trim() : String(entry.value).trim();
+        return { keyId, value, keyName: entry.key.trim() };
+      });
+      const desiredIds = new Set(desired.map((d) => d.keyId));
+
+      const metaChanges: Array<{
+        key: string;
+        keyId: string;
+        action: 'add' | 'edit' | 'remove';
+        previous?: string;
+        next?: string;
+      }> = [];
+      for (const [kid, prev] of prevByKeyId) {
+        if (!desiredIds.has(kid)) {
+          metaChanges.push({ key: prev.keyName, keyId: kid, action: 'remove', previous: prev.value });
+        }
+      }
+      for (const d of desired) {
+        const prev = prevByKeyId.get(d.keyId);
+        if (!prev) {
+          metaChanges.push({ key: d.keyName, keyId: d.keyId, action: 'add', next: d.value });
+        } else if (prev.value !== d.value) {
+          metaChanges.push({
+            key: d.keyName,
+            keyId: d.keyId,
+            action: 'edit',
+            previous: prev.value,
+            next: d.value,
+          });
+        }
+      }
+
       await prisma.filesMetadataValue.deleteMany({ where: { files_id: fileId, company_id: companyId } });
 
       for (const entry of list) {
@@ -1278,6 +1324,21 @@ export const companiesController = {
             metadata_id: keyId,
             value: typeof entry.value === 'string' ? entry.value.trim() : String(entry.value).trim(),
             company_id: companyId,
+          },
+        });
+      }
+
+      if (metaChanges.length > 0) {
+        const actorId = normalizeFileHistoryActorId(req.user?.id);
+        await appendFileHistoryEvent({
+          companyId,
+          fileId,
+          eventType: FILE_HISTORY_EVENT_TYPE.METADATA_CHANGED,
+          actorId,
+          details: {
+            source: 'replace_all',
+            ...(req.company && !req.user ? { actorSource: 'company_api_key' } : {}),
+            changes: metaChanges,
           },
         });
       }
@@ -2662,6 +2723,17 @@ export const companiesController = {
           uploaded_by: userId,
         },
       });
+      await appendFileHistoryEvent({
+        companyId,
+        fileId: file.id,
+        eventType: FILE_HISTORY_EVENT_TYPE.FILE_UPLOADED,
+        actorId: normalizeFileHistoryActorId(userId),
+        details: {
+          name: file.name,
+          source: 'api_create_file',
+          ...(req.company && !req.user ? { actorSource: 'company_api_key' } : {}),
+        },
+      });
       return res.status(201).json({
         ...file,
         size_bytes: file.size_bytes?.toString(),
@@ -2823,6 +2895,75 @@ export const companiesController = {
       return res.status(204).send();
     } catch (error) {
       console.error('deleteAgentPermission error:', error);
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
+  /**
+   * GET /api/companies/:companyId/files/:fileId/history
+   * Timeline of file events (same read access as document preview).
+   */
+  async getFileHistory(req: AuthRequest, res: Response) {
+    try {
+      const { companyId, fileId } = req.params;
+      if (!companyId || !fileId) {
+        return res.status(400).json({ error: 'Missing company ID or file ID' });
+      }
+      const access = await ensureCompanyAccess(req, companyId);
+      if (access.error) return res.status(access.error.status).json(access.error.body);
+
+      const file = await prisma.file.findFirst({
+        where: { id: fileId, company_id: companyId },
+        select: { id: true, folder_id: true, is_archived: true },
+      });
+      if (!file || file.is_archived) {
+        return res.status(404).json({ error: 'File not found' });
+      }
+
+      const isPrivileged =
+        req.user?.super_admin === true
+        || (!!req.company && !req.user)
+        || access.userCompany?.role === 'company_admin';
+
+      const userId = req.user?.id;
+      if (!isPrivileged) {
+        if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+        const isCompanyAdmin = access.userCompany?.role === 'company_admin' || !!req.user?.super_admin;
+        const userGroupIds = await getUserGroupIdsInCompany(userId, companyId);
+        if (file.folder_id) {
+          const allowed = await canUserAccessFolder(userId, companyId, file.folder_id, isCompanyAdmin, userGroupIds);
+          if (!allowed) return res.status(403).json({ error: 'Forbidden' });
+        } else {
+          const level = await canUserAccessFileByMetadata({
+            userId,
+            companyId,
+            fileId: file.id,
+            isCompanyAdmin,
+            userGroupIds,
+          });
+          if (level == null) return res.status(403).json({ error: 'Forbidden' });
+        }
+      }
+
+      const events = await prisma.fileHistoryEvent.findMany({
+        where: { file_id: fileId, company_id: companyId },
+        orderBy: { created_at: 'asc' },
+        include: { actor: { select: { id: true, email: true, full_name: true } } },
+      });
+
+      return res.json({
+        events: events.map((e) => ({
+          id: e.id,
+          eventType: e.event_type,
+          createdAt: e.created_at.toISOString(),
+          actor: e.actor
+            ? { id: e.actor.id, email: e.actor.email, fullName: e.actor.full_name }
+            : null,
+          details: e.details ?? null,
+        })),
+      });
+    } catch (error) {
+      console.error('getFileHistory error:', error);
       return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
     }
   },

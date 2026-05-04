@@ -409,7 +409,15 @@ export const useExecutionForm = (
         { apiKey: apiKey ?? undefined }
       );
       const filePath = res?.file_path;
-      const signedUrl = filePath ? await getSignedUrl(filePath, file.name) : null;
+      if (!filePath) {
+        throw new Error("No file_path returned from upload");
+      }
+      const signedUrl = await getSignedUrl(filePath, file.name);
+      // Refetch is async; ExecutionDataPanel prefers editingValues over DB for display.
+      setEditingValues((prev) => ({
+        ...prev,
+        [cacheKey]: { value: filePath, original_name: file.name },
+      }));
       if (signedUrl) {
         setSignedUrls((prev) => ({ ...prev, [cacheKey]: signedUrl }));
       }
@@ -595,6 +603,12 @@ export const useExecutionForm = (
       queryClient.invalidateQueries({ queryKey: ["execution_data_structures", executionId] });
       // Wait for refetch so the cache is updated before showing success; avoids file reappearing on refresh
       await queryClient.refetchQueries({ queryKey: executionQueryKey });
+      const editingKey = `${row.id}-${fieldId}`;
+      setEditingValues((prev) => {
+        const next = { ...prev };
+        delete next[editingKey];
+        return next;
+      });
       toast({ title: "File deleted successfully", description: "File has been removed from form" });
     } catch (error: unknown) {
       console.error("Error deleting file:", error);

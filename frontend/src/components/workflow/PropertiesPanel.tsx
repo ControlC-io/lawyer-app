@@ -12,6 +12,7 @@ import { Switch } from "@/components/ui/switch";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { api } from "@/lib/api";
 import { useCompanyId } from "@/hooks/useCompanyId";
 import { useAuth } from "@/contexts/AuthContext";
@@ -35,7 +36,12 @@ type KeyValuePair = { key: string; value: string; mode?: "static" | "bind" };
 type ReminderMode = "none" | "repeat" | "schedule";
 
 type StepNotificationConfig = {
-  assignment: { enabled: boolean };
+  assignment: {
+    enabled: boolean;
+    use_custom_notification: boolean;
+    subject_template: string;
+    content_template: string;
+  };
   reminder: {
     mode: ReminderMode;
     delay_minutes: number;
@@ -43,6 +49,14 @@ type StepNotificationConfig = {
     max_count?: number;
     schedule_minutes: number[];
   };
+};
+type StepEmailActionConfig = {
+  subject_template: string;
+  body_template_html: string;
+  recipient_sources: Array<"creator" | "static" | "user_field">;
+  static_recipients: string[];
+  user_field_ids: string[];
+  attachment_field_ids: string[];
 };
 
 type ReminderDurationUnit = "hours" | "days";
@@ -70,9 +84,21 @@ function normalizeStepNotificationConfig(rawConfig: unknown): StepNotificationCo
     .sort((a: number, b: number) => a - b)
     .filter((value: number, index: number, list: number[]) => index === 0 || value !== list[index - 1]);
 
+  const subjectTemplate =
+    typeof assignment.subject_template === "string" ? assignment.subject_template.trim() : "";
+  const contentTemplate =
+    typeof assignment.content_template === "string" ? assignment.content_template.trim() : "";
+  const useCustomNotification =
+    typeof assignment.use_custom_notification === "boolean"
+      ? assignment.use_custom_notification
+      : subjectTemplate.length > 0 || contentTemplate.length > 0;
+
   return {
     assignment: {
       enabled: assignment.enabled !== false,
+      use_custom_notification: useCustomNotification,
+      subject_template: typeof assignment.subject_template === "string" ? assignment.subject_template : "",
+      content_template: typeof assignment.content_template === "string" ? assignment.content_template : "",
     },
     reminder: {
       mode,
@@ -84,6 +110,39 @@ function normalizeStepNotificationConfig(rawConfig: unknown): StepNotificationCo
           : clampPositiveInteger(reminder.max_count, 1),
       schedule_minutes: scheduleMinutes.length > 0 ? scheduleMinutes : [24 * 60],
     },
+  };
+}
+
+function normalizeEmailActionConfig(rawConfig: unknown): StepEmailActionConfig {
+  const input = (rawConfig && typeof rawConfig === "object" ? rawConfig : {}) as Record<string, unknown>;
+  const recipientSourcesRaw = Array.isArray(input.recipient_sources) ? input.recipient_sources : [];
+  const recipientSources = Array.from(
+    new Set(
+      recipientSourcesRaw
+        .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
+        .filter((entry): entry is "creator" | "static" | "user_field" =>
+          entry === "creator" || entry === "static" || entry === "user_field"
+        )
+    )
+  );
+
+  const staticRecipients = Array.isArray(input.static_recipients)
+    ? Array.from(new Set(input.static_recipients.map((entry) => (typeof entry === "string" ? entry.trim() : "")).filter(Boolean)))
+    : [];
+  const userFieldIds = Array.isArray(input.user_field_ids)
+    ? Array.from(new Set(input.user_field_ids.map((entry) => (typeof entry === "string" ? entry.trim() : "")).filter(Boolean)))
+    : [];
+  const attachmentFieldIds = Array.isArray(input.attachment_field_ids)
+    ? Array.from(new Set(input.attachment_field_ids.map((entry) => (typeof entry === "string" ? entry.trim() : "")).filter(Boolean)))
+    : [];
+
+  return {
+    subject_template: typeof input.subject_template === "string" ? input.subject_template : "",
+    body_template_html: typeof input.body_template_html === "string" ? input.body_template_html : "",
+    recipient_sources: recipientSources.length > 0 ? recipientSources : ["creator"],
+    static_recipients: staticRecipients,
+    user_field_ids: userFieldIds,
+    attachment_field_ids: attachmentFieldIds,
   };
 }
 
@@ -136,6 +195,26 @@ const EXPLANATION_EDITOR_FORMATS = [
   "link",
 ];
 
+const EMAIL_BODY_EDITOR_MODULES = {
+  toolbar: [
+    [{ header: [1, 2, 3, false] }],
+    ["bold", "italic", "underline"],
+    [{ list: "ordered" }, { list: "bullet" }],
+    ["link", "image", "clean"],
+  ],
+};
+
+const EMAIL_BODY_EDITOR_FORMATS = [
+  "header",
+  "bold",
+  "italic",
+  "underline",
+  "list",
+  "bullet",
+  "link",
+  "image",
+];
+
 interface PropertiesPanelProps {
   step: WorkflowStep;
   workflowId: string;
@@ -185,9 +264,30 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
   /** Cache of prompt templates per agent id, for form actions */
   const [formActionAgentTemplates, setFormActionAgentTemplates] = useState<Record<string, string>>({});
   const [formActionAgentTemplatesLoading, setFormActionAgentTemplatesLoading] = useState<Record<string, boolean>>({});
+  const [geminiConfigured, setGeminiConfigured] = useState(false);
 
-  // Default to assign to execution creator (true) if not set
-  const assignToExecutionCreator = step.config.assign_to_execution_creator !== false;
+  const assignmentSourceFromConfig = typeof step.config.assignment_source === "string"
+    ? step.config.assignment_source
+    : "";
+  const assignmentMode: "creator" | "static" | "field" =
+    assignmentSourceFromConfig === "field"
+      ? "field"
+      : assignmentSourceFromConfig === "static"
+        ? "static"
+        : assignmentSourceFromConfig === "creator"
+          ? "creator"
+          : step.config.assign_to_execution_creator !== false
+            ? "creator"
+            : "static";
+  const assignToExecutionCreator = assignmentMode === "creator";
+  const assignmentSourceFieldId = typeof step.config.assignment_source_field_id === "string"
+    ? step.config.assignment_source_field_id
+    : "";
+  const topLevelUserFields = dataStructureItems.filter(
+    (item) => item.field_type === "user" && !item.parent_item_id
+  );
+  const allUserFields = dataStructureItems.filter((item) => item.field_type === "user");
+  const fileFields = dataStructureItems.filter((item) => item.field_type === "file");
   const isStartOrEnd = step.step_type === "start" || step.step_type === "end";
   const requiresExplicitAssignment =
     (step.step_type === "action" && (step.action_type || "manual") === "manual") ||
@@ -201,6 +301,7 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
     (step.step_type === "decision" && ["Human", "Agent_Human"].includes(step.decision_node_type || "Human")) ||
     step.step_type === "edit_form";
   const stepNotificationConfig = normalizeStepNotificationConfig(step.config?.notifications);
+  const emailActionConfig = normalizeEmailActionConfig(step.config?.email_action);
   const reminderDelayDuration = minutesToDuration(stepNotificationConfig.reminder.delay_minutes);
   const reminderRepeatDuration = minutesToDuration(
     stepNotificationConfig.reminder.repeat_every_minutes || stepNotificationConfig.reminder.delay_minutes
@@ -212,6 +313,8 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
     step.config.agent_id ? "agent" : step.config.api_configuration_id ? "integration" : "none"
   );
   const hasExplicitAssignment = Boolean(step.config.assigned_to_user_id || step.config.assigned_to_group_id);
+  const hasFieldAssignment = assignmentMode === "field" && !!assignmentSourceFieldId;
+  const hasValidAssignment = assignmentMode === "creator" || hasFieldAssignment || hasExplicitAssignment;
   const [selectedConfigId, setSelectedConfigId] = useState<string>(
     step.config.api_configuration_id || "none"
   );
@@ -236,6 +339,18 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
       mode: d.value?.startsWith("{{") ? "bind" : "static"
     })) : [{ key: "", value: "", mode: "static" }]
   );
+
+  const updateEmailActionConfig = (updater: (current: StepEmailActionConfig) => StepEmailActionConfig) => {
+    const current = normalizeEmailActionConfig(step.config?.email_action);
+    const next = updater(current);
+    onUpdateStep({
+      ...step,
+      config: {
+        ...step.config,
+        email_action: next,
+      },
+    });
+  };
 
   useEffect(() => {
     setStepExplanationOpen(false);
@@ -262,6 +377,8 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
           );
           if (metadataList) setMetadataKeys(metadataList);
         }
+        const health = await api.get<{ pdfSplit?: { geminiConfigured?: boolean } }>("/api/health");
+        setGeminiConfigured(Boolean(health?.pdfSplit?.geminiConfigured));
 
         if (apiConfigTypeForStep) {
           const apiConfigList = await api.get<Array<{ id: string; name: string; config_type: string }>>(
@@ -331,6 +448,11 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
     fetchAgents();
     fetchAgentCategories();
   }, [companyId, workflowId, step.step_type, step.action_type]);
+
+  useEffect(() => {
+    if (step.step_type !== "file" || step.action_type === "automatic") return;
+    onUpdateStep({ ...step, action_type: "automatic" });
+  }, [onUpdateStep, step]);
 
   useEffect(() => {
     if (step.action_type === "agent" && step.config.agent_id) {
@@ -471,6 +593,10 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
     }
     return field.name;
   };
+
+  const notificationTemplateFieldNames = Array.from(
+    new Set(dataStructureItems.map((field) => getFieldDisplayName(field)).filter((name) => name.trim().length > 0))
+  ).sort((a, b) => a.localeCompare(b));
 
   const fetchApiConfigurations = async () => {
     if (!companyId) return;
@@ -619,11 +745,19 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
     onUpdateStep({ ...step, name });
   };
 
-  const handleConfigChange = (key: string, value: string | boolean) => {
+  const handleConfigChange = (key: string, value: unknown) => {
     onUpdateStep({
       ...step,
       config: { ...step.config, [key]: value },
     });
+  };
+
+  const toggleExtractMetadataKey = (id: string, checked: boolean) => {
+    const current = Array.isArray(step.config.extractMetadataKeyIds)
+      ? step.config.extractMetadataKeyIds.filter((k: unknown): k is string => typeof k === "string" && !!k.trim())
+      : [];
+    const next = checked ? Array.from(new Set([...current, id])) : current.filter((k) => k !== id);
+    handleConfigChange("extractMetadataKeyIds", next);
   };
 
   const handleAddOutput = () => {
@@ -878,30 +1012,80 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
 
           {!isStartOrEnd && (
           <TabsContent value="assign" className="space-y-4 mt-4">
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
-                <Label htmlFor="assign-to-creator">Assign to execution creator</Label>
-                <p className="text-xs text-muted-foreground">
-                  When enabled, the step will be assigned to the user who creates the execution
-                </p>
-              </div>
-              <Switch
-                id="assign-to-creator"
-                checked={assignToExecutionCreator}
-                onCheckedChange={(checked) => {
+            <div className="space-y-2">
+              <Label htmlFor="assignment-source-mode">{t("workflowEditor.assignmentSourceLabel")}</Label>
+              <Select
+                value={assignmentMode}
+                onValueChange={(value) => {
+                  const nextMode = value as "creator" | "static" | "field";
                   onUpdateStep({
                     ...step,
                     config: {
                       ...step.config,
-                      assign_to_execution_creator: checked,
-                      // Clear user/group assignments when enabling assign to creator
-                      assigned_to_user_id: checked ? "" : step.config.assigned_to_user_id,
-                      assigned_to_group_id: checked ? "" : step.config.assigned_to_group_id,
+                      assignment_source: nextMode,
+                      assign_to_execution_creator: nextMode === "creator",
+                      assignment_source_field_id:
+                        nextMode === "field" ? step.config.assignment_source_field_id || "" : "",
+                      assigned_to_user_id:
+                        nextMode === "creator" ? "" : step.config.assigned_to_user_id,
+                      assigned_to_group_id:
+                        nextMode === "creator" ? "" : step.config.assigned_to_group_id,
                     },
                   });
                 }}
-              />
+              >
+                <SelectTrigger id="assignment-source-mode">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="creator">{t("workflowEditor.assignmentSourceCreator")}</SelectItem>
+                  <SelectItem value="static">{t("workflowEditor.assignmentSourceStatic")}</SelectItem>
+                  <SelectItem value="field">{t("workflowEditor.assignmentSourceField")}</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                {assignmentMode === "creator"
+                  ? t("workflowEditor.assignmentSourceCreatorHint")
+                  : assignmentMode === "field"
+                    ? t("workflowEditor.assignmentSourceFieldHint")
+                    : t("workflowEditor.assignmentSourceStaticHint")}
+              </p>
             </div>
+
+            {assignmentMode === "field" && (
+              <div className="space-y-2">
+                <Label htmlFor="assignment-source-field">{t("workflowEditor.assignmentFieldLabel")}</Label>
+                <Select
+                  value={assignmentSourceFieldId || "none"}
+                  onValueChange={(value) => {
+                    onUpdateStep({
+                      ...step,
+                      config: {
+                        ...step.config,
+                        assignment_source: "field",
+                        assign_to_execution_creator: false,
+                        assignment_source_field_id: value === "none" ? "" : value,
+                      },
+                    });
+                  }}
+                >
+                  <SelectTrigger id="assignment-source-field">
+                    <SelectValue placeholder={t("workflowEditor.assignmentFieldPlaceholder")} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">{t("workflowEditor.assignmentFieldNone")}</SelectItem>
+                    {topLevelUserFields.map((field) => (
+                      <SelectItem key={field.id} value={field.id}>
+                        {field.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {topLevelUserFields.length === 0 && (
+                  <p className="text-xs text-muted-foreground">{t("workflowEditor.assignmentFieldNoUserFields")}</p>
+                )}
+              </div>
+            )}
 
             <div className="flex items-center justify-between">
               <div className="space-y-0.5">
@@ -949,7 +1133,7 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
               </div>
             )}
 
-            {!assignToExecutionCreator && (
+            {assignmentMode !== "creator" && (
               <>
                 <PermissionTargetPicker
                   users={users}
@@ -981,17 +1165,17 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
                   allowNoneOption
                   noneLabel="No assignment"
                   labels={{
-                    users: "Assigned user",
-                    groups: "Assigned group",
-                    usersPlaceholder: "Select user",
-                    groupsPlaceholder: "Select group",
+                    users: t("workflowEditor.assignedUserLabel"),
+                    groups: t("workflowEditor.assignedGroupLabel"),
+                    usersPlaceholder: t("workflowEditor.assignedUserPlaceholder"),
+                    groupsPlaceholder: t("workflowEditor.assignedGroupPlaceholder"),
                   }}
                 />
 
-                {requiresExplicitAssignment && !hasExplicitAssignment && (
+                {requiresExplicitAssignment && !hasValidAssignment && (
                   <Alert>
                     <AlertDescription>
-                      This step type requires an explicit user or group assignment.
+                      {t("workflowEditor.assignmentRequiredWarning")}
                     </AlertDescription>
                   </Alert>
                 )}
@@ -1026,6 +1210,210 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
                   }}
                 />
               </div>
+
+              {stepNotificationConfig.assignment.enabled && (
+              <>
+              <div className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <Label htmlFor="notification-use-custom-message">
+                    {t("workflowEditorStepNotifications.useCustomMessage")}
+                  </Label>
+                  <p className="text-xs text-muted-foreground">
+                    {t("workflowEditorStepNotifications.useCustomMessageHint")}
+                  </p>
+                </div>
+                <Switch
+                  id="notification-use-custom-message"
+                  checked={stepNotificationConfig.assignment.use_custom_notification}
+                  onCheckedChange={(checked) => {
+                    updateStepNotifications((current) => ({
+                      ...current,
+                      assignment: {
+                        ...current.assignment,
+                        use_custom_notification: checked,
+                      },
+                    }));
+                  }}
+                />
+              </div>
+
+              {stepNotificationConfig.assignment.use_custom_notification && (
+              <div className="space-y-4">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <Label htmlFor="notification-subject-template">
+                    {t("workflowEditorStepNotifications.subjectTemplate")}
+                  </Label>
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="gap-1"
+                      >
+                        <Link2 className="h-4 w-4" />
+                        {t("workflowEditorStepNotifications.insertVariable")}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-72 p-2">
+                      <div className="space-y-1 max-h-56 overflow-y-auto">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          className="w-full justify-start text-left h-auto py-2"
+                          onClick={() => {
+                            updateStepNotifications((current) => ({
+                              ...current,
+                              assignment: {
+                                ...current.assignment,
+                                subject_template: `${current.assignment.subject_template}{{execution_link}}`,
+                              },
+                            }));
+                          }}
+                        >
+                          <div className="space-y-0.5">
+                            <p className="text-sm font-medium">Execution link</p>
+                            <p className="text-xs text-muted-foreground">{'{{execution_link}}'}</p>
+                          </div>
+                        </Button>
+                        {notificationTemplateFieldNames.map((fieldName) => (
+                          <Button
+                            key={`notification-subject-${fieldName}`}
+                            type="button"
+                            variant="ghost"
+                            className="w-full justify-start text-left h-auto py-2"
+                            onClick={() => {
+                              updateStepNotifications((current) => ({
+                                ...current,
+                                assignment: {
+                                  ...current.assignment,
+                                  subject_template: `${current.assignment.subject_template}{{${fieldName}}}`,
+                                },
+                              }));
+                            }}
+                          >
+                            <div className="space-y-0.5">
+                              <p className="text-sm font-medium">{fieldName}</p>
+                              <p className="text-xs text-muted-foreground">{`{{${fieldName}}}`}</p>
+                            </div>
+                          </Button>
+                        ))}
+                        {notificationTemplateFieldNames.length === 0 && (
+                          <p className="text-xs text-muted-foreground px-2 py-1">
+                            {t("workflowEditorStepNotifications.noFieldsAvailable")}
+                          </p>
+                        )}
+                      </div>
+                    </PopoverContent>
+                  </Popover>
+                </div>
+                <Input
+                  id="notification-subject-template"
+                  value={stepNotificationConfig.assignment.subject_template}
+                  onChange={(event) => {
+                    updateStepNotifications((current) => ({
+                      ...current,
+                      assignment: {
+                        ...current.assignment,
+                        subject_template: event.target.value,
+                      },
+                    }));
+                  }}
+                  placeholder={t("workflowEditorStepNotifications.subjectTemplatePlaceholder")}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <Label htmlFor="notification-content-template">
+                    {t("workflowEditorStepNotifications.contentTemplate")}
+                  </Label>
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="gap-1"
+                      >
+                        <Link2 className="h-4 w-4" />
+                        {t("workflowEditorStepNotifications.insertVariable")}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-72 p-2">
+                      <div className="space-y-1 max-h-56 overflow-y-auto">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          className="w-full justify-start text-left h-auto py-2"
+                          onClick={() => {
+                            updateStepNotifications((current) => ({
+                              ...current,
+                              assignment: {
+                                ...current.assignment,
+                                content_template: `${current.assignment.content_template}{{execution_link}}`,
+                              },
+                            }));
+                          }}
+                        >
+                          <div className="space-y-0.5">
+                            <p className="text-sm font-medium">Execution link</p>
+                            <p className="text-xs text-muted-foreground">{'{{execution_link}}'}</p>
+                          </div>
+                        </Button>
+                        {notificationTemplateFieldNames.map((fieldName) => (
+                          <Button
+                            key={`notification-content-${fieldName}`}
+                            type="button"
+                            variant="ghost"
+                            className="w-full justify-start text-left h-auto py-2"
+                            onClick={() => {
+                              updateStepNotifications((current) => ({
+                                ...current,
+                                assignment: {
+                                  ...current.assignment,
+                                  content_template: `${current.assignment.content_template}{{${fieldName}}}`,
+                                },
+                              }));
+                            }}
+                          >
+                            <div className="space-y-0.5">
+                              <p className="text-sm font-medium">{fieldName}</p>
+                              <p className="text-xs text-muted-foreground">{`{{${fieldName}}}`}</p>
+                            </div>
+                          </Button>
+                        ))}
+                        {notificationTemplateFieldNames.length === 0 && (
+                          <p className="text-xs text-muted-foreground px-2 py-1">
+                            {t("workflowEditorStepNotifications.noFieldsAvailable")}
+                          </p>
+                        )}
+                      </div>
+                    </PopoverContent>
+                  </Popover>
+                </div>
+                <Textarea
+                  id="notification-content-template"
+                  value={stepNotificationConfig.assignment.content_template}
+                  onChange={(event) => {
+                    updateStepNotifications((current) => ({
+                      ...current,
+                      assignment: {
+                        ...current.assignment,
+                        content_template: event.target.value,
+                      },
+                    }));
+                  }}
+                  placeholder={t("workflowEditorStepNotifications.contentTemplatePlaceholder")}
+                  rows={5}
+                />
+                <p className="text-xs text-muted-foreground">
+                  {t("workflowEditorStepNotifications.templateHint")}
+                </p>
+              </div>
+              </div>
+              )}
 
               <div className="space-y-2">
                 <Label htmlFor="step-reminder-mode">{t("workflowEditorStepNotifications.reminderMode")}</Label>
@@ -1282,6 +1670,8 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
                     </div>
                   ))}
                 </div>
+              )}
+              </>
               )}
             </div>
           </TabsContent>
@@ -1801,7 +2191,7 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
                   <Label>Action Type</Label>
                   <Select
                     value={step.action_type || "manual"}
-                    onValueChange={(value) => onUpdateStep({ ...step, action_type: value as "manual" | "automatic" | "agent" })}
+                    onValueChange={(value) => onUpdateStep({ ...step, action_type: value as "manual" | "automatic" | "agent" | "email" })}
                   >
                     <SelectTrigger>
                       <SelectValue />
@@ -1810,6 +2200,7 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
                       <SelectItem value="manual">Manual</SelectItem>
                       <SelectItem value="automatic">Automatic</SelectItem>
                       <SelectItem value="agent">Agent</SelectItem>
+                      <SelectItem value="email">Email</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -1960,6 +2351,267 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
                             </Badge>
                           );
                         })}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {step.action_type === "email" && (
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <Label htmlFor="email-action-subject">Email Subject</Label>
+                        <Popover>
+                          <PopoverTrigger asChild>
+                            <Button type="button" variant="outline" size="sm" className="gap-1">
+                              <Link2 className="h-4 w-4" />
+                              Insert variable
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-72 p-2">
+                            <div className="space-y-1 max-h-56 overflow-y-auto">
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                className="w-full justify-start text-left h-auto py-2"
+                                onClick={() => {
+                                  updateEmailActionConfig((current) => ({
+                                    ...current,
+                                    subject_template: `${current.subject_template}{{execution_link}}`,
+                                  }));
+                                }}
+                              >
+                                <div className="space-y-0.5">
+                                  <p className="text-sm font-medium">Execution link</p>
+                                  <p className="text-xs text-muted-foreground">{'{{execution_link}}'}</p>
+                                </div>
+                              </Button>
+                              {notificationTemplateFieldNames.map((fieldName) => (
+                                <Button
+                                  key={`email-subject-${fieldName}`}
+                                  type="button"
+                                  variant="ghost"
+                                  className="w-full justify-start text-left h-auto py-2"
+                                  onClick={() => {
+                                    updateEmailActionConfig((current) => ({
+                                      ...current,
+                                      subject_template: `${current.subject_template}{{${fieldName}}}`,
+                                    }));
+                                  }}
+                                >
+                                  <div className="space-y-0.5">
+                                    <p className="text-sm font-medium">{fieldName}</p>
+                                    <p className="text-xs text-muted-foreground">{`{{${fieldName}}}`}</p>
+                                  </div>
+                                </Button>
+                              ))}
+                            </div>
+                          </PopoverContent>
+                        </Popover>
+                      </div>
+                      <Input
+                        id="email-action-subject"
+                        value={emailActionConfig.subject_template}
+                        onChange={(event) => {
+                          updateEmailActionConfig((current) => ({
+                            ...current,
+                            subject_template: event.target.value,
+                          }));
+                        }}
+                        placeholder="Example: Request update for {{request_name}}"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <Label>Email Body</Label>
+                        <Popover>
+                          <PopoverTrigger asChild>
+                            <Button type="button" variant="outline" size="sm" className="gap-1">
+                              <Link2 className="h-4 w-4" />
+                              Insert variable
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-72 p-2">
+                            <div className="space-y-1 max-h-56 overflow-y-auto">
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                className="w-full justify-start text-left h-auto py-2"
+                                onClick={() => {
+                                  updateEmailActionConfig((current) => ({
+                                    ...current,
+                                    body_template_html: `${current.body_template_html}{{execution_link}}`,
+                                  }));
+                                }}
+                              >
+                                <div className="space-y-0.5">
+                                  <p className="text-sm font-medium">Execution link</p>
+                                  <p className="text-xs text-muted-foreground">{'{{execution_link}}'}</p>
+                                </div>
+                              </Button>
+                              {notificationTemplateFieldNames.map((fieldName) => (
+                                <Button
+                                  key={`email-body-${fieldName}`}
+                                  type="button"
+                                  variant="ghost"
+                                  className="w-full justify-start text-left h-auto py-2"
+                                  onClick={() => {
+                                    updateEmailActionConfig((current) => ({
+                                      ...current,
+                                      body_template_html: `${current.body_template_html}{{${fieldName}}}`,
+                                    }));
+                                  }}
+                                >
+                                  <div className="space-y-0.5">
+                                    <p className="text-sm font-medium">{fieldName}</p>
+                                    <p className="text-xs text-muted-foreground">{`{{${fieldName}}}`}</p>
+                                  </div>
+                                </Button>
+                              ))}
+                            </div>
+                          </PopoverContent>
+                        </Popover>
+                      </div>
+                      <div className="bg-background rounded-md">
+                        <ReactQuill
+                          theme="snow"
+                          value={emailActionConfig.body_template_html}
+                          onChange={(value) => {
+                            updateEmailActionConfig((current) => ({
+                              ...current,
+                              body_template_html: value,
+                            }));
+                          }}
+                          modules={EMAIL_BODY_EDITOR_MODULES}
+                          formats={EMAIL_BODY_EDITOR_FORMATS}
+                          placeholder="Write the email body (supports rich text and variables)"
+                          className="min-h-[180px]"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-3">
+                      <Label>Recipients</Label>
+                      <div className="space-y-2 rounded-md border p-3">
+                        <div className="flex items-center gap-2">
+                          <Checkbox
+                            id="email-recipient-creator"
+                            checked={emailActionConfig.recipient_sources.includes("creator")}
+                            onCheckedChange={(checked) => {
+                              updateEmailActionConfig((current) => {
+                                const next = new Set(current.recipient_sources);
+                                if (checked) next.add("creator");
+                                else next.delete("creator");
+                                return { ...current, recipient_sources: Array.from(next) as StepEmailActionConfig["recipient_sources"] };
+                              });
+                            }}
+                          />
+                          <Label htmlFor="email-recipient-creator">Execution creator</Label>
+                        </div>
+
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-2">
+                            <Checkbox
+                              id="email-recipient-static"
+                              checked={emailActionConfig.recipient_sources.includes("static")}
+                              onCheckedChange={(checked) => {
+                                updateEmailActionConfig((current) => {
+                                  const next = new Set(current.recipient_sources);
+                                  if (checked) next.add("static");
+                                  else next.delete("static");
+                                  return { ...current, recipient_sources: Array.from(next) as StepEmailActionConfig["recipient_sources"] };
+                                });
+                              }}
+                            />
+                            <Label htmlFor="email-recipient-static">Static recipient(s)</Label>
+                          </div>
+                          {emailActionConfig.recipient_sources.includes("static") && (
+                            <Input
+                              value={emailActionConfig.static_recipients.join(", ")}
+                              onChange={(event) => {
+                                const staticRecipients = event.target.value
+                                  .split(",")
+                                  .map((entry) => entry.trim())
+                                  .filter((entry) => entry.length > 0);
+                                updateEmailActionConfig((current) => ({
+                                  ...current,
+                                  static_recipients: staticRecipients,
+                                }));
+                              }}
+                              placeholder="email1@company.com, email2@company.com"
+                            />
+                          )}
+                        </div>
+
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-2">
+                            <Checkbox
+                              id="email-recipient-user-fields"
+                              checked={emailActionConfig.recipient_sources.includes("user_field")}
+                              onCheckedChange={(checked) => {
+                                updateEmailActionConfig((current) => {
+                                  const next = new Set(current.recipient_sources);
+                                  if (checked) next.add("user_field");
+                                  else next.delete("user_field");
+                                  return { ...current, recipient_sources: Array.from(next) as StepEmailActionConfig["recipient_sources"] };
+                                });
+                              }}
+                            />
+                            <Label htmlFor="email-recipient-user-fields">User field(s)</Label>
+                          </div>
+
+                          {emailActionConfig.recipient_sources.includes("user_field") && (
+                            <div className="border rounded-md p-2 max-h-44 overflow-y-auto space-y-2">
+                              {allUserFields.length === 0 && (
+                                <p className="text-xs text-muted-foreground">No user fields are available in this workflow data structure.</p>
+                              )}
+                              {allUserFields.map((field) => (
+                                <div key={`email-user-field-${field.id}`} className="flex items-center gap-2">
+                                  <Checkbox
+                                    id={`email-user-field-${field.id}`}
+                                    checked={emailActionConfig.user_field_ids.includes(field.id)}
+                                    onCheckedChange={(checked) => {
+                                      updateEmailActionConfig((current) => {
+                                        const next = new Set(current.user_field_ids);
+                                        if (checked) next.add(field.id);
+                                        else next.delete(field.id);
+                                        return { ...current, user_field_ids: Array.from(next) };
+                                      });
+                                    }}
+                                  />
+                                  <Label htmlFor={`email-user-field-${field.id}`}>{getFieldDisplayName(field)}</Label>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>Attachments (file fields)</Label>
+                      <div className="border rounded-md p-2 max-h-44 overflow-y-auto space-y-2">
+                        {fileFields.length === 0 && (
+                          <p className="text-xs text-muted-foreground">No file fields are available in this workflow data structure.</p>
+                        )}
+                        {fileFields.map((field) => (
+                          <div key={`email-attachment-field-${field.id}`} className="flex items-center gap-2">
+                            <Checkbox
+                              id={`email-attachment-field-${field.id}`}
+                              checked={emailActionConfig.attachment_field_ids.includes(field.id)}
+                              onCheckedChange={(checked) => {
+                                updateEmailActionConfig((current) => {
+                                  const next = new Set(current.attachment_field_ids);
+                                  if (checked) next.add(field.id);
+                                  else next.delete(field.id);
+                                  return { ...current, attachment_field_ids: Array.from(next) };
+                                });
+                              }}
+                            />
+                            <Label htmlFor={`email-attachment-field-${field.id}`}>{getFieldDisplayName(field)}</Label>
+                          </div>
+                        ))}
                       </div>
                     </div>
                   </div>
@@ -2600,22 +3252,8 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
               <div className="space-y-4">
                 <div className="space-y-2">
                   <Label>Processing Type</Label>
-                  <Select
-                    value={step.action_type || "manual"}
-                    onValueChange={(value) => onUpdateStep({ ...step, action_type: value as "manual" | "automatic" })}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="manual">Manual</SelectItem>
-                      <SelectItem value="automatic">Automatic</SelectItem>
-                    </SelectContent>
-                  </Select>
                   <p className="text-xs text-muted-foreground">
-                    {step.action_type === "automatic"
-                      ? "The file will be processed automatically when this step is reached."
-                      : "A user must click the button to process the file."}
+                    The file is always processed automatically when this step is reached.
                   </p>
                 </div>
 
@@ -2795,13 +3433,89 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
                     <Switch
                       id="ocr-enabled"
                       checked={!!step.config.ocrEnabled}
-                      onCheckedChange={(checked) => handleConfigChange("ocrEnabled", checked)}
+                      onCheckedChange={(checked) => {
+                        handleConfigChange("ocrEnabled", checked);
+                        if (!checked) {
+                          handleConfigChange("extractMetadataAfterOcr", false);
+                          handleConfigChange("extractMetadataKeyIds", []);
+                        }
+                      }}
                     />
                     <Label htmlFor="ocr-enabled">OCR uploaded documents</Label>
                   </div>
                   <p className="text-xs text-muted-foreground">
                     Automatically extract text from documents passing through this node.
                   </p>
+
+                  {!!step.config.ocrEnabled && !geminiConfigured && (
+                    <p className="text-xs text-muted-foreground">{String(t("splitPdf.missingGemini"))}</p>
+                  )}
+
+                  {!!step.config.ocrEnabled && geminiConfigured && (
+                    <div className="space-y-2 pl-1 border-l-2 border-muted ml-1">
+                      <div className="flex items-center space-x-2">
+                        <Switch
+                          id="ocr-extract-metadata"
+                          checked={step.config.extractMetadataAfterOcr === true}
+                          onCheckedChange={(checked) => {
+                            handleConfigChange("extractMetadataAfterOcr", checked);
+                            if (!checked) {
+                              handleConfigChange("extractMetadataKeyIds", []);
+                            }
+                          }}
+                        />
+                        <Label htmlFor="ocr-extract-metadata" className="text-sm">
+                          {String(t("metadataDocuments.uploadExtractMetadataAi"))}
+                        </Label>
+                      </div>
+                      <p className="text-xs text-muted-foreground pl-6">
+                        {String(t("metadataDocuments.uploadExtractMetadataHint"))}
+                      </p>
+
+                      {step.config.extractMetadataAfterOcr === true && (
+                        <div className="pl-6 space-y-2">
+                          <Label className="text-xs font-medium text-muted-foreground">
+                            {String(t("splitPdf.metadataKeysLabel"))}
+                          </Label>
+                          {metadataKeys.length === 0 ? (
+                            <p className="text-xs text-muted-foreground">
+                              {String(t("splitPdf.metadataKeysEmpty"))}
+                            </p>
+                          ) : (
+                            <div className="space-y-1 rounded-lg border bg-muted/20 p-2 max-h-[min(200px,30vh)] overflow-y-auto">
+                              {metadataKeys.map((k) => {
+                                const label = (k.name && k.name.trim()) || String(t("splitPdf.metadataKeyUnnamed"));
+                                const predefined =
+                                  k.value_kind === "predefined_list" && Array.isArray(k.allowed_values)
+                                    ? (k.allowed_values as unknown[]).filter((x): x is string => typeof x === "string")
+                                    : [];
+                                return (
+                                  <label
+                                    key={k.id}
+                                    className="flex cursor-pointer items-start gap-2 rounded-md p-1.5 hover:bg-muted/40"
+                                  >
+                                    <Checkbox
+                                      checked={Array.isArray(step.config.extractMetadataKeyIds) && step.config.extractMetadataKeyIds.includes(k.id)}
+                                      onCheckedChange={(checked) => toggleExtractMetadataKey(k.id, checked === true)}
+                                      className="mt-0.5"
+                                    />
+                                    <span className="min-w-0 flex-1">
+                                      <span className="text-sm font-medium leading-tight block">{label}</span>
+                                      {predefined.length > 0 && (
+                                        <span className="text-xs text-muted-foreground block mt-0.5">
+                                          {String(t("splitPdf.metadataPredefinedOptions"))}: {predefined.join(", ")}
+                                        </span>
+                                      )}
+                                    </span>
+                                  </label>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             )}

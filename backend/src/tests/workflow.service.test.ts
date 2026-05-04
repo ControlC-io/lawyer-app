@@ -6,6 +6,7 @@ jest.mock('../lib/prisma', () => ({
   prisma: {
     workflowStep: { findUnique: jest.fn() },
     workflowConnection: { findMany: jest.fn() },
+    userCompany: { findFirst: jest.fn() },
     workflowExecutionStep: {
       findMany: jest.fn(),
       count: jest.fn(),
@@ -285,6 +286,46 @@ describe('workflow.service', () => {
       );
     });
 
+    it('should call triggerStepProcessing when target step is email action', async () => {
+      (prisma.workflowStep.findUnique as jest.Mock)
+        .mockResolvedValueOnce({ workflow_id: 'wf-1' })
+        .mockResolvedValueOnce({
+          step_type: 'action',
+          action_type: 'email',
+          decision_node_type: null,
+          assigned_to_user_id: null,
+          assigned_to_group_id: null,
+          config: {},
+        });
+      (prisma.workflowConnection.findMany as jest.Mock).mockResolvedValue([
+        { source_step_id: 'step-1', target_step_id: 'step-email-2' },
+      ]);
+      (prisma.workflowExecutionStep.findMany as jest.Mock).mockResolvedValue([
+        { step_id: 'step-1' },
+      ]);
+      (prisma.workflowExecution.findUnique as jest.Mock).mockResolvedValue({
+        created_by: 'user-1',
+        company_id: 'company-1',
+      });
+      (prisma.workflowExecutionStep.findFirst as jest.Mock).mockResolvedValue(null);
+      (prisma.workflowExecutionStep.create as jest.Mock).mockResolvedValue({
+        id: 'ex-step-email',
+      });
+      (fetch as unknown as jest.Mock).mockResolvedValue({ ok: true });
+
+      const result = await workflowService.advanceWorkflow(
+        'exec-1',
+        'step-1',
+        'company-1'
+      );
+      expect(result).toEqual(['step-email-2']);
+      await new Promise((r) => setImmediate(r));
+      expect(fetch).toHaveBeenCalledWith(
+        expect.stringContaining('/steps/ex-step-email/process'),
+        expect.any(Object)
+      );
+    });
+
     it('should call triggerFileProcessing when target step is file type', async () => {
       (prisma.workflowStep.findUnique as jest.Mock)
         .mockResolvedValueOnce({ workflow_id: 'wf-1' })
@@ -324,10 +365,86 @@ describe('workflow.service', () => {
         expect.any(Object)
       );
     });
+
+    it('should assign step from user field when valid company user', async () => {
+      (prisma.workflowStep.findUnique as jest.Mock)
+        .mockResolvedValueOnce({ workflow_id: 'wf-1' })
+        .mockResolvedValueOnce({
+          step_type: 'edit_form',
+          action_type: null,
+          decision_node_type: null,
+          assigned_to_user_id: 'fallback-user',
+          assigned_to_group_id: 'fallback-group',
+          config: { assignment_source: 'field', assignment_source_field_id: 'assignee_field' },
+        });
+      (prisma.workflowConnection.findMany as jest.Mock).mockResolvedValue([
+        { source_step_id: 'step-1', target_step_id: 'step-2' },
+      ]);
+      (prisma.workflowExecutionStep.findMany as jest.Mock).mockResolvedValue([{ step_id: 'step-1' }]);
+      (prisma.workflowExecution.findUnique as jest.Mock).mockResolvedValue({
+        created_by: 'creator-user',
+        company_id: 'company-1',
+      });
+      (prisma.workflowExecutionData.findMany as jest.Mock).mockResolvedValue([
+        { values: { assignee_field: { value: 'user-from-field' } } },
+      ]);
+      (prisma.userCompany.findFirst as jest.Mock).mockResolvedValue({ user_id: 'user-from-field' });
+      (prisma.workflowExecutionStep.findFirst as jest.Mock).mockResolvedValue(null);
+      (prisma.workflowExecutionStep.create as jest.Mock).mockResolvedValue({ id: 'ex-step-field' });
+
+      await workflowService.advanceWorkflow('exec-1', 'step-1', 'company-1');
+
+      expect(prisma.workflowExecutionStep.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            assigned_to_user_id: 'user-from-field',
+            assigned_to_group_id: null,
+          }),
+        })
+      );
+    });
+
+    it('should fallback to static assignee when user field is invalid', async () => {
+      (prisma.workflowStep.findUnique as jest.Mock)
+        .mockResolvedValueOnce({ workflow_id: 'wf-1' })
+        .mockResolvedValueOnce({
+          step_type: 'edit_form',
+          action_type: null,
+          decision_node_type: null,
+          assigned_to_user_id: 'fallback-user',
+          assigned_to_group_id: 'fallback-group',
+          config: { assignment_source: 'field', assignment_source_field_id: 'assignee_field' },
+        });
+      (prisma.workflowConnection.findMany as jest.Mock).mockResolvedValue([
+        { source_step_id: 'step-1', target_step_id: 'step-2' },
+      ]);
+      (prisma.workflowExecutionStep.findMany as jest.Mock).mockResolvedValue([{ step_id: 'step-1' }]);
+      (prisma.workflowExecution.findUnique as jest.Mock).mockResolvedValue({
+        created_by: 'creator-user',
+        company_id: 'company-1',
+      });
+      (prisma.workflowExecutionData.findMany as jest.Mock).mockResolvedValue([
+        { values: { assignee_field: { value: 'user-outside-company' } } },
+      ]);
+      (prisma.userCompany.findFirst as jest.Mock).mockResolvedValue(null);
+      (prisma.workflowExecutionStep.findFirst as jest.Mock).mockResolvedValue(null);
+      (prisma.workflowExecutionStep.create as jest.Mock).mockResolvedValue({ id: 'ex-step-static-fallback' });
+
+      await workflowService.advanceWorkflow('exec-1', 'step-1', 'company-1');
+
+      expect(prisma.workflowExecutionStep.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            assigned_to_user_id: 'fallback-user',
+            assigned_to_group_id: 'fallback-group',
+          }),
+        })
+      );
+    });
   });
 
   describe('handleStepActivation', () => {
-    it('should skip assignment dispatch when disabled and still schedule reminder', async () => {
+    it('should skip assignment dispatch and not schedule reminders when notifications disabled', async () => {
       const triggerSpy = jest
         .spyOn(workflowService, 'triggerAssignmentNotification')
         .mockResolvedValue(undefined);
@@ -349,14 +466,10 @@ describe('workflow.service', () => {
       );
 
       expect(triggerSpy).not.toHaveBeenCalled();
-      expect(prisma.stepReminderJob.createMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.arrayContaining([
-            expect.objectContaining({ reminder_key: 'schedule-0', mode: 'schedule' }),
-            expect.objectContaining({ reminder_key: 'schedule-1', mode: 'schedule' }),
-          ]),
-        })
-      );
+      expect(prisma.stepReminderJob.deleteMany).toHaveBeenCalledWith({
+        where: { execution_step_id: 'exec-step-1' },
+      });
+      expect(prisma.stepReminderJob.createMany).not.toHaveBeenCalled();
       triggerSpy.mockRestore();
     });
 

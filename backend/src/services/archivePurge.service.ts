@@ -10,6 +10,11 @@ function parsePositiveInteger(value: string | undefined, fallbackValue: number):
 
 let archivePurgeWorkerTimer: NodeJS.Timeout | null = null;
 
+export interface PurgeWorkflowsResult {
+  purged: string[];
+  blocked: string[];
+}
+
 export const archivePurgeService = {
   getCutoffDate(): Date {
     const retentionDays = parsePositiveInteger(process.env.ARCHIVE_RETENTION_DAYS, 30);
@@ -20,19 +25,14 @@ export const archivePurgeService = {
     return parsePositiveInteger(process.env.ARCHIVE_PURGE_BATCH_SIZE, 100);
   },
 
-  async purgeArchivedExecutions(cutoff: Date, batchSize: number): Promise<number> {
-    const executions = await prisma.workflowExecution.findMany({
-      where: {
-        is_archived: true,
-        archived_datetime: { lte: cutoff },
-      },
-      select: { id: true },
-      orderBy: { archived_datetime: 'asc' },
-      take: batchSize,
-    });
-
-    if (executions.length === 0) return 0;
-    const executionIds = executions.map((execution) => execution.id);
+  /**
+   * Permanently delete the supplied execution ids and their dependent rows.
+   * Caller is responsible for ensuring the executions are archived; no extra
+   * filtering is applied here so the call can be reused by both the periodic
+   * purge worker and the admin bulk-delete endpoint.
+   */
+  async purgeExecutionsByIds(executionIds: string[]): Promise<number> {
+    if (executionIds.length === 0) return 0;
 
     await prisma.$transaction(async (tx) => {
       await tx.workflowExecutionLog.deleteMany({ where: { execution_id: { in: executionIds } } });
@@ -45,19 +45,17 @@ export const archivePurgeService = {
     return executionIds.length;
   },
 
-  async purgeArchivedWorkflows(cutoff: Date, batchSize: number): Promise<number> {
-    const workflows = await prisma.workflow.findMany({
-      where: {
-        is_archived: true,
-        archived_datetime: { lte: cutoff },
-      },
-      select: { id: true },
-      orderBy: { archived_datetime: 'asc' },
-      take: batchSize,
-    });
-    if (workflows.length === 0) return 0;
+  /**
+   * Permanently delete the supplied workflow ids along with their archived
+   * executions. Workflows that still have at least one non-archived execution
+   * are returned in `blocked` and left untouched, mirroring the safety check
+   * applied by the scheduled purge worker.
+   */
+  async purgeWorkflowsByIds(workflowIds: string[]): Promise<PurgeWorkflowsResult> {
+    if (workflowIds.length === 0) {
+      return { purged: [], blocked: [] };
+    }
 
-    const workflowIds = workflows.map((workflow) => workflow.id);
     const workflowsWithActiveExecutions = await prisma.workflowExecution.findMany({
       where: { workflow_id: { in: workflowIds }, is_archived: false },
       select: { workflow_id: true },
@@ -66,13 +64,15 @@ export const archivePurgeService = {
     const blockedWorkflowIds = new Set(workflowsWithActiveExecutions.map((row) => row.workflow_id));
     const purgeWorkflowIds = workflowIds.filter((workflowId) => !blockedWorkflowIds.has(workflowId));
 
-    if (purgeWorkflowIds.length === 0) return 0;
+    if (purgeWorkflowIds.length === 0) {
+      return { purged: [], blocked: Array.from(blockedWorkflowIds) };
+    }
 
-    const archivedExecutionIds = await prisma.workflowExecution.findMany({
+    const archivedExecutions = await prisma.workflowExecution.findMany({
       where: { workflow_id: { in: purgeWorkflowIds }, is_archived: true },
       select: { id: true },
     });
-    const executionIds = archivedExecutionIds.map((row) => row.id);
+    const executionIds = archivedExecutions.map((row) => row.id);
 
     await prisma.$transaction(async (tx) => {
       if (executionIds.length > 0) {
@@ -91,7 +91,89 @@ export const archivePurgeService = {
       await tx.workflow.deleteMany({ where: { id: { in: purgeWorkflowIds } } });
     });
 
-    return purgeWorkflowIds.length;
+    return { purged: purgeWorkflowIds, blocked: Array.from(blockedWorkflowIds) };
+  },
+
+  /**
+   * Permanently delete the supplied agent configuration ids and their
+   * dependent permission/usage rows.
+   */
+  async purgeAgentConfigurationsByIds(configIds: string[]): Promise<number> {
+    if (configIds.length === 0) return 0;
+
+    await prisma.$transaction(async (tx) => {
+      await tx.agentPermission.deleteMany({ where: { agent_configuration_id: { in: configIds } } });
+      await tx.agentUsage.deleteMany({ where: { agent_id: { in: configIds } } });
+      await tx.agentConfiguration.deleteMany({ where: { id: { in: configIds } } });
+    });
+
+    return configIds.length;
+  },
+
+  /**
+   * Permanently delete the supplied file ids: removes the storage objects
+   * (best-effort) and the related `workflowFile` / `filesMetadataValue` rows.
+   */
+  async purgeFilesByIds(fileIds: string[]): Promise<number> {
+    if (fileIds.length === 0) return 0;
+
+    const files = await prisma.file.findMany({
+      where: { id: { in: fileIds } },
+      select: { id: true, storage_path: true },
+    });
+    if (files.length === 0) return 0;
+
+    const resolvedFileIds = files.map((file) => file.id);
+    const bucket = storageService.getDocumentsBucket();
+
+    for (const file of files) {
+      try {
+        await storageService.deleteFile(bucket, file.storage_path);
+      } catch {
+        // Object may already be missing; keep DB cleanup moving.
+      }
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.workflowFile.deleteMany({ where: { file_id: { in: resolvedFileIds } } });
+      await tx.filesMetadataValue.deleteMany({ where: { files_id: { in: resolvedFileIds } } });
+      await tx.file.deleteMany({ where: { id: { in: resolvedFileIds } } });
+    });
+
+    return resolvedFileIds.length;
+  },
+
+  async purgeArchivedExecutions(cutoff: Date, batchSize: number): Promise<number> {
+    const executions = await prisma.workflowExecution.findMany({
+      where: {
+        is_archived: true,
+        archived_datetime: { lte: cutoff },
+      },
+      select: { id: true },
+      orderBy: { archived_datetime: 'asc' },
+      take: batchSize,
+    });
+
+    if (executions.length === 0) return 0;
+    const executionIds = executions.map((execution) => execution.id);
+    return this.purgeExecutionsByIds(executionIds);
+  },
+
+  async purgeArchivedWorkflows(cutoff: Date, batchSize: number): Promise<number> {
+    const workflows = await prisma.workflow.findMany({
+      where: {
+        is_archived: true,
+        archived_datetime: { lte: cutoff },
+      },
+      select: { id: true },
+      orderBy: { archived_datetime: 'asc' },
+      take: batchSize,
+    });
+    if (workflows.length === 0) return 0;
+
+    const workflowIds = workflows.map((workflow) => workflow.id);
+    const { purged } = await this.purgeWorkflowsByIds(workflowIds);
+    return purged.length;
   },
 
   async purgeArchivedAgentConfigurations(cutoff: Date, batchSize: number): Promise<number> {
@@ -107,14 +189,7 @@ export const archivePurgeService = {
 
     if (configs.length === 0) return 0;
     const configIds = configs.map((config) => config.id);
-
-    await prisma.$transaction(async (tx) => {
-      await tx.agentPermission.deleteMany({ where: { agent_configuration_id: { in: configIds } } });
-      await tx.agentUsage.deleteMany({ where: { agent_id: { in: configIds } } });
-      await tx.agentConfiguration.deleteMany({ where: { id: { in: configIds } } });
-    });
-
-    return configIds.length;
+    return this.purgeAgentConfigurationsByIds(configIds);
   },
 
   async purgeArchivedFiles(cutoff: Date, batchSize: number): Promise<number> {
@@ -123,30 +198,14 @@ export const archivePurgeService = {
         is_archived: true,
         archived_datetime: { lte: cutoff },
       },
-      select: { id: true, storage_path: true },
+      select: { id: true },
       orderBy: { archived_datetime: 'asc' },
       take: batchSize,
     });
     if (files.length === 0) return 0;
 
     const fileIds = files.map((file) => file.id);
-    const bucket = storageService.getDocumentsBucket();
-
-    for (const file of files) {
-      try {
-        await storageService.deleteFile(bucket, file.storage_path);
-      } catch {
-        // Object may already be missing; keep DB cleanup moving.
-      }
-    }
-
-    await prisma.$transaction(async (tx) => {
-      await tx.workflowFile.deleteMany({ where: { file_id: { in: fileIds } } });
-      await tx.filesMetadataValue.deleteMany({ where: { files_id: { in: fileIds } } });
-      await tx.file.deleteMany({ where: { id: { in: fileIds } } });
-    });
-
-    return fileIds.length;
+    return this.purgeFilesByIds(fileIds);
   },
 
   async processArchivePurgeOnce(): Promise<{ executions: number; workflows: number; agentConfigurations: number; files: number }> {

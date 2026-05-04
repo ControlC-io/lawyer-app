@@ -1,6 +1,7 @@
 import { Response } from 'express';
 import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
+import { appendFileHistoryEvent, FILE_HISTORY_EVENT_TYPE, normalizeFileHistoryActorId } from '../lib/fileHistory';
 import { processDocumentOcr } from '../services/ocr.service';
 
 export const ocrController = {
@@ -23,6 +24,16 @@ export const ocrController = {
         if (!membership && !req.user?.super_admin) {
           return res.status(403).json({ error: 'Access denied' });
         }
+      }
+
+      if (file.company_id) {
+        await appendFileHistoryEvent({
+          companyId: file.company_id,
+          fileId,
+          eventType: FILE_HISTORY_EVENT_TYPE.OCR_REQUESTED,
+          actorId: normalizeFileHistoryActorId(userId),
+          details: { source: 'manual_trigger' },
+        });
       }
 
       const updated = await prisma.file.update({

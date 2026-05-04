@@ -10,11 +10,13 @@ import { HtmlField } from "./fields/HtmlField";
 import { TimeField } from "./fields/TimeField";
 import { DateTimeField } from "./fields/DateTimeField";
 import { SignatureField } from "./fields/SignatureField";
+import { UserField } from "./fields/UserField";
 
 interface FieldRendererProps {
   field: any;
   value: any;
   onChange: (value: any) => void;
+  companyId?: string;
   disabled?: boolean;
   required?: boolean;
   labelPosition?: "top" | "side" | "hidden"; // Position of the label: "top" (above), "side" (beside), or "hidden" (no label)
@@ -47,7 +49,7 @@ interface FieldRendererProps {
 }
 
 export const FieldRenderer = (props: FieldRendererProps) => {
-  const { field, value, onChange, disabled, required, labelPosition = "top", primaryColor, ...otherProps } = props;
+  const { field, value, onChange, companyId, disabled, required, labelPosition = "top", primaryColor, ...otherProps } = props;
   const fieldType = field.field_type || field.type || "text";
 
   switch (fieldType) {
@@ -116,6 +118,18 @@ export const FieldRenderer = (props: FieldRendererProps) => {
         onView={otherProps.onViewFile}
         isUploading={otherProps.isUploading}
         signedUrl={otherProps.signedUrl}
+        primaryColor={primaryColor}
+      />;
+
+    case "user":
+      return <UserField
+        field={field}
+        value={value}
+        onChange={onChange}
+        companyId={companyId}
+        disabled={disabled}
+        required={required}
+        labelPosition={labelPosition}
         primaryColor={primaryColor}
       />;
 

@@ -1,4 +1,4 @@
-import { Trash2, Pencil, Copy, Hand, Zap, Bot, User } from "lucide-react";
+import { Trash2, Pencil, Copy, Hand, Zap, Bot, User, Mail } from "lucide-react";
 import { WorkflowStep } from "@/pages/WorkflowEditor";
 import { Button } from "@/components/ui/button";
 import { getStepNodeStyles } from "@/lib/stepTypeColors";
@@ -67,7 +67,7 @@ export function WorkflowNode({
   const renderConfigIcons = () => {
     // For action nodes: show action_type icon
     if (step.step_type === "action" || step.step_type === "file") {
-      const actionType = step.action_type || "manual";
+      const actionType = step.step_type === "file" ? "automatic" : (step.action_type || "manual");
       if (actionType === "manual") {
         return (
           <div title="Manual action">
@@ -84,6 +84,12 @@ export function WorkflowNode({
         return (
           <div title="Agent action">
             <Bot className="h-3.5 w-3.5" />
+          </div>
+        );
+      } else if (actionType === "email") {
+        return (
+          <div title="Email action">
+            <Mail className="h-3.5 w-3.5" />
           </div>
         );
       }

@@ -29,6 +29,9 @@ interface Session {
 }
 
 interface CompanyBranding {
+  /** Set with branding fetch so consumers can avoid showing stale data after company switch */
+  companyId?: string;
+  name?: string | null;
   internal_logo_url?: string | null;
   internal_primary_color?: string | null;
 }
@@ -185,7 +188,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const fetchBranding = async () => {
       try {
-        const company = await api.get<CompanyBranding>(`/api/companies/${selectedCompanyId}`);
+        const company = await api.get<
+          Pick<CompanyBranding, "internal_logo_url" | "internal_primary_color"> & { name?: string }
+        >(`/api/companies/${selectedCompanyId}`);
         let resolvedLogoUrl: string | null = company.internal_logo_url ?? null;
         const rawLogoUrl = company.internal_logo_url?.trim() ?? "";
         if (/^\/api\/companies\/[a-zA-Z0-9-]+\/internal-logo$/.test(rawLogoUrl)) {
@@ -198,6 +203,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           revokeBrandingLogoObjectUrl();
         }
         setCompanyBranding({
+          companyId: selectedCompanyId,
+          name: company.name ?? null,
           internal_logo_url: resolvedLogoUrl,
           internal_primary_color: company.internal_primary_color ?? null,
         });

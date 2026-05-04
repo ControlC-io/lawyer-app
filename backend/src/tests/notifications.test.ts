@@ -10,6 +10,7 @@ jest.mock('../lib/prisma', () => ({
     workflowExecutionStep: { findUnique: jest.fn() },
     profileGroupMember: { findMany: jest.fn() },
     profile: { findMany: jest.fn() },
+    workflowExecutionData: { findMany: jest.fn() },
     notification: { createMany: jest.fn(), deleteMany: jest.fn() },
   },
 }));
@@ -27,6 +28,7 @@ describe('Notifications Endpoints', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     (prisma.user.findUnique as jest.Mock).mockResolvedValue(mockUser);
+    (prisma.workflowExecutionData.findMany as jest.Mock).mockResolvedValue([]);
   });
 
   describe('POST /api/notifications/assignment', () => {
@@ -122,7 +124,10 @@ describe('Notifications Endpoints', () => {
         'assignee@example.com',
         'My Workflow',
         'Step One',
-        'exec-1'
+        'exec-1',
+        expect.objectContaining({
+          subject: 'New task assigned: Step One',
+        })
       );
     });
 

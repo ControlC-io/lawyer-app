@@ -9,6 +9,83 @@ type AssignmentDispatchResult = {
   recipients_emailed: number;
 };
 
+export type NotificationTemplateContext = {
+  executionLink: string;
+  fieldValuesByName: Map<string, { value: string; ambiguous: boolean }>;
+};
+
+function stringifyTemplateValue(value: unknown): string {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') {
+    return String(value);
+  }
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+export function buildDisplayNameByFieldId(rawDataStructure: unknown): Record<string, string> {
+  const fields = Array.isArray(rawDataStructure) ? rawDataStructure : [];
+  const displayNameByFieldId: Record<string, string> = {};
+
+  for (const field of fields) {
+    if (!field || typeof field !== 'object') continue;
+    const id = typeof (field as any).id === 'string' ? (field as any).id : '';
+    const name = typeof (field as any).name === 'string' ? (field as any).name.trim() : '';
+    if (!id || !name) continue;
+    displayNameByFieldId[id] = name;
+  }
+
+  for (const field of fields) {
+    if (!field || typeof field !== 'object') continue;
+    const id = typeof (field as any).id === 'string' ? (field as any).id : '';
+    const name = typeof (field as any).name === 'string' ? (field as any).name.trim() : '';
+    const parentId =
+      typeof (field as any).parent_item_id === 'string' ? (field as any).parent_item_id : '';
+    if (!id || !name || !parentId) continue;
+    const parentName = displayNameByFieldId[parentId];
+    if (!parentName) continue;
+    displayNameByFieldId[id] = `${parentName}.${name}`;
+  }
+
+  return displayNameByFieldId;
+}
+
+export function buildFieldValuesByName(
+  displayNameByFieldId: Record<string, string>,
+  executionDataSnapshot: Record<string, unknown>
+): Map<string, { value: string; ambiguous: boolean }> {
+  const fieldValuesByName = new Map<string, { value: string; ambiguous: boolean }>();
+  for (const [fieldId, displayName] of Object.entries(displayNameByFieldId)) {
+    const tokenKey = displayName.trim().toLowerCase();
+    if (!tokenKey) continue;
+    const existing = fieldValuesByName.get(tokenKey);
+    const value = stringifyTemplateValue(executionDataSnapshot[fieldId]);
+    if (!existing) {
+      fieldValuesByName.set(tokenKey, { value, ambiguous: false });
+      continue;
+    }
+    fieldValuesByName.set(tokenKey, { value: existing.value, ambiguous: true });
+  }
+  return fieldValuesByName;
+}
+
+export function renderNotificationTemplate(template: string, context: NotificationTemplateContext): string {
+  return template.replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (_match, rawToken: string) => {
+    const token = rawToken.trim();
+    if (!token) return '';
+    if (token.toLowerCase() === 'execution_link') {
+      return context.executionLink;
+    }
+    const entry = context.fieldValuesByName.get(token.toLowerCase());
+    if (!entry || entry.ambiguous) return '';
+    return entry.value;
+  });
+}
+
 export const notificationService = {
   /**
    * Create a notification for a user
@@ -161,6 +238,7 @@ export const notificationService = {
               select: {
                 id: true,
                 name: true,
+                data_structure: true,
               },
             },
           },
@@ -169,6 +247,7 @@ export const notificationService = {
           select: {
             id: true,
             name: true,
+            config: true,
           },
         },
       },
@@ -188,6 +267,59 @@ export const notificationService = {
     const stepName = stepInstance.step.name || 'Next Step';
     const executionId = stepInstance.execution_id;
     const companyId = stepInstance.company_id!;
+    const executionLink = `${process.env.APP_URL || 'http://localhost'}/workflows/executions/${executionId}`;
+
+    const executionDataRows = await prisma.workflowExecutionData.findMany({
+      where: { execution_id: executionId },
+      select: { values: true },
+    });
+    const executionDataSnapshot: Record<string, unknown> = {};
+    executionDataRows.forEach((row: any) => {
+      const values = row?.values && typeof row.values === 'object' ? row.values : {};
+      Object.entries(values as Record<string, any>).forEach(([fieldId, fieldData]) => {
+        executionDataSnapshot[fieldId] = fieldData?.value ?? fieldData;
+      });
+    });
+
+    const displayNameByFieldId = buildDisplayNameByFieldId(stepInstance.execution.workflow.data_structure);
+    const templateContext: NotificationTemplateContext = {
+      executionLink,
+      fieldValuesByName: buildFieldValuesByName(displayNameByFieldId, executionDataSnapshot),
+    };
+    const notificationsConfig =
+      stepInstance.step?.config && typeof stepInstance.step.config === 'object'
+        ? (stepInstance.step.config as Record<string, any>).notifications
+        : undefined;
+    const assignmentConfig =
+      notificationsConfig && typeof notificationsConfig === 'object' && notificationsConfig.assignment && typeof notificationsConfig.assignment === 'object'
+        ? notificationsConfig.assignment
+        : {};
+    const subjectTemplate =
+      typeof assignmentConfig.subject_template === 'string' ? assignmentConfig.subject_template.trim() : '';
+    const contentTemplate =
+      typeof assignmentConfig.content_template === 'string' ? assignmentConfig.content_template.trim() : '';
+    const useCustomNotification =
+      typeof assignmentConfig.use_custom_notification === 'boolean'
+        ? assignmentConfig.use_custom_notification
+        : subjectTemplate.length > 0 || contentTemplate.length > 0;
+
+    const defaultSubject = `New task assigned: ${stepName}`;
+    const defaultContent = `You have been assigned to complete a step in ${workflowName}.\nStep: ${stepName}`;
+    const defaultInAppMessage = `A new step "${stepName}" has been assigned to you in the workflow "${workflowName}".`;
+
+    let renderedSubject: string;
+    let renderedContent: string;
+    if (!useCustomNotification) {
+      renderedSubject = defaultSubject;
+      renderedContent = defaultContent;
+    } else {
+      renderedSubject = subjectTemplate
+        ? renderNotificationTemplate(subjectTemplate, templateContext)
+        : defaultSubject;
+      renderedContent = contentTemplate
+        ? renderNotificationTemplate(contentTemplate, templateContext)
+        : defaultContent;
+    }
 
     let recipientIds: string[] = [];
     if (stepInstance.assigned_to_user_id) {
@@ -228,8 +360,8 @@ export const notificationService = {
     const internalNotifications = recipientIds.map((recipientId) => ({
       user_id: recipientId,
       company_id: companyId,
-      title: 'New Task Assigned',
-      message: `A new step "${stepName}" has been assigned to you in the workflow "${workflowName}".`,
+      title: renderedSubject || 'New Task Assigned',
+      message: renderedContent || defaultInAppMessage,
       type: 'assignment',
       data: {
         execution_id: executionId,
@@ -252,7 +384,11 @@ export const notificationService = {
           recipient.email!,
           workflowName,
           stepName,
-          executionId
+          executionId,
+          {
+            subject: renderedSubject,
+            content: renderedContent,
+          }
         );
         recipientsEmailed += 1;
       } catch (error) {

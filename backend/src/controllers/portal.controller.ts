@@ -10,6 +10,7 @@ import {
   normalizePortalLanguages,
   resolveLocalizedText,
 } from '../services/portalTranslation.service';
+import { ensureCompanyUser, getWorkflowFieldById, isUserField, normalizeUserFieldValue } from '../lib/workflowUserField';
 
 // ---------------------------------------------------------------------------
 // Field validation (reused from external.controller.ts)
@@ -740,6 +741,22 @@ export const portalController = {
             }
           }
         }
+      }
+
+      for (const [fieldId, rawValue] of Object.entries(relocatedData)) {
+        const fieldDefinition = getWorkflowFieldById(fieldsList, fieldId);
+        if (!isUserField(fieldDefinition)) continue;
+        const normalizedUserId = normalizeUserFieldValue(rawValue);
+        if (normalizedUserId) {
+          const isAllowedUser = await ensureCompanyUser(company.id, normalizedUserId);
+          if (!isAllowedUser) {
+            return res.status(400).json({
+              error: 'Invalid field value',
+              details: `Field "${fieldId}" must reference a user in this company`,
+            });
+          }
+        }
+        relocatedData[fieldId] = normalizedUserId;
       }
 
       // Find the execution step for the first step

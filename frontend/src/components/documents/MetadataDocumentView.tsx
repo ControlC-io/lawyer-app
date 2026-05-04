@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useCallback, useRef, useMemo, Children } from "react";
+import React, { useState, useEffect, useLayoutEffect, useCallback, useRef, useMemo, Children } from "react";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   DropdownMenu,
@@ -26,6 +27,12 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import {
   File as FileIcon,
   Upload,
@@ -56,6 +63,7 @@ import {
   ChevronUp,
   Scissors,
   MoreHorizontal,
+  History,
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import ReactMarkdown from "react-markdown";
@@ -65,10 +73,25 @@ import { useToast } from "@/hooks/use-toast";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useNavigate } from "react-router-dom";
 import { MetadataValueControl } from "@/components/documents/MetadataValueControl";
+import { MetadataFreeTextFilterCombobox } from "@/components/documents/MetadataFreeTextFilterCombobox";
 import { Progress } from "@/components/ui/progress";
 import { useDocumentImportJobs } from "@/contexts/DocumentImportJobsContext";
+import { useAuth } from "@/contexts/AuthContext";
+import { getTagColors, type TagColorSet } from "@/lib/tagColors";
 
 const MAX_UPLOAD_FILES = 25;
+const METADATA_BADGE_GAP_PX = 4;
+
+function lightenHexColor(hexColor: string, amount: number): string {
+  const hex = hexColor.replace("#", "");
+  if (hex.length !== 6) return hexColor;
+  const toHex = (value: number) => value.toString(16).padStart(2, "0");
+  const mixWithWhite = (channel: number) => Math.min(255, Math.round(channel + (255 - channel) * amount));
+  const r = parseInt(hex.slice(0, 2), 16);
+  const g = parseInt(hex.slice(2, 4), 16);
+  const b = parseInt(hex.slice(4, 6), 16);
+  return `#${toHex(mixWithWhite(r))}${toHex(mixWithWhite(g))}${toHex(mixWithWhite(b))}`;
+}
 
 interface FileType {
   id: string;
@@ -87,11 +110,29 @@ interface FileType {
   ocr_error?: string | null;
   ocr_processed_at?: string | null;
   ocrSnippet?: string;
-  ragie_document_id?: string | null;
-  ragie_partition?: string | null;
-  ragie_uploaded_at?: string | null;
-  ragie_status?: string | null;
-  ragie_metadata?: Record<string, unknown> | null;
+}
+
+function getFileMetadataDisplayEntries(file: FileType): Array<{ key: string; value: string }> {
+  const rows = file.metadata_values || [];
+  if (rows.length === 0) return [];
+  return rows
+    .map((mv) => ({
+      key: (mv.metadata?.name || "").trim(),
+      value: mv.value?.trim() || "",
+    }))
+    .filter((e) => e.value);
+}
+
+function splitFileName(fileName: string): { baseName: string; extension: string } {
+  const trimmed = fileName.trim();
+  const dot = trimmed.lastIndexOf(".");
+  if (dot <= 0 || dot === trimmed.length - 1) {
+    return { baseName: trimmed, extension: "" };
+  }
+  return {
+    baseName: trimmed.slice(0, dot),
+    extension: trimmed.slice(dot),
+  };
 }
 
 interface OcrViewerData {
@@ -102,12 +143,25 @@ interface OcrViewerData {
   processedAt?: string;
 }
 
+interface FileHistoryApiEvent {
+  id: string;
+  eventType: string;
+  createdAt: string;
+  actor: { id: string; email: string; fullName: string | null } | null;
+  details: unknown;
+}
+
 interface MetadataKey {
   id: string;
   name: string;
   value_kind: "free_text" | "predefined_list";
   allowed_values?: unknown;
 }
+
+type FilterRow = {
+  key_id: string;
+  values: string[];
+};
 
 interface TreeNode {
   id: string;
@@ -148,6 +202,202 @@ function OcrStatusBadge({ file }: { file: FileType }) {
     default:
       return null;
   }
+}
+
+/** Key/value line for metadata tooltips: bold label, readable value. */
+function FileMetadataTooltipRow({ metadataKey, value }: { metadataKey: string; value: string }) {
+  const label = metadataKey.trim();
+  if (!label) {
+    return <p className="m-0 text-sm leading-snug break-words">{value}</p>;
+  }
+  return (
+    <p className="m-0 text-sm leading-snug break-words">
+      <span className="font-semibold text-foreground">{label}</span>
+      <span className="text-muted-foreground font-normal" aria-hidden>
+        {": "}
+      </span>
+      <span className="font-normal text-foreground">{value}</span>
+    </p>
+  );
+}
+
+function FileRowMetadataBadges({
+  fileId,
+  entries,
+  metadataTagColors,
+}: {
+  fileId: string;
+  entries: Array<{ key: string; value: string }>;
+  metadataTagColors: TagColorSet | null;
+}) {
+  const entriesRef = useRef(entries);
+  entriesRef.current = entries;
+
+  const containerRef = useRef<HTMLDivElement>(null);
+  const measureRowRef = useRef<HTMLDivElement>(null);
+  const plusProbeTextRef = useRef<HTMLSpanElement>(null);
+  const plusProbeWrapRef = useRef<HTMLDivElement>(null);
+
+  const [fitCount, setFitCount] = useState(entries.length);
+
+  const badgeOutlineClass = metadataTagColors
+    ? "min-w-0 max-w-[180px] shrink truncate text-[10px] font-normal px-1.5 py-0 h-5 border"
+    : "min-w-0 max-w-[180px] shrink truncate text-[10px] font-normal px-1.5 py-0 h-5 border bg-primary/10 text-primary border-primary/20";
+
+  const badgeStyle = metadataTagColors
+    ? {
+        backgroundColor: lightenHexColor(metadataTagColors.bg, 0.2),
+        color: metadataTagColors.text,
+        borderColor: metadataTagColors.dot,
+      }
+    : undefined;
+
+  const entriesFingerprint = entries.map((e) => `${e.key}\u0000${e.value}`).join("\u0001");
+
+  const recalc = useCallback(() => {
+    const currentEntries = entriesRef.current;
+    const n = currentEntries.length;
+    if (n === 0) {
+      setFitCount(0);
+      return;
+    }
+
+    const measureRow = measureRowRef.current;
+    const container = containerRef.current;
+    if (!measureRow || !container) {
+      setFitCount(n);
+      return;
+    }
+
+    const badgeNodes = measureRow.querySelectorAll<HTMLElement>("[data-metadata-measure='badge']");
+    if (badgeNodes.length !== n) {
+      setFitCount(n);
+      return;
+    }
+
+    const widths = Array.from(badgeNodes).map((el) => el.getBoundingClientRect().width);
+
+    const plusWidthByHidden = new Map<number, number>();
+    const plusTextEl = plusProbeTextRef.current;
+    const plusWrapEl = plusProbeWrapRef.current;
+    if (plusTextEl && plusWrapEl) {
+      for (let h = 1; h <= n; h++) {
+        plusTextEl.textContent = `+${h}`;
+        plusWidthByHidden.set(h, plusWrapEl.getBoundingClientRect().width);
+      }
+      plusTextEl.textContent = "+1";
+    } else {
+      for (let h = 1; h <= n; h++) {
+        plusWidthByHidden.set(h, 36);
+      }
+    }
+
+    const W = container.getBoundingClientRect().width;
+    if (!W) {
+      setFitCount(n);
+      return;
+    }
+
+    const EPS = 1;
+    let best = 0;
+    for (let k = 0; k <= n; k++) {
+      let total = 0;
+      if (k > 0) {
+        for (let i = 0; i < k; i++) {
+          total += widths[i];
+          if (i < k - 1) total += METADATA_BADGE_GAP_PX;
+        }
+      }
+      if (k < n) {
+        const hidden = n - k;
+        total += (k > 0 ? METADATA_BADGE_GAP_PX : 0) + (plusWidthByHidden.get(hidden) ?? 36);
+      }
+      if (total <= W + EPS) best = k;
+    }
+    setFitCount(best);
+  }, []);
+
+  useLayoutEffect(() => {
+    recalc();
+  }, [recalc, entriesFingerprint]);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => recalc());
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [recalc]);
+
+  const n = entries.length;
+  const safeFit = Math.min(fitCount, n);
+  const visibleEntries = entries.slice(0, safeFit);
+  const hiddenCount = n - safeFit;
+
+  return (
+    <>
+      <div
+        ref={measureRowRef}
+        className="pointer-events-none fixed left-[-10000px] top-0 z-[-1] flex flex-nowrap items-center gap-1 opacity-0"
+        aria-hidden
+      >
+        {entries.map((e, i) => (
+          <Badge
+            key={`measure-${fileId}-${i}`}
+            data-metadata-measure="badge"
+            variant="outline"
+            className={badgeOutlineClass}
+            style={badgeStyle}
+          >
+            <span className="min-w-0 max-w-full truncate">{e.value}</span>
+          </Badge>
+        ))}
+        <div ref={plusProbeWrapRef} className="inline-flex shrink-0">
+          <Badge variant="outline" className="text-[10px] font-normal px-1.5 py-0 h-5 border">
+            <span ref={plusProbeTextRef}>+1</span>
+          </Badge>
+        </div>
+      </div>
+      <div ref={containerRef} className="min-w-0 w-full max-w-full" onClick={(e) => e.stopPropagation()}>
+        <div className="flex min-w-0 flex-nowrap items-center gap-1 overflow-hidden">
+          {visibleEntries.map(({ key, value }, index) => (
+            <Tooltip key={`${fileId}-metadata-${index}`}>
+              <TooltipTrigger asChild>
+                <Badge
+                  variant="outline"
+                  className={badgeOutlineClass}
+                  style={badgeStyle}
+                >
+                  <span className="min-w-0 max-w-full truncate">{value}</span>
+                </Badge>
+              </TooltipTrigger>
+              <TooltipContent side="top" className="max-w-[420px] break-words">
+                <FileMetadataTooltipRow metadataKey={key} value={value} />
+              </TooltipContent>
+            </Tooltip>
+          ))}
+          {hiddenCount > 0 && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Badge variant="outline" className="shrink-0 text-[10px] font-normal px-1.5 py-0 h-5 border">
+                  +{hiddenCount}
+                </Badge>
+              </TooltipTrigger>
+              <TooltipContent side="top" align="start" className="w-[420px] max-w-[90vw]">
+                <div className="max-h-64 space-y-2 overflow-y-auto pr-1">
+                  {entries.map(({ key, value }, index) => (
+                    <div key={`${fileId}-all-metadata-${index}`}>
+                      <FileMetadataTooltipRow metadataKey={key} value={value} />
+                    </div>
+                  ))}
+                </div>
+              </TooltipContent>
+            </Tooltip>
+          )}
+        </div>
+      </div>
+    </>
+  );
 }
 
 function escapeRegExp(s: string) {
@@ -222,28 +472,40 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
   const [isMetadataDialogOpen, setIsMetadataDialogOpen] = useState(false);
   const [editingFile, setEditingFile] = useState<FileType | null>(null);
   const [metadataEntries, setMetadataEntries] = useState<Array<{ key: string; value: string }>>([]);
+  const [renameDialogOpen, setRenameDialogOpen] = useState(false);
+  const [renameTargetFile, setRenameTargetFile] = useState<FileType | null>(null);
+  const [renameBaseName, setRenameBaseName] = useState("");
+  const [renameSubmitting, setRenameSubmitting] = useState(false);
   const [isBulkMetadataOpen, setIsBulkMetadataOpen] = useState(false);
   const [bulkEntries, setBulkEntries] = useState<Array<{ key: string; value: string }>>([]);
-  const [bulkMode, setBulkMode] = useState<"merge" | "replace">("merge");
+  const [isBulkExtractDialogOpen, setIsBulkExtractDialogOpen] = useState(false);
+  const [bulkExtractSubmitting, setBulkExtractSubmitting] = useState(false);
+  const [bulkExtractSelectedKeyIds, setBulkExtractSelectedKeyIds] = useState<string[]>([]);
+  const [bulkExtractRenameInstructions, setBulkExtractRenameInstructions] = useState("");
   const [previewFile, setPreviewFile] = useState<FileType | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [previewMode, setPreviewMode] = useState<"document" | "ocr" | "split">("document");
+  const [previewMode, setPreviewMode] = useState<"document" | "ocr" | "split" | "history">("document");
   const [previewOcrData, setPreviewOcrData] = useState<OcrViewerData | null>(null);
   const [previewOcrFileId, setPreviewOcrFileId] = useState<string | null>(null);
   const [previewOcrLoading, setPreviewOcrLoading] = useState(false);
   const [previewOcrError, setPreviewOcrError] = useState<string | null>(null);
-  const [filterRows, setFilterRows] = useState<Array<{ key_id: string; value: string }>>([]);
+  const [previewHistoryEvents, setPreviewHistoryEvents] = useState<FileHistoryApiEvent[]>([]);
+  const [previewHistoryLoading, setPreviewHistoryLoading] = useState(false);
+  const [previewHistoryError, setPreviewHistoryError] = useState<string | null>(null);
+  const [filterRows, setFilterRows] = useState<FilterRow[]>([]);
   const [treeSearch, setTreeSearch] = useState("");
   // OCR state
   const [ocrPolling, setOcrPolling] = useState<Record<string, NodeJS.Timeout>>({});
   const [ocrAfterUpload, setOcrAfterUpload] = useState(false);
   const [extractMetadataAfterOcr, setExtractMetadataAfterOcr] = useState(false);
   const [selectedExtractMetadataKeyIds, setSelectedExtractMetadataKeyIds] = useState<string[]>([]);
+  const [extractRenameInstructionsAfterUpload, setExtractRenameInstructionsAfterUpload] = useState("");
   // Per-file extract metadata action
   const [extractDialogOpen, setExtractDialogOpen] = useState(false);
   const [extractTargetFile, setExtractTargetFile] = useState<FileType | null>(null);
   const [extractSubmitting, setExtractSubmitting] = useState(false);
   const [extractSelectedKeyIds, setExtractSelectedKeyIds] = useState<string[]>([]);
+  const [extractRenameInstructions, setExtractRenameInstructions] = useState("");
   const [ocrEnabled, setOcrEnabled] = useState(false);
   const [geminiConfigured, setGeminiConfigured] = useState(false);
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
@@ -255,13 +517,32 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [searchActive, setSearchActive] = useState(false);
   const { toast } = useToast();
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
+  const { companyBranding } = useAuth();
   const navigate = useNavigate();
   const { startImportJob, setJobBackground, jobs, dismissJob } = useDocumentImportJobs();
   const activeUploadJob = uploadDialogJobId ? jobs.find((j) => j.id === uploadDialogJobId) : undefined;
   const isImportBusy = !!(activeUploadJob && activeUploadJob.phase !== "error");
+  const metadataTagColors = companyBranding?.internal_primary_color
+    ? getTagColors(companyBranding.internal_primary_color)
+    : null;
 
   const canWriteFiles = canManage || hasWriteAccess;
+  const selectedOcrEligibleFileIds = useMemo(() => {
+    const eligibleIds: string[] = [];
+    for (const file of files) {
+      if (selectedFileIds.has(file.id) && !file.ocr_status) {
+        eligibleIds.push(file.id);
+      }
+    }
+    return eligibleIds;
+  }, [files, selectedFileIds]);
+  const selectedOcrEligibleCount = selectedOcrEligibleFileIds.length;
+  const selectedAiExtractEligibleFiles = useMemo(
+    () => files.filter((file) => selectedFileIds.has(file.id) && file.ocr_status === "completed"),
+    [files, selectedFileIds],
+  );
+  const selectedAiExtractEligibleCount = selectedAiExtractEligibleFiles.length;
 
   // OCR viewer search: count matches and build regex
   const ocrSearchRegex = useMemo(() => {
@@ -412,13 +693,23 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
   }, [previewFile]);
 
   const applyFilterRows = useCallback(
-    (rows: Array<{ key_id: string; value: string }>) => {
-      const cleaned = rows.filter((r) => r.key_id || r.value.trim());
-      const newlyComplete = cleaned
-        .filter((r) => r.key_id && r.value.trim())
-        .map((r) => ({ key_id: r.key_id, value: r.value.trim() }));
-      const draftRows = cleaned.filter((r) => !r.key_id || !r.value.trim());
-      setFilterRows(draftRows.length > 0 ? draftRows : []);
+    (rows: FilterRow[]) => {
+      const cleaned = rows
+        .map((row) => ({
+          key_id: row.key_id,
+          values: Array.from(
+            new Set(
+              row.values
+                .map((value) => value.trim())
+                .filter(Boolean),
+            ),
+          ),
+        }))
+        .filter((row) => row.key_id || row.values.length > 0);
+      const newlyComplete = cleaned.flatMap((row) =>
+        row.key_id ? row.values.map((value) => ({ key_id: row.key_id, value })) : [],
+      );
+      setFilterRows(cleaned.length > 0 ? cleaned : []);
       setFilters((prev) => {
         const keyIdsReplaced = new Set(newlyComplete.map((r) => r.key_id));
         const prevKept = prev.filter(
@@ -624,13 +915,19 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
 
     setExtractSubmitting(true);
     try {
-      await api.post(`/api/companies/${companyId}/documents/extract-metadata-from-ocr`, {
+      const response = await api.post<{ values: Record<string, string>; renamedTo?: string }>(
+        `/api/companies/${companyId}/documents/extract-metadata-from-ocr`,
+        {
         fileId: extractTargetFile.id,
         metadataKeyIds: extractSelectedKeyIds,
-      });
+        renameInstructions: extractRenameInstructions.trim() || undefined,
+        },
+      );
       toast({
         title: String(t("metadataDocuments.extractMetadataSuccessTitle")),
-        description: String(t("metadataDocuments.extractMetadataSuccessDescription")),
+        description: response.renamedTo
+          ? String(t("metadataDocuments.extractMetadataSuccessDescriptionWithRename", { name: response.renamedTo }))
+          : String(t("metadataDocuments.extractMetadataSuccessDescription")),
       });
       setExtractDialogOpen(false);
       setExtractTargetFile(null);
@@ -670,6 +967,9 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
       formData.append("ocr", "true");
       if (extractMetadataAfterOcr && geminiConfigured && selectedExtractMetadataKeyIds.length > 0) {
         formData.append("extractMetadataKeyIds", JSON.stringify(selectedExtractMetadataKeyIds));
+        if (extractRenameInstructionsAfterUpload.trim()) {
+          formData.append("extractMetadataRenameInstructions", extractRenameInstructionsAfterUpload.trim());
+        }
       }
     }
     const wantsExtract =
@@ -686,6 +986,7 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
         setOcrAfterUpload(false);
         setExtractMetadataAfterOcr(false);
         setSelectedExtractMetadataKeyIds([]);
+        setExtractRenameInstructionsAfterUpload("");
         setUploadDialogJobId(null);
         setIsUploadOpen(false);
         await fetchFiles();
@@ -720,6 +1021,55 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
     }
   };
 
+  const openRenameDialog = (file: FileType) => {
+    const { baseName } = splitFileName(file.name);
+    setRenameTargetFile(file);
+    setRenameBaseName(baseName);
+    setRenameDialogOpen(true);
+  };
+
+  const handleRenameFile = async () => {
+    if (!renameTargetFile) return;
+    const nextBase = renameBaseName.trim();
+    if (!nextBase) {
+      toast({
+        title: String(t("splitPdf.error")),
+        description: String(t("metadataDocuments.renameValidationRequired")),
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setRenameSubmitting(true);
+    try {
+      const result = await api.patch<{ name: string }>(
+        `/api/companies/${companyId}/documents/files/${renameTargetFile.id}/rename`,
+        { name: nextBase },
+      );
+      const nextName = result?.name || renameTargetFile.name;
+      setFiles((prev) => prev.map((f) => (f.id === renameTargetFile.id ? { ...f, name: nextName } : f)));
+      if (previewFile?.id === renameTargetFile.id) {
+        setPreviewFile({ ...renameTargetFile, name: nextName });
+      }
+      if (editingFile?.id === renameTargetFile.id) {
+        setEditingFile({ ...renameTargetFile, name: nextName });
+      }
+      toast({
+        title: String(t("metadataDocuments.renameSuccessTitle")),
+        description: String(t("metadataDocuments.renameSuccessDescription", { name: nextName })),
+      });
+      setRenameDialogOpen(false);
+    } catch {
+      toast({
+        title: String(t("splitPdf.error")),
+        description: String(t("metadataDocuments.renameFailed")),
+        variant: "destructive",
+      });
+    } finally {
+      setRenameSubmitting(false);
+    }
+  };
+
   // Bulk metadata
   const handleBulkMetadata = async () => {
     const entries = bulkEntries.filter((e) => e.key.trim());
@@ -728,7 +1078,6 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
       await api.post(`/api/companies/${companyId}/documents/bulk-metadata`, {
         file_ids: Array.from(selectedFileIds),
         entries,
-        mode: bulkMode,
       });
       toast({ title: "Success", description: `Metadata updated for ${selectedFileIds.size} files` });
       setIsBulkMetadataOpen(false);
@@ -738,6 +1087,96 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
       fetchTree();
     } catch {
       toast({ title: "Error", description: "Failed to update metadata", variant: "destructive" });
+    }
+  };
+
+  const toggleBulkExtractKey = (id: string, checked: boolean) => {
+    setBulkExtractSelectedKeyIds((prev) => {
+      if (checked) return prev.includes(id) ? prev : [...prev, id];
+      return prev.filter((x) => x !== id);
+    });
+  };
+
+  const openBulkExtractMetadataDialog = () => {
+    setBulkExtractSelectedKeyIds([]);
+    setBulkExtractRenameInstructions("");
+    setBulkExtractSubmitting(false);
+    setIsBulkExtractDialogOpen(true);
+  };
+
+  const handleBulkExtractMetadata = async () => {
+    if (bulkExtractSelectedKeyIds.length === 0) {
+      toast({
+        title: String(t("splitPdf.error")),
+        description: String(t("splitPdf.metadataKeysRequired")),
+        variant: "destructive",
+      });
+      return;
+    }
+    const totalSelected = selectedFileIds.size;
+    if (totalSelected === 0) return;
+    if (selectedAiExtractEligibleFiles.length === 0) {
+      toast({
+        title: String(t("splitPdf.error")),
+        description: String(t("metadataDocuments.bulkExtractNoOcrEligible")),
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setBulkExtractSubmitting(true);
+    try {
+      const settled = await Promise.allSettled(
+        selectedAiExtractEligibleFiles.map((file) =>
+          api.post(`/api/companies/${companyId}/documents/extract-metadata-from-ocr`, {
+            fileId: file.id,
+            metadataKeyIds: bulkExtractSelectedKeyIds,
+            renameInstructions: bulkExtractRenameInstructions.trim() || undefined,
+          }),
+        ),
+      );
+      const succeeded = settled.filter((result) => result.status === "fulfilled").length;
+      const failed = settled.length - succeeded;
+      const skipped = totalSelected - selectedAiExtractEligibleFiles.length;
+
+      if (failed === 0) {
+        toast({
+          title: String(t("metadataDocuments.extractMetadataSuccessTitle")),
+          description: String(
+            t("metadataDocuments.bulkExtractSuccessDescription", {
+              success: String(succeeded),
+              skipped: String(skipped),
+            }),
+          ),
+        });
+      } else if (succeeded === 0) {
+        toast({
+          title: String(t("splitPdf.error")),
+          description: String(t("metadataDocuments.bulkExtractFailedDescription")),
+          variant: "destructive",
+        });
+      } else {
+        toast({
+          title: String(t("metadataDocuments.bulkExtractPartialTitle")),
+          description: String(
+            t("metadataDocuments.bulkExtractPartialDescription", {
+              success: String(succeeded),
+              failed: String(failed),
+              skipped: String(skipped),
+            }),
+          ),
+          variant: "destructive",
+        });
+      }
+
+      setIsBulkExtractDialogOpen(false);
+      setBulkExtractSelectedKeyIds([]);
+      setBulkExtractRenameInstructions("");
+      setSelectedFileIds(new Set());
+      await fetchFiles();
+      fetchTree();
+    } finally {
+      setBulkExtractSubmitting(false);
     }
   };
 
@@ -768,42 +1207,6 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
       fetchTree();
     } catch {
       toast({ title: "Error", description: "Failed to delete file", variant: "destructive" });
-    }
-  };
-
-  const handleUploadToRagie = async (file: FileType) => {
-    if (file.ragie_document_id) return;
-    try {
-      await api.post(`/api/companies/${companyId}/documents/${file.id}/ragie/upload`);
-      toast({
-        title: String(t("metadataDocuments.ragieUploadSuccessTitle")),
-        description: String(t("metadataDocuments.ragieUploadSuccessDescription", { name: file.name })),
-      });
-      fetchFiles();
-    } catch (e) {
-      toast({
-        title: String(t("metadataDocuments.ragieUploadFailedTitle")),
-        description: e instanceof Error ? e.message : String(t("metadataDocuments.ragieUploadFailedDescription")),
-        variant: "destructive",
-      });
-    }
-  };
-
-  const handleRemoveFromRagie = async (file: FileType) => {
-    if (!file.ragie_document_id) return;
-    try {
-      await api.delete(`/api/companies/${companyId}/documents/${file.id}/ragie`);
-      toast({
-        title: String(t("metadataDocuments.ragieRemoveSuccessTitle")),
-        description: String(t("metadataDocuments.ragieRemoveSuccessDescription", { name: file.name })),
-      });
-      fetchFiles();
-    } catch (e) {
-      toast({
-        title: String(t("metadataDocuments.ragieRemoveFailedTitle")),
-        description: e instanceof Error ? e.message : String(t("metadataDocuments.ragieRemoveFailedDescription")),
-        variant: "destructive",
-      });
     }
   };
 
@@ -892,7 +1295,8 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
 
   // Bulk OCR
   const triggerBulkOcr = async () => {
-    const ids = Array.from(selectedFileIds);
+    const ids = selectedOcrEligibleFileIds;
+    if (ids.length === 0) return;
     for (const id of ids) {
       await triggerOcr(id);
     }
@@ -901,7 +1305,7 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
   const canPreview = (mimeType: string) =>
     mimeType?.startsWith("image/") || mimeType === "application/pdf";
 
-  const openPreview = (file: FileType, mode: "document" | "ocr" | "split" = "document") => {
+  const openPreview = (file: FileType, mode: "document" | "ocr" | "split" | "history" = "document") => {
     if (!canPreview(file.mime_type)) return;
     setPreviewFile(file);
     setPreviewMode(mode);
@@ -930,20 +1334,41 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
   }, [previewOcrData, previewOcrFileId, previewOcrLoading]);
 
   useEffect(() => {
-    if (!previewFile || previewMode === "document" || previewFile.ocr_status !== "completed") return;
+    if (!previewFile || previewMode === "document" || previewMode === "history" || previewFile.ocr_status !== "completed") return;
     loadPreviewOcr(previewFile);
   }, [loadPreviewOcr, previewFile, previewMode]);
+
+  useEffect(() => {
+    if (!previewFile || previewMode !== "history" || !companyId) return;
+    let cancelled = false;
+    setPreviewHistoryLoading(true);
+    setPreviewHistoryError(null);
+    void (async () => {
+      try {
+        const data = await api.get<{ events: FileHistoryApiEvent[] }>(
+          `/api/companies/${companyId}/files/${previewFile.id}/history`,
+        );
+        if (!cancelled) {
+          setPreviewHistoryEvents(data.events ?? []);
+        }
+      } catch {
+        if (!cancelled) {
+          setPreviewHistoryError(String(t("metadataDocuments.historyError")));
+          setPreviewHistoryEvents([]);
+        }
+      } finally {
+        if (!cancelled) setPreviewHistoryLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [previewFile, previewMode, companyId, t]);
 
   const formatFileSize = (bytes: number) => {
     if (bytes < 1024) return bytes + " B";
     if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
     return (bytes / (1024 * 1024)).toFixed(1) + " MB";
-  };
-
-  const getFileMetadataDisplay = (file: FileType) => {
-    const values = file.metadata_values || [];
-    if (values.length === 0) return null;
-    return values.map((mv) => `${mv.metadata?.name || "?"}: ${mv.value}`).join(", ");
   };
 
   // Render tree node recursively
@@ -1041,6 +1466,78 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
       return <iframe src={previewUrl} className={`w-full ${heightClass}`} title={previewFile.name} />;
     }
     return <div className="text-sm text-muted-foreground">Preview unavailable for this file type.</div>;
+  };
+
+  const renderPreviewHistoryPane = () => {
+    if (!previewFile) return null;
+    const locale = language === "fr" ? "fr-FR" : "en-US";
+    const eventTitle = (eventType: string) => {
+      const key = `metadataDocuments.historyEvent.${eventType}`;
+      const label = t(key);
+      if (typeof label === "string" && label !== key) return label;
+      return eventType;
+    };
+    if (previewHistoryLoading) {
+      return (
+        <div className="flex items-center justify-center h-[70vh] text-muted-foreground gap-2">
+          <Loader2 className="h-5 w-5 animate-spin" />
+          {String(t("metadataDocuments.historyLoading"))}
+        </div>
+      );
+    }
+    if (previewHistoryError) {
+      return (
+        <div className="flex items-center justify-center h-[70vh] text-destructive text-sm px-4 text-center">
+          {previewHistoryError}
+        </div>
+      );
+    }
+    if (previewHistoryEvents.length === 0) {
+      return (
+        <div className="flex items-center justify-center h-[70vh] text-muted-foreground text-sm px-4 text-center">
+          {String(t("metadataDocuments.historyEmpty"))}
+        </div>
+      );
+    }
+    return (
+      <ScrollArea className="h-[70vh] pr-3">
+        <div className="space-y-0 border rounded-md">
+          {previewHistoryEvents.map((ev) => {
+            const actorLabel = ev.actor
+              ? (ev.actor.fullName?.trim() || ev.actor.email)
+              : String(t("metadataDocuments.historyActorSystem"));
+            const detailsRaw = ev.details;
+            const hasDetails =
+              detailsRaw !== null &&
+              detailsRaw !== undefined &&
+              typeof detailsRaw === "object" &&
+              !Array.isArray(detailsRaw) &&
+              Object.keys(detailsRaw as object).length > 0;
+            return (
+              <div key={ev.id} className="border-b last:border-b-0 px-4 py-3 text-sm">
+                <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+                  <span className="font-medium">{eventTitle(ev.eventType)}</span>
+                  <time className="text-xs text-muted-foreground tabular-nums shrink-0">
+                    {new Date(ev.createdAt).toLocaleString(locale, { dateStyle: "medium", timeStyle: "short" })}
+                  </time>
+                </div>
+                <p className="text-xs text-muted-foreground mt-0.5">{actorLabel}</p>
+                {hasDetails && (
+                  <details className="mt-2 text-xs">
+                    <summary className="cursor-pointer text-muted-foreground hover:text-foreground select-none">
+                      {String(t("metadataDocuments.historyDetails"))}
+                    </summary>
+                    <pre className="mt-1 max-h-40 overflow-auto rounded bg-muted/50 p-2 text-[11px] leading-snug whitespace-pre-wrap break-all">
+                      {JSON.stringify(detailsRaw, null, 2)}
+                    </pre>
+                  </details>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </ScrollArea>
+    );
   };
 
   const renderPreviewOcrPane = () => {
@@ -1286,19 +1783,37 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
           <div className="flex items-center gap-2 shrink-0">
             {canWriteFiles && selectedFileIds.size > 0 && (
               <>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-7 text-xs"
-                  onClick={() => {
-                    setBulkEntries([{ key: "", value: "" }]);
-                    setIsBulkMetadataOpen(true);
-                  }}
-                >
-                  <Tag className="h-3 w-3 mr-1" />
-                  Tag {selectedFileIds.size}
-                </Button>
-                {ocrEnabled && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-xs"
+                    >
+                      <Tag className="h-3 w-3 mr-1" />
+                      Metadata {selectedFileIds.size}
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" className="min-w-[220px]">
+                    <DropdownMenuItem
+                      onClick={() => {
+                        setBulkEntries([{ key: "", value: "" }]);
+                        setIsBulkMetadataOpen(true);
+                      }}
+                    >
+                      <Edit className="h-4 w-4 mr-2" />
+                      {String(t("metadataDocuments.bulkManualMetadataAction"))}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      disabled={!geminiConfigured}
+                      onClick={openBulkExtractMetadataDialog}
+                    >
+                      <FileSearch className="h-4 w-4 mr-2" />
+                      {String(t("metadataDocuments.bulkAiExtractAction"))}
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                {ocrEnabled && selectedOcrEligibleCount > 0 && (
                   <Button
                     size="sm"
                     variant="outline"
@@ -1306,7 +1821,7 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
                     onClick={triggerBulkOcr}
                   >
                     <ScanText className="h-3 w-3 mr-1" />
-                    Run OCR ({selectedFileIds.size})
+                    Run OCR ({selectedOcrEligibleCount})
                   </Button>
                 )}
                 <Button
@@ -1324,7 +1839,7 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
               size="sm"
               variant="outline"
               className="h-7 text-xs"
-              onClick={() => setFilterRows([...filterRows, { key_id: "", value: "" }])}
+              onClick={() => setFilterRows([...filterRows, { key_id: "", values: [] }])}
             >
               <Filter className="h-3 w-3 mr-1" />
               Add Filter
@@ -1357,11 +1872,16 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
             <div className="flex flex-wrap gap-2">
               {filterRows.map((row, i) => (
                 <div key={i} className="flex items-center gap-1.5">
+                  {(() => {
+                    const rowMetaKey = metadataKeys.find((k) => k.id === row.key_id);
+                    const isFreeText = rowMetaKey?.value_kind === "free_text";
+                    return (
+                      <>
                   <Select
                     value={row.key_id}
                     onValueChange={(v) => {
                       const next = [...filterRows];
-                      next[i] = { ...next[i], key_id: v };
+                      next[i] = { ...next[i], key_id: v, values: [] };
                       setFilterRows(next);
                       applyFilterRows(next);
                     }}
@@ -1377,18 +1897,38 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
                       ))}
                     </SelectContent>
                   </Select>
-                  <MetadataValueControl
-                    className="h-7 w-[140px] text-xs min-w-[140px]"
-                    metaKey={metadataKeys.find((k) => k.id === row.key_id)}
-                    value={row.value}
-                    onChange={(v) => {
-                      const next = [...filterRows];
-                      next[i] = { ...next[i], value: v };
-                      setFilterRows(next);
-                      applyFilterRows(next);
-                    }}
-                    placeholder="Value..."
-                  />
+                        {isFreeText ? (
+                          <MetadataFreeTextFilterCombobox
+                            companyId={companyId}
+                            metadataKeyId={row.key_id}
+                            selectedValues={row.values}
+                            onChange={(values) => {
+                              const next = [...filterRows];
+                              next[i] = { ...next[i], values };
+                              setFilterRows(next);
+                              applyFilterRows(next);
+                            }}
+                            triggerClassName="h-7 w-[140px] text-xs min-w-[140px]"
+                            placeholder={String(t("metadataDocuments.filterValuePlaceholder"))}
+                            searchPlaceholder={String(t("metadataDocuments.filterSearchValuesPlaceholder"))}
+                            emptyLabel={String(t("metadataDocuments.filterNoValuesFound"))}
+                            loadingLabel={String(t("metadataDocuments.filterValuesLoading"))}
+                            clearLabel={String(t("metadataDocuments.filterClearSelection"))}
+                          />
+                        ) : (
+                          <MetadataValueControl
+                            className="h-7 w-[140px] text-xs min-w-[140px]"
+                            metaKey={rowMetaKey}
+                            value={row.values[0] ?? ""}
+                            onChange={(v) => {
+                              const next = [...filterRows];
+                              next[i] = { ...next[i], values: v ? [v] : [] };
+                              setFilterRows(next);
+                              applyFilterRows(next);
+                            }}
+                            placeholder={String(t("metadataDocuments.filterValuePlaceholder"))}
+                          />
+                        )}
                   <Button
                     variant="ghost"
                     size="icon"
@@ -1401,45 +1941,12 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
                   >
                     <X className="h-3 w-3" />
                   </Button>
+                      </>
+                    );
+                  })()}
                 </div>
               ))}
             </div>
-          </div>
-        )}
-
-        {/* Active filter chips */}
-        {filters.length > 0 && (
-          <div className="px-3 py-1.5 border-b flex flex-wrap items-center gap-1.5 shrink-0">
-            <span className="text-xs text-muted-foreground mr-1">Active filters:</span>
-            {filters.map((f, i) => {
-              const keyName = metadataKeys.find((k) => k.id === f.key_id)?.name || f.key_id;
-              return (
-                <Badge key={i} variant="secondary" className="text-xs gap-1 pr-1">
-                  {f.missing ? `No ${keyName}` : `${keyName}: ${f.value}`}
-                  <button
-                    className="ml-0.5 hover:text-destructive"
-                    onClick={() => {
-                      const next = filters.filter((_, j) => j !== i);
-                      setFilters(next);
-                      setFilterRows((prev) => prev.filter((r) => !r.key_id || !r.value.trim()));
-                      if (next.length === 0) setSelectedNodePath([]);
-                    }}
-                  >
-                    <X className="h-3 w-3" />
-                  </button>
-                </Badge>
-              );
-            })}
-            <button
-              className="text-xs text-muted-foreground hover:text-foreground ml-1"
-              onClick={() => {
-                setFilters([]);
-                setFilterRows([]);
-                setSelectedNodePath([]);
-              }}
-            >
-              Clear all
-            </button>
           </div>
         )}
 
@@ -1466,7 +1973,8 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
 
         {/* File list */}
         <div className="flex-1 overflow-auto [&_>div]:overflow-visible">
-          <Table>
+          <TooltipProvider delayDuration={200}>
+          <Table className="w-full min-w-0 table-fixed">
             <TableHeader>
               <TableRow>
                 {canWriteFiles && (
@@ -1477,18 +1985,18 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
                     />
                   </TableHead>
                 )}
-                <TableHead>Name</TableHead>
-                <TableHead>Metadata</TableHead>
-                <TableHead>OCR</TableHead>
-                <TableHead>Size</TableHead>
-                <TableHead>Created</TableHead>
-                <TableHead className="text-right w-28">Actions</TableHead>
+                <TableHead className="min-w-0 w-[45%]">Name</TableHead>
+                <TableHead className="w-24 whitespace-nowrap">OCR</TableHead>
+                <TableHead className="w-24 whitespace-nowrap">Size</TableHead>
+                <TableHead className="w-28 whitespace-nowrap">Created</TableHead>
+                <TableHead className="w-28 whitespace-nowrap text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {files.map((file) => {
                 const fileWritable = canManage || file.accessLevel === 'write';
                 const previewable = canPreview(file.mime_type);
+                const metadataEntries = getFileMetadataDisplayEntries(file);
                 return (
                 <TableRow
                   key={file.id}
@@ -1508,16 +2016,37 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
                       />
                     </TableCell>
                   )}
-                  <TableCell className="font-medium">
-                    <div className="flex flex-col gap-0.5">
-                      <div className="flex items-center gap-2">
-                        <FileIcon className="h-4 w-4 text-muted-foreground shrink-0" />
-                        <span className="truncate">{file.name}</span>
-                        {file.ragie_document_id && (
-                          <Badge variant="secondary" className="gap-1 text-[10px]">
-                            <CheckCircle className="h-3 w-3" />
-                            {String(t("metadataDocuments.ragieLinkedBadge"))}
-                          </Badge>
+                  <TableCell className="min-w-0 font-medium">
+                    <div className="flex w-full min-w-0 max-w-full flex-col gap-0.5">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <FileIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
+                        <span className="min-w-0 truncate">{file.name}</span>
+                      </div>
+                      <div className="flex w-full min-w-0 items-center gap-1.5">
+                        {metadataEntries.length > 0 ? (
+                          <div className="min-w-0 w-0 flex-1 basis-0">
+                            <FileRowMetadataBadges
+                              key={file.id}
+                              fileId={file.id}
+                              entries={metadataEntries}
+                              metadataTagColors={metadataTagColors}
+                            />
+                          </div>
+                        ) : (
+                          <span className="text-xs text-muted-foreground/50">No metadata</span>
+                        )}
+                        {fileWritable && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6 shrink-0"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openMetadataDialog(file);
+                            }}
+                          >
+                            <Edit className="h-3 w-3" />
+                          </Button>
                         )}
                       </div>
                       {searchActive && file.ocrSnippet && (
@@ -1531,30 +2060,6 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
                           className="ml-6 text-xs text-muted-foreground line-clamp-2 [&_mark]:bg-yellow-200 [&_mark]:text-yellow-900 [&_mark]:px-0.5 [&_mark]:rounded-sm"
                           dangerouslySetInnerHTML={{ __html: file.ocrSnippet }}
                         />
-                      )}
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-1.5">
-                      {getFileMetadataDisplay(file) ? (
-                        <span className="text-xs text-muted-foreground truncate max-w-[200px]">
-                          {getFileMetadataDisplay(file)}
-                        </span>
-                      ) : (
-                        <span className="text-xs text-muted-foreground/50">No metadata</span>
-                      )}
-                      {fileWritable && (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-6 w-6"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            openMetadataDialog(file);
-                          }}
-                        >
-                          <Edit className="h-3 w-3" />
-                        </Button>
                       )}
                     </div>
                   </TableCell>
@@ -1579,27 +2084,32 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
                             <MoreHorizontal className="h-3.5 w-3.5" />
                           </Button>
                         </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="min-w-[200px]">
-                          <DropdownMenuItem onClick={() => handleDownload(file)}>
+                        <DropdownMenuContent
+                          align="end"
+                          className="min-w-[200px]"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <DropdownMenuItem
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDownload(file);
+                            }}
+                          >
                             <Download className="h-4 w-4 mr-2" />
                             {String(t("metadataDocuments.download"))}
                           </DropdownMenuItem>
 
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem
-                            disabled={!fileWritable || !!file.ragie_document_id}
-                            onClick={() => handleUploadToRagie(file)}
-                          >
-                            <CloudUpload className="h-4 w-4 mr-2" />
-                            {String(t("metadataDocuments.ragieUploadAction"))}
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            disabled={!fileWritable || !file.ragie_document_id}
-                            onClick={() => handleRemoveFromRagie(file)}
-                          >
-                            <Trash2 className="h-4 w-4 mr-2" />
-                            {String(t("metadataDocuments.ragieRemoveAction"))}
-                          </DropdownMenuItem>
+                          {fileWritable && (
+                            <DropdownMenuItem
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openRenameDialog(file);
+                              }}
+                            >
+                              <Edit className="h-4 w-4 mr-2" />
+                              {String(t("metadataDocuments.rename"))}
+                            </DropdownMenuItem>
+                          )}
 
                           <DropdownMenuSeparator />
                           <DropdownMenuItem
@@ -1608,7 +2118,10 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
                               || file.ocr_status === "pending"
                               || file.ocr_status === "processing"
                             }
-                            onClick={() => triggerOcr(file.id)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              triggerOcr(file.id);
+                            }}
                           >
                             <ScanText className="h-4 w-4 mr-2" />
                             {String(
@@ -1624,7 +2137,10 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
 
                           <DropdownMenuItem
                             disabled={file.ocr_status !== "completed" || !geminiConfigured}
-                            onClick={() => openExtractMetadataDialog(file)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openExtractMetadataDialog(file);
+                            }}
                           >
                             <Tag className="h-4 w-4 mr-2" />
                             {String(t("metadataDocuments.extractMetadata"))}
@@ -1660,6 +2176,7 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
               )}
             </TableBody>
           </Table>
+          </TooltipProvider>
         </div>
       </div>
 
@@ -1673,6 +2190,7 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
           if (!open) {
             setExtractTargetFile(null);
             setExtractSelectedKeyIds([]);
+            setExtractRenameInstructions("");
             setExtractSubmitting(false);
           }
         }}
@@ -1730,6 +2248,22 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
                 </div>
               </ScrollArea>
             )}
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="extract-rename-instructions" className="text-xs font-medium text-muted-foreground">
+              {String(t("metadataDocuments.extractMetadataRenameInstructionsLabel"))}
+            </Label>
+            <Textarea
+              id="extract-rename-instructions"
+              value={extractRenameInstructions}
+              onChange={(event) => setExtractRenameInstructions(event.target.value)}
+              placeholder={String(t("metadataDocuments.extractMetadataRenameInstructionsPlaceholder"))}
+              className="min-h-[96px]"
+            />
+            <p className="text-xs text-muted-foreground">
+              {String(t("metadataDocuments.extractMetadataRenameInstructionsHelp"))}
+            </p>
           </div>
 
           <div className="flex gap-2 pt-2 border-t">
@@ -1984,6 +2518,7 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
                       if (!on) {
                         setExtractMetadataAfterOcr(false);
                         setSelectedExtractMetadataKeyIds([]);
+                        setExtractRenameInstructionsAfterUpload("");
                       }
                     }}
                   />
@@ -2001,7 +2536,13 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
                         id="ocr-extract-metadata"
                         disabled={isImportBusy}
                         checked={extractMetadataAfterOcr}
-                        onCheckedChange={(checked) => setExtractMetadataAfterOcr(!!checked)}
+                        onCheckedChange={(checked) => {
+                          const enabled = !!checked;
+                          setExtractMetadataAfterOcr(enabled);
+                          if (!enabled) {
+                            setExtractRenameInstructionsAfterUpload("");
+                          }
+                        }}
                       />
                       <Label htmlFor="ocr-extract-metadata" className="text-sm">{String(t("metadataDocuments.uploadExtractMetadataAi"))}</Label>
                     </div>
@@ -2043,6 +2584,22 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
                             })}
                           </div>
                         )}
+
+                        <div className="space-y-2 pt-1">
+                          <Label htmlFor="upload-extract-rename-instructions" className="text-xs font-medium text-muted-foreground">
+                            {String(t("metadataDocuments.extractMetadataRenameInstructionsLabel"))}
+                          </Label>
+                          <Textarea
+                            id="upload-extract-rename-instructions"
+                            value={extractRenameInstructionsAfterUpload}
+                            onChange={(event) => setExtractRenameInstructionsAfterUpload(event.target.value)}
+                            placeholder={String(t("metadataDocuments.extractMetadataRenameInstructionsPlaceholder"))}
+                            className="min-h-[88px]"
+                          />
+                          <p className="text-xs text-muted-foreground">
+                            {String(t("metadataDocuments.extractMetadataRenameInstructionsHelp"))}
+                          </p>
+                        </div>
                       </div>
                     )}
                   </div>
@@ -2106,6 +2663,67 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
         </DialogContent>
       </Dialog>
 
+      {/* Rename file */}
+      <Dialog
+        open={renameDialogOpen}
+        onOpenChange={(open) => {
+          setRenameDialogOpen(open);
+          if (!open) {
+            setRenameTargetFile(null);
+            setRenameBaseName("");
+            setRenameSubmitting(false);
+          }
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>{String(t("metadataDocuments.renameDialogTitle"))}</DialogTitle>
+            <DialogDescription>
+              {renameTargetFile
+                ? String(t("metadataDocuments.renameDialogDescription", { name: renameTargetFile.name }))
+                : String(t("metadataDocuments.renameDialogDescriptionNoFile"))}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="rename-file-base">{String(t("metadataDocuments.renameFieldLabel"))}</Label>
+            <div className="flex items-center gap-2">
+              <Input
+                id="rename-file-base"
+                value={renameBaseName}
+                onChange={(e) => setRenameBaseName(e.target.value)}
+                placeholder={String(t("metadataDocuments.renameFieldPlaceholder"))}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    handleRenameFile();
+                  }
+                }}
+                autoFocus
+              />
+              {renameTargetFile && (
+                <span className="shrink-0 text-sm text-muted-foreground">
+                  {splitFileName(renameTargetFile.name).extension || String(t("metadataDocuments.renameNoExtension"))}
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground">{String(t("metadataDocuments.renameHelp"))}</p>
+          </div>
+          <div className="flex gap-2 pt-2">
+            <Button
+              variant="outline"
+              className="flex-1"
+              onClick={() => setRenameDialogOpen(false)}
+              disabled={renameSubmitting}
+            >
+              {String(t("common.cancel"))}
+            </Button>
+            <Button className="flex-1" onClick={handleRenameFile} disabled={renameSubmitting}>
+              {renameSubmitting ? String(t("common.loading")) : String(t("metadataDocuments.renameSubmit"))}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {/* Metadata Editor */}
       <Dialog open={isMetadataDialogOpen} onOpenChange={setIsMetadataDialogOpen}>
         <DialogContent className="max-w-lg [overflow:clip]">
@@ -2157,17 +2775,11 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>Bulk Assign Metadata</DialogTitle>
-            <DialogDescription>Apply metadata to {selectedFileIds.size} selected files.</DialogDescription>
+            <DialogDescription>
+              Apply metadata updates to {selectedFileIds.size} selected files. Any metadata keys not listed below will remain unchanged.
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
-            <div className="flex gap-2">
-              <Button variant={bulkMode === "merge" ? "default" : "outline"} size="sm" onClick={() => setBulkMode("merge")}>
-                Merge
-              </Button>
-              <Button variant={bulkMode === "replace" ? "default" : "outline"} size="sm" onClick={() => setBulkMode("replace")}>
-                Replace
-              </Button>
-            </div>
             <div className="space-y-2">
               {bulkEntries.map((entry, i) => (
                 <div key={i} className="flex gap-2">
@@ -2208,13 +2820,135 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
         </DialogContent>
       </Dialog>
 
+      {/* Bulk Extract Metadata from OCR */}
+      <Dialog
+        open={isBulkExtractDialogOpen}
+        onOpenChange={(open) => {
+          setIsBulkExtractDialogOpen(open);
+          if (!open) {
+            setBulkExtractSubmitting(false);
+            setBulkExtractSelectedKeyIds([]);
+            setBulkExtractRenameInstructions("");
+          }
+        }}
+      >
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{String(t("metadataDocuments.bulkExtractDialogTitle"))}</DialogTitle>
+            <DialogDescription>
+              {String(
+                t("metadataDocuments.bulkExtractDialogDescription", {
+                  selected: String(selectedFileIds.size),
+                  eligible: String(selectedAiExtractEligibleCount),
+                }),
+              )}
+            </DialogDescription>
+          </DialogHeader>
+
+          {!geminiConfigured && (
+            <p className="text-xs text-muted-foreground">{String(t("splitPdf.missingGemini"))}</p>
+          )}
+
+          <div className="space-y-2">
+            <Label className="text-xs font-medium text-muted-foreground">
+              {String(t("splitPdf.metadataKeysLabel"))}
+            </Label>
+            {metadataKeys.length === 0 ? (
+              <p className="text-xs text-muted-foreground">{String(t("splitPdf.metadataKeysEmpty"))}</p>
+            ) : (
+              <ScrollArea className="h-[min(240px,35vh)] rounded-lg border bg-muted/20">
+                <div className="p-2 space-y-1">
+                  {metadataKeys.map((k) => {
+                    const label = (k.name && k.name.trim()) || String(t("splitPdf.metadataKeyUnnamed"));
+                    const predefined =
+                      k.value_kind === "predefined_list" && Array.isArray(k.allowed_values)
+                        ? (k.allowed_values as unknown[]).filter((x): x is string => typeof x === "string")
+                        : [];
+                    return (
+                      <label
+                        key={k.id}
+                        className="flex cursor-pointer items-start gap-2 rounded-md p-1.5 hover:bg-muted/40"
+                      >
+                        <Checkbox
+                          checked={bulkExtractSelectedKeyIds.includes(k.id)}
+                          onCheckedChange={(checked) => toggleBulkExtractKey(k.id, checked === true)}
+                          className="mt-0.5"
+                        />
+                        <span className="min-w-0 flex-1">
+                          <span className="text-sm font-medium leading-tight block">{label}</span>
+                          {predefined.length > 0 && (
+                            <span className="text-xs text-muted-foreground block mt-0.5">
+                              {String(t("splitPdf.metadataPredefinedOptions"))}: {predefined.join(", ")}
+                            </span>
+                          )}
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </ScrollArea>
+            )}
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="bulk-extract-rename-instructions" className="text-xs font-medium text-muted-foreground">
+              {String(t("metadataDocuments.extractMetadataRenameInstructionsLabel"))}
+            </Label>
+            <Textarea
+              id="bulk-extract-rename-instructions"
+              value={bulkExtractRenameInstructions}
+              onChange={(event) => setBulkExtractRenameInstructions(event.target.value)}
+              placeholder={String(t("metadataDocuments.extractMetadataRenameInstructionsPlaceholder"))}
+              className="min-h-[96px]"
+            />
+            <p className="text-xs text-muted-foreground">
+              {String(t("metadataDocuments.extractMetadataRenameInstructionsHelp"))}
+            </p>
+          </div>
+
+          <div className="flex gap-2 pt-2 border-t">
+            <Button variant="outline" className="flex-1" onClick={() => setIsBulkExtractDialogOpen(false)}>
+              {String(t("common.cancel"))}
+            </Button>
+            <Button
+              className="flex-1"
+              disabled={
+                bulkExtractSubmitting
+                || bulkExtractSelectedKeyIds.length === 0
+                || !geminiConfigured
+                || selectedAiExtractEligibleCount === 0
+              }
+              onClick={() => void handleBulkExtractMetadata()}
+            >
+              {bulkExtractSubmitting ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Tag className="h-4 w-4 mr-2" />
+              )}
+              {String(t("metadataDocuments.bulkAiExtractSubmit"))}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {/* Preview */}
-      <Dialog open={!!previewFile} onOpenChange={(open) => !open && setPreviewFile(null)}>
+      <Dialog
+        open={!!previewFile}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPreviewFile(null);
+            setPreviewMode("document");
+            setPreviewHistoryEvents([]);
+            setPreviewHistoryError(null);
+            setPreviewHistoryLoading(false);
+          }
+        }}
+      >
         <DialogContent className="max-w-6xl max-h-[90vh]">
           <DialogHeader>
             <DialogTitle className="flex items-center justify-between gap-3">
               <span className="truncate">{previewFile?.name}</span>
-              <div className="flex items-center gap-1">
+              <div className="flex flex-wrap items-center justify-end gap-1">
                 <Button
                   size="sm"
                   variant={previewMode === "document" ? "default" : "outline"}
@@ -2239,6 +2973,15 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
                 >
                   {String(t("metadataDocuments.viewerModeSplit"))}
                 </Button>
+                <Button
+                  size="sm"
+                  variant={previewMode === "history" ? "default" : "outline"}
+                  className="h-7 text-xs"
+                  onClick={() => setPreviewMode("history")}
+                >
+                  <History className="h-3 w-3 sm:mr-1" />
+                  <span className="hidden sm:inline">{String(t("metadataDocuments.viewerModeHistory"))}</span>
+                </Button>
               </div>
             </DialogTitle>
           </DialogHeader>
@@ -2261,6 +3004,11 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
                 <div className="border rounded-md p-3 overflow-hidden">
                   {renderPreviewOcrPane()}
                 </div>
+              </div>
+            )}
+            {previewMode === "history" && (
+              <div className="max-h-[70vh] overflow-hidden">
+                {renderPreviewHistoryPane()}
               </div>
             )}
           </div>

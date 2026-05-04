@@ -35,7 +35,7 @@ export interface WorkflowStep {
   position_x: number;
   position_y: number;
   config: any;
-  action_type?: "manual" | "automatic" | "agent";
+  action_type?: "manual" | "automatic" | "agent" | "email";
   // Must match Prisma enum values (see backend/prisma/schema.prisma)
   decision_node_type?: "Human" | "Agent" | "Agent_Human";
 }
@@ -93,6 +93,15 @@ function normalizeStepNotificationSettings(step: WorkflowStep): WorkflowStep {
     .sort((a: number, b: number) => a - b)
     .filter((entry: number, index: number, list: number[]) => index === 0 || entry !== list[index - 1]);
 
+  const subjectTemplate =
+    typeof assignmentSource.subject_template === "string" ? assignmentSource.subject_template.trim() : "";
+  const contentTemplate =
+    typeof assignmentSource.content_template === "string" ? assignmentSource.content_template.trim() : "";
+  const useCustomNotification =
+    typeof assignmentSource.use_custom_notification === "boolean"
+      ? assignmentSource.use_custom_notification
+      : subjectTemplate.length > 0 || contentTemplate.length > 0;
+
   return {
     ...step,
     config: {
@@ -100,6 +109,11 @@ function normalizeStepNotificationSettings(step: WorkflowStep): WorkflowStep {
       notifications: {
         assignment: {
           enabled: assignmentSource.enabled !== false,
+          use_custom_notification: useCustomNotification,
+          subject_template:
+            typeof assignmentSource.subject_template === "string" ? assignmentSource.subject_template : "",
+          content_template:
+            typeof assignmentSource.content_template === "string" ? assignmentSource.content_template : "",
         },
         reminder: {
           mode: reminderMode,
@@ -214,6 +228,7 @@ const FIELD_TYPES = [
   { value: "datetime", label: "Date & Time" },
   { value: "option", label: "Option (Single)" },
   { value: "multiple_option", label: "Multiple Options" },
+  { value: "user", label: "User" },
   { value: "array", label: "Array" },
   { value: "file", label: "File" },
 

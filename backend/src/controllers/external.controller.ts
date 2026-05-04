@@ -12,6 +12,7 @@ import {
   normalizePortalLanguages,
   resolveLocalizedText,
 } from '../services/portalTranslation.service';
+import { ensureCompanyUser, getWorkflowFieldById, isUserField, normalizeUserFieldValue } from '../lib/workflowUserField';
 
 // prisma is imported from ../lib/prisma
 
@@ -427,14 +428,30 @@ export const externalController = {
 
       // Update data
       if (executionDataRows.length > 0) {
+        const workflowFields = Array.isArray(currentStep.data_structure) ? currentStep.data_structure : [];
         if (executionDataRows.length === 1) {
           const rowId = executionDataRows[0].id;
           const currentValues = (executionDataRows[0].values || {}) as Record<string, any>;
           const newValues = { ...currentValues };
 
-          Object.entries(data).forEach(([fieldId, val]) => {
-            newValues[fieldId] = { ...(currentValues[fieldId] || {}), value: val };
-          });
+          for (const [fieldId, val] of Object.entries(data)) {
+            let normalizedValue = val;
+            const fieldDefinition = getWorkflowFieldById(workflowFields, fieldId);
+            if (isUserField(fieldDefinition)) {
+              const normalizedUserId = normalizeUserFieldValue(val);
+              if (normalizedUserId) {
+                const isAllowedUser = await ensureCompanyUser(currentStep.company_id, normalizedUserId);
+                if (!isAllowedUser) {
+                  return res.status(400).json({
+                    error: 'Invalid field value',
+                    details: `Field "${fieldId}" must reference a user in this company`,
+                  });
+                }
+              }
+              normalizedValue = normalizedUserId;
+            }
+            newValues[fieldId] = { ...(currentValues[fieldId] || {}), value: normalizedValue };
+          }
 
           await prisma.workflowExecutionData.update({
             where: { id: rowId },
@@ -447,12 +464,27 @@ export const externalController = {
             const newValues = { ...currentValues };
             let hasUpdate = false;
 
-            Object.entries(data).forEach(([fieldId, val]) => {
+            for (const [fieldId, val] of Object.entries(data)) {
               if (currentValues[fieldId] !== undefined) {
-                newValues[fieldId] = { ...currentValues[fieldId], value: val };
+                let normalizedValue = val;
+                const fieldDefinition = getWorkflowFieldById(workflowFields, fieldId);
+                if (isUserField(fieldDefinition)) {
+                  const normalizedUserId = normalizeUserFieldValue(val);
+                  if (normalizedUserId) {
+                    const isAllowedUser = await ensureCompanyUser(currentStep.company_id, normalizedUserId);
+                    if (!isAllowedUser) {
+                      return res.status(400).json({
+                        error: 'Invalid field value',
+                        details: `Field "${fieldId}" must reference a user in this company`,
+                      });
+                    }
+                  }
+                  normalizedValue = normalizedUserId;
+                }
+                newValues[fieldId] = { ...currentValues[fieldId], value: normalizedValue };
                 hasUpdate = true;
               }
-            });
+            }
 
             if (hasUpdate) {
               await prisma.workflowExecutionData.update({

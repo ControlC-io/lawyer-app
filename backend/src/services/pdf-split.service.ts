@@ -220,6 +220,56 @@ ${ocrBody}`;
   return parseMetadataObject(parsed, ids);
 }
 
+/**
+ * Propose a renamed file base name from OCR + user instructions.
+ * Returns a plain string (no path). Extension handling is performed by caller.
+ */
+export async function proposeFileNameFromOcrWithGemini(params: {
+  ocrMarkdown: string;
+  currentFileName: string;
+  renameInstructions: string;
+  currentDate: string;
+}): Promise<string> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) throw new Error('GEMINI_API_KEY is not configured');
+  const modelName = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
+
+  const ocrBody = truncateOcr(params.ocrMarkdown);
+
+  const prompt = `You rename a single document based on OCR text and user instructions.
+
+Current file name:
+${JSON.stringify(params.currentFileName)}
+
+User instructions for renaming:
+${params.renameInstructions}
+
+Rules:
+- Return ONLY one JSON object: {"name":"..."}.
+- "name" must be a concise descriptive file base name (no folders, no path separators).
+- Do not include an extension.
+- Use ASCII characters when possible.
+- If uncertain, still provide your best short descriptive name.
+- Reference date (yyyy-mm-dd): ${params.currentDate}
+
+OCR text:
+${ocrBody}`;
+
+  const genAI = new GoogleGenerativeAI(apiKey);
+  const model = genAI.getGenerativeModel({ model: modelName });
+  const result = await model.generateContent(prompt);
+  const text = result.response.text();
+  const parsed = parseGeminiJsonObject(text);
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('Invalid rename response format');
+  }
+  const name = (parsed as { name?: unknown }).name;
+  if (typeof name !== 'string') {
+    throw new Error('Rename response must include a string name');
+  }
+  return name.trim();
+}
+
 export async function getPdfPageCount(pdfBuffer: Buffer): Promise<number> {
   const pdfDoc = await PDFDocument.load(pdfBuffer);
   return pdfDoc.getPageCount();

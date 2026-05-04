@@ -1,8 +1,11 @@
 import request from 'supertest';
+import { Readable } from 'stream';
 import { app } from '../app';
 import { prisma } from '../lib/prisma';
 import { workflowService } from '../services/workflow.service';
 import { aiService } from '../services/ai.service';
+import { emailService } from '../services/email.service';
+import { storageService } from '../services/storage.service';
 
 // Mock Prisma
 jest.mock('../lib/prisma', () => ({
@@ -12,12 +15,13 @@ jest.mock('../lib/prisma', () => ({
     userCompany: { findFirst: jest.fn() },
     workflow: { findFirst: jest.fn(), findUnique: jest.fn(), create: jest.fn() },
     workflowExecution: { create: jest.fn(), findUnique: jest.fn(), findFirst: jest.fn(), update: jest.fn(), updateMany: jest.fn() },
-    workflowExecutionData: { create: jest.fn(), findFirst: jest.fn(), update: jest.fn() },
+    workflowExecutionData: { create: jest.fn(), findFirst: jest.fn(), findMany: jest.fn(), update: jest.fn() },
     workflowStep: { findFirst: jest.fn(), findMany: jest.fn(), update: jest.fn(), create: jest.fn() },
     workflowExecutionStep: { create: jest.fn(), createMany: jest.fn(), findFirst: jest.fn(), update: jest.fn(), updateMany: jest.fn() },
     workflowConnection: { findMany: jest.fn() },
     agentConfiguration: { findUnique: jest.fn() },
     apiConfiguration: { findUnique: jest.fn() },
+    profile: { findUnique: jest.fn(), findMany: jest.fn() },
     workflowExecutionLog: { create: jest.fn() },
   },
 }));
@@ -48,8 +52,16 @@ jest.mock('../services/storage.service', () => ({
   storageService: {
     getSignedUrl: jest.fn().mockResolvedValue('https://signed.example/'),
     getDocumentsBucket: jest.fn().mockReturnValue('documents'),
+    getBucketName: jest.fn().mockReturnValue('floowly'),
+    downloadFile: jest.fn().mockResolvedValue(Readable.from([Buffer.from('attachment-content')])),
     init: jest.fn(),
     getClient: jest.fn(),
+  },
+}));
+
+jest.mock('../services/email.service', () => ({
+  emailService: {
+    sendWorkflowActionEmail: jest.fn().mockResolvedValue(undefined),
   },
 }));
 
@@ -336,6 +348,64 @@ describe('Workflow Endpoints', () => {
       const updateArgs = (prisma.workflowStep.update as jest.Mock).mock.calls.at(-1)?.[0];
       expect(updateArgs?.data?.config).not.toHaveProperty('explanation');
     });
+
+    it('accepts and normalizes email action configuration', async () => {
+      (prisma.workflow.findFirst as jest.Mock).mockResolvedValue({
+        id: 'wf-123',
+        company_id: 'company-123',
+        data_structure: [
+          { id: 'user-field-1', name: 'Requester', field_type: 'user' },
+          { id: 'file-field-1', name: 'Attachment', field_type: 'file' },
+        ],
+      });
+      (prisma.workflowStep.findMany as jest.Mock)
+        .mockResolvedValueOnce([{ id: 'step-1' }])
+        .mockResolvedValueOnce([{ id: 'step-1', config: {} }]);
+
+      const response = await request(app)
+        .put('/api/companies/company-123/workflows/wf-123/steps')
+        .set('Authorization', 'Bearer token')
+        .send({
+          steps: [
+            {
+              id: 'step-1',
+              step_type: 'action',
+              action_type: 'email',
+              name: 'Email step',
+              position_x: 100,
+              position_y: 200,
+              config: {
+                email_action: {
+                  subject_template: 'Subject {{Requester}}',
+                  body_template_html: '<p>Hello {{Requester}}</p>',
+                  recipient_sources: ['creator', 'static', 'user_field'],
+                  static_recipients: ['notify@example.com'],
+                  user_field_ids: ['user-field-1'],
+                  attachment_field_ids: ['file-field-1'],
+                },
+              },
+            },
+          ],
+        });
+
+      expect(response.status).toBe(200);
+      expect(prisma.workflowStep.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'step-1' },
+          data: expect.objectContaining({
+            action_type: 'email',
+            config: expect.objectContaining({
+              email_action: expect.objectContaining({
+                recipient_sources: expect.arrayContaining(['creator', 'static', 'user_field']),
+                static_recipients: ['notify@example.com'],
+                user_field_ids: ['user-field-1'],
+                attachment_field_ids: ['file-field-1'],
+              }),
+            }),
+          }),
+        })
+      );
+    });
   });
 
   describe('POST /api/workflows/executions/:executionId/steps/:stepId/process', () => {
@@ -361,6 +431,83 @@ describe('Workflow Endpoints', () => {
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
       expect(aiService.callAgentEndpoint).toHaveBeenCalled();
+    });
+
+    it('should process email action, send emails with attachments, and auto-complete step', async () => {
+      (storageService.downloadFile as jest.Mock).mockImplementation(() =>
+        Promise.resolve(Readable.from(Buffer.from('attachment-content')))
+      );
+      (prisma.workflowExecutionStep.findFirst as jest.Mock).mockResolvedValue({
+        id: 'ex-step-123',
+        execution_id: 'exec-123',
+        status: 'running',
+        started_at: new Date('2026-01-01T00:00:00Z'),
+        step_id: 'step-email-1',
+        company_id: 'company-123',
+        step: {
+          step_type: 'action',
+          action_type: 'email',
+          config: {
+            email_action: {
+              subject_template: 'Subject {{Requester}}',
+              body_template_html: '<p>Hello {{Requester}}</p>',
+              recipient_sources: ['creator', 'static', 'user_field'],
+              static_recipients: ['static@example.com'],
+              user_field_ids: ['requester'],
+              attachment_field_ids: ['attachment'],
+            },
+          },
+          workflow: {
+            data_structure: [
+              { id: 'requester', name: 'Requester', field_type: 'user' },
+              { id: 'attachment', name: 'Attachment', field_type: 'file' },
+            ],
+          },
+        },
+      });
+      (prisma.workflowExecution.findFirst as jest.Mock)
+        .mockResolvedValueOnce({ company_id: 'company-123' })
+        .mockResolvedValueOnce({ created_by: 'creator-1' });
+      (prisma.workflowExecutionData.findMany as jest.Mock).mockResolvedValue([
+        {
+          values: {
+            requester: { value: { id: 'assignee-1' } },
+            attachment: { value: 'files/test.pdf', original_name: 'test.pdf' },
+          },
+        },
+      ]);
+      (prisma.profile.findUnique as jest.Mock).mockResolvedValue({ email: 'creator@example.com' });
+      (prisma.profile.findMany as jest.Mock).mockResolvedValue([{ email: 'assignee@example.com' }]);
+      (prisma.workflowExecution.findUnique as jest.Mock).mockResolvedValue({ status: 'running' });
+      (workflowService.advanceWorkflow as jest.Mock).mockResolvedValue(['step-next-1']);
+
+      const response = await request(app)
+        .post('/api/workflows/executions/exec-123/steps/ex-step-123/process')
+        .set(mockAuthHeaders);
+
+      expect(response.status).toBe(200);
+      expect(response.body.success).toBe(true);
+      expect(response.body.recipients_count).toBe(2);
+      expect(response.body.attachments_count).toBe(1);
+      expect(emailService.sendWorkflowActionEmail).toHaveBeenCalledTimes(2);
+      expect(prisma.workflowExecutionStep.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'ex-step-123' },
+          data: expect.objectContaining({
+            status: 'completed',
+            step_data: expect.objectContaining({
+              _step_meta: expect.objectContaining({
+                closed_by_source: 'system',
+              }),
+            }),
+          }),
+        })
+      );
+      expect(workflowService.advanceWorkflow).toHaveBeenCalledWith(
+        'exec-123',
+        'step-email-1',
+        'company-123'
+      );
     });
 
     it('should dispatch automatic action without completing when status is running', async () => {
@@ -437,7 +584,7 @@ describe('Workflow Endpoints', () => {
       expect(response.status).toBe(404);
     });
 
-    it('should return 200 and skip when step is not automatic/agent', async () => {
+    it('should return 200 and skip when step is not processable', async () => {
       (prisma.workflowExecutionStep.findFirst as jest.Mock).mockResolvedValue({
         id: 'ex-step-123',
         execution_id: 'exec-123',
@@ -452,7 +599,7 @@ describe('Workflow Endpoints', () => {
         .post('/api/workflows/executions/exec-123/steps/ex-step-123/process')
         .set(mockAuthHeaders);
       expect(response.status).toBe(200);
-      expect(response.body.message).toContain('not an automatic/agent step');
+      expect(response.body.message).toContain('not a processable automatic step');
       expect(aiService.callAgentEndpoint).not.toHaveBeenCalled();
     });
 
@@ -957,6 +1104,46 @@ describe('Workflow Endpoints', () => {
       expect(prisma.workflowExecutionData.update).toHaveBeenCalled();
     });
 
+    it('should flatten file field payload with original_name on updateExecutionData', async () => {
+      (prisma.company.findUnique as jest.Mock).mockResolvedValue(mockCompany);
+      (prisma.workflowExecution.findFirst as jest.Mock).mockResolvedValue({
+        id: 'exec-123',
+        workflow: {
+          data_structure: [{ id: 'f-file', name: 'Photo', field_type: 'file' }],
+        },
+      });
+      (prisma.workflowExecutionData.findFirst as jest.Mock).mockResolvedValue({
+        id: 'data-123',
+        values: {
+          'f-file': {
+            value: 'executions/exec-123/1_pic.png',
+            original_name: 'pic.png',
+          },
+        },
+      });
+
+      const response = await request(app)
+        .put('/api/workflows/executions/exec-123/data')
+        .set(mockAuthHeaders)
+        .send({
+          data: {
+            Photo: {
+              value: 'executions/exec-123/1_pic.png',
+              original_name: 'renamed.png',
+            },
+          },
+        });
+
+      expect(response.status).toBe(200);
+      expect(prisma.workflowExecutionData.update).toHaveBeenCalled();
+      const updateArg = (prisma.workflowExecutionData.update as jest.Mock).mock.calls[0][0];
+      expect(updateArg.data.values['f-file']).toEqual({
+        value: 'executions/exec-123/1_pic.png',
+        original_name: 'renamed.png',
+      });
+      expect(typeof updateArg.data.values['f-file'].value).toBe('string');
+    });
+
     it('should return 404 when execution is not found', async () => {
       (prisma.workflowExecution.findFirst as jest.Mock).mockResolvedValue(null);
       const response = await request(app)
@@ -1050,6 +1237,76 @@ describe('Workflow Endpoints', () => {
         });
       expect(response.status).toBe(200);
       expect(prisma.workflowExecutionData.update).toHaveBeenCalled();
+    });
+
+    it('should normalize user field value to user id when valid', async () => {
+      (prisma.company.findUnique as jest.Mock).mockResolvedValue(mockCompany);
+      (prisma.workflowExecution.findFirst as jest.Mock).mockResolvedValue({
+        id: 'exec-123',
+        workflow: {
+          data_structure: [
+            { id: 'assignee_field', name: 'Assignee', field_type: 'user' },
+          ],
+        },
+      });
+      (prisma.workflowExecutionData.findFirst as jest.Mock).mockResolvedValue({
+        id: 'data-123',
+        values: {},
+      });
+      (prisma.userCompany.findFirst as jest.Mock).mockResolvedValue({
+        id: 'uc-1',
+        company_id: 'company-123',
+        user_id: 'user-123',
+      });
+
+      const response = await request(app)
+        .put('/api/workflows/executions/exec-123/data')
+        .set(mockAuthHeaders)
+        .send({
+          values: {
+            assignee_field: { id: 'user-123', email: 'user@example.com' },
+          },
+        });
+
+      expect(response.status).toBe(200);
+      expect(prisma.workflowExecutionData.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            values: expect.objectContaining({
+              assignee_field: expect.objectContaining({ value: 'user-123' }),
+            }),
+          }),
+        })
+      );
+    });
+
+    it('should reject user field values for users outside the company', async () => {
+      (prisma.company.findUnique as jest.Mock).mockResolvedValue(mockCompany);
+      (prisma.workflowExecution.findFirst as jest.Mock).mockResolvedValue({
+        id: 'exec-123',
+        workflow: {
+          data_structure: [
+            { id: 'assignee_field', name: 'Assignee', field_type: 'user' },
+          ],
+        },
+      });
+      (prisma.workflowExecutionData.findFirst as jest.Mock).mockResolvedValue({
+        id: 'data-123',
+        values: {},
+      });
+      (prisma.userCompany.findFirst as jest.Mock).mockResolvedValue(null);
+
+      const response = await request(app)
+        .put('/api/workflows/executions/exec-123/data')
+        .set(mockAuthHeaders)
+        .send({
+          values: {
+            assignee_field: 'user-outside-company',
+          },
+        });
+
+      expect(response.status).toBe(400);
+      expect(response.body.error).toBe('invalid user field value');
     });
   });
 

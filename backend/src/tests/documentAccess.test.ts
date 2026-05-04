@@ -368,6 +368,40 @@ describe('documentAccess', () => {
       });
       expect(result).toEqual(['file-1']);
     });
+
+    it('applies OR logic for multiple values of same metadata key', async () => {
+      mockFiles.mockResolvedValue([
+        { id: 'file-1' },
+        { id: 'file-2' },
+        { id: 'file-3' },
+      ]);
+      mockRuleCount.mockResolvedValue(1);
+      mockRules.mockResolvedValue([
+        {
+          id: 'rule-1',
+          permission_type: 'read',
+          conditions: [],
+          assignments: [{ user_id: 'user-1', group_id: null }],
+        },
+      ]);
+      mockMetadataValues.mockResolvedValue([
+        { files_id: 'file-1', metadata_id: 'key-number', value: 'A-123' },
+        { files_id: 'file-2', metadata_id: 'key-number', value: 'B-999' },
+        { files_id: 'file-3', metadata_id: 'key-number', value: 'C-555' },
+      ]);
+
+      const result = await getAccessibleFileIds({
+        userId: 'user-1',
+        companyId: 'company-1',
+        isCompanyAdmin: false,
+        userGroupIds: [],
+        metadataFilters: [
+          { key_id: 'key-number', value: 'A-123' },
+          { key_id: 'key-number', value: 'B-999' },
+        ],
+      });
+      expect(result).toEqual(['file-1', 'file-2']);
+    });
   });
 
   describe('buildVirtualTree', () => {

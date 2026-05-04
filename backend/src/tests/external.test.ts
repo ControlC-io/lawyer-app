@@ -8,6 +8,7 @@ jest.mock('../lib/prisma', () => ({
   prisma: {
     company: { findUnique: jest.fn() },
     user: { findUnique: jest.fn() },
+    userCompany: { findFirst: jest.fn() },
     workflowExecutionData: { findMany: jest.fn(), update: jest.fn(), findFirst: jest.fn() },
     workflowExecutionStep: { update: jest.fn(), findFirst: jest.fn() },
     workflowExecution: { findFirst: jest.fn() },
@@ -21,6 +22,7 @@ jest.mock('jsonwebtoken', () => ({ verify: jest.fn() }));
 jest.mock('../services/workflow.service', () => ({
   workflowService: {
     advanceWorkflow: jest.fn().mockResolvedValue([]),
+    cancelReminderForExecutionStep: jest.fn().mockResolvedValue(undefined),
   }
 }));
 
@@ -72,6 +74,28 @@ describe('External Endpoints', () => {
         .post('/api/external/steps//submit')
         .send({ data: {} });
       expect([400, 404]).toContain(response.status);
+    });
+
+    it('should reject user field value not in company', async () => {
+      (prisma.$queryRaw as jest.Mock).mockResolvedValue([{
+        execution_id: 'exec-123',
+        execution_step_id: 'ex-step-123',
+        workflow_step_id: 'wf-step-123',
+        company_id: 'company-123',
+        step_config: {},
+        data_structure: [
+          { id: 'assignee_field', field_type: 'user' },
+        ],
+      }]);
+      (prisma.workflowExecutionData.findMany as jest.Mock).mockResolvedValue([{ id: 'data-1', values: {} }]);
+      (prisma.userCompany.findFirst as jest.Mock).mockResolvedValue(null);
+
+      const response = await request(app)
+        .post('/api/external/steps/test-token/submit')
+        .send({ data: { assignee_field: 'user-outside' } });
+
+      expect(response.status).toBe(400);
+      expect(response.body.error).toBe('Invalid field value');
     });
   });
 

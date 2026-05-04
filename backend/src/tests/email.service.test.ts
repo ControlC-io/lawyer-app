@@ -9,6 +9,6 @@ import { emailService } from '../services/email.service';
 describe('email.service', () => {
   it('is mocked in test env and exposes expected interface', () => {
     expect(emailService).toBeDefined();
-    expect(typeof (emailService as any).sendEmail).toBe('function');
+    expect(typeof (emailService as any).sendWorkflowActionEmail).toBe('function');
   });
 });

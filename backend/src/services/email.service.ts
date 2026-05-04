@@ -4,6 +4,12 @@ const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY || '';
 const FROM_EMAIL = process.env.FROM_EMAIL || 'noreply@picobello.app'; 
 const APP_URL = process.env.APP_URL || 'http://localhost';
 let configuredApiKeyLength = 0;
+export type WorkflowEmailAttachment = {
+  content: string;
+  filename: string;
+  type?: string;
+  disposition?: 'attachment' | 'inline';
+};
 
 function resolveSendGridApiKey(): string {
   // Prefer runtime value to surface late-loaded env values.
@@ -54,6 +60,24 @@ function logEmailAttempt(context: string, to: string, subject: string) {
   });
 }
 
+function sanitizeEmailAttachments(attachments: WorkflowEmailAttachment[] | undefined): WorkflowEmailAttachment[] {
+  if (!attachments || attachments.length === 0) return [];
+  return attachments
+    .filter((attachment) =>
+      attachment &&
+      typeof attachment.content === 'string' &&
+      attachment.content.length > 0 &&
+      typeof attachment.filename === 'string' &&
+      attachment.filename.trim().length > 0
+    )
+    .map((attachment) => ({
+      content: attachment.content,
+      filename: attachment.filename.trim(),
+      type: attachment.type,
+      disposition: attachment.disposition || 'attachment',
+    }));
+}
+
 function logEmailError(context: string, error: unknown, to: string, subject: string) {
   const err = error as any;
   console.error(`[email] ${context} failed`, {
@@ -68,6 +92,25 @@ function logEmailError(context: string, error: unknown, to: string, subject: str
     sendgridResponseHeaders: err?.response?.headers ?? null,
     env: getRuntimeEmailEnvState(),
   });
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function textToHtml(value: string): string {
+  const escaped = escapeHtml(value);
+  return escaped
+    .replace(
+      /(https?:\/\/[^\s<]+)/g,
+      '<a href="$1" style="color: #0066cc; text-decoration: underline; word-break: break-all;">$1</a>'
+    )
+    .replace(/\n/g, '<br/>');
 }
 
 // Initialize SendGrid only if API key is provided
@@ -137,14 +180,23 @@ export const emailService = {
     email: string,
     workflowName: string,
     stepName: string,
-    executionId: string
+    executionId: string,
+    options?: {
+      subject?: string;
+      content?: string;
+      buttonLabel?: string;
+    }
   ): Promise<void> {
     if (!ensureSendGridConfigured('sendAssignmentNotification')) {
       return;
     }
 
     const executionLink = `${APP_URL}/workflows/executions/${executionId}`;
-    const subject = `New task assigned: ${stepName}`;
+    const subject = options?.subject?.trim() || `New task assigned: ${stepName}`;
+    const defaultContent = `You have been assigned to complete a step in ${workflowName}.\nStep: ${stepName}`;
+    const content = options?.content?.trim() || defaultContent;
+    const contentHtml = textToHtml(content);
+    const buttonLabel = options?.buttonLabel?.trim() || 'View Task';
 
     const msg = {
       to: email,
@@ -153,10 +205,9 @@ export const emailService = {
       html: `
         <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eee; border-radius: 8px;">
           <h2 style="color: #333;">New Task Assigned</h2>
-          <p style="color: #555; font-size: 16px;">You have been assigned to complete a step in <strong>${workflowName}</strong>.</p>
-          <p style="color: #555; font-size: 16px;"><strong>Step:</strong> ${stepName}</p>
+          <p style="color: #555; font-size: 16px;">${contentHtml}</p>
           <div style="margin: 35px 0; text-align: center;">
-            <a href="${executionLink}" style="background-color: #000; color: white; padding: 14px 28px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">View Task</a>
+            <a href="${executionLink}" style="background-color: #000; color: white; padding: 14px 28px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">${escapeHtml(buttonLabel)}</a>
           </div>
           <p style="color: #777; font-size: 14px;">If the button doesn't work, copy and paste this link into your browser:</p>
           <p style="color: #0066cc; font-size: 14px; word-break: break-all;">${executionLink}</p>
@@ -308,6 +359,46 @@ export const emailService = {
     } catch (error) {
       logEmailError('sendExternalFormLink', error, email, subject);
       throw new Error('Failed to send external form link');
+    }
+  },
+
+  async sendWorkflowActionEmail(
+    email: string,
+    subject: string,
+    html: string,
+    options?: {
+      text?: string;
+      attachments?: WorkflowEmailAttachment[];
+    }
+  ): Promise<void> {
+    if (!ensureSendGridConfigured('sendWorkflowActionEmail')) {
+      return;
+    }
+
+    const sanitizedSubject = subject.trim();
+    const sanitizedHtml = html.trim();
+    const attachments = sanitizeEmailAttachments(options?.attachments);
+    const text = options?.text?.trim();
+
+    const msg: sgMail.MailDataRequired = {
+      to: email,
+      from: { email: FROM_EMAIL, name: 'Picobello' },
+      subject: sanitizedSubject,
+      html: sanitizedHtml,
+      ...(text ? { text } : {}),
+      ...(attachments.length > 0 ? { attachments } : {}),
+      trackingSettings: {
+        clickTracking: { enable: false, enableText: false },
+      },
+    };
+
+    try {
+      logEmailAttempt('sendWorkflowActionEmail', email, sanitizedSubject);
+      await sgMail.send(msg);
+      console.log(`Workflow action email sent to ${email}`);
+    } catch (error) {
+      logEmailError('sendWorkflowActionEmail', error, email, sanitizedSubject);
+      throw new Error('Failed to send workflow action email');
     }
   },
 };

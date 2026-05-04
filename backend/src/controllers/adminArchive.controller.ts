@@ -1,8 +1,19 @@
 import { Response } from 'express';
 import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
+import { archivePurgeService } from '../services/archivePurge.service';
 
 type ArchiveEntity = 'workflows' | 'executions' | 'agents' | 'documents';
+type BulkDeleteEntity = 'workflows' | 'executions' | 'documents';
+
+const BULK_DELETE_MAX_IDS = 500;
+const BULK_DELETE_ENTITIES: readonly BulkDeleteEntity[] = ['workflows', 'executions', 'documents'];
+
+type BulkSkipReason = 'not_found' | 'workflow_archived';
+interface BulkSkipEntry {
+  id: string;
+  reason: BulkSkipReason;
+}
 
 function assertSuperAdmin(req: AuthRequest, res: Response): boolean {
   if (req.user?.super_admin) return true;
@@ -212,6 +223,98 @@ export const adminArchiveController = {
       return res.json({ success: true });
     } catch (error) {
       console.error('unarchiveRecord error:', error);
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  },
+
+  async bulkDeleteArchived(req: AuthRequest, res: Response) {
+    try {
+      if (!assertSuperAdmin(req, res)) return;
+
+      const entity = req.params.entity as string | undefined;
+      if (!entity || !BULK_DELETE_ENTITIES.includes(entity as BulkDeleteEntity)) {
+        return res.status(400).json({
+          error: 'Invalid entity',
+          details: `Allowed: ${BULK_DELETE_ENTITIES.join(', ')}`,
+        });
+      }
+
+      const rawIds = (req.body as { ids?: unknown })?.ids;
+      if (!Array.isArray(rawIds) || rawIds.length === 0) {
+        return res.status(400).json({ error: 'Missing ids', details: 'Provide a non-empty array of ids' });
+      }
+      if (rawIds.length > BULK_DELETE_MAX_IDS) {
+        return res.status(400).json({
+          error: 'Too many ids',
+          details: `Max ${BULK_DELETE_MAX_IDS} ids per request`,
+        });
+      }
+      const ids = Array.from(
+        new Set(
+          rawIds.filter((value): value is string => typeof value === 'string' && value.length > 0),
+        ),
+      );
+      if (ids.length === 0) {
+        return res.status(400).json({ error: 'Missing ids', details: 'Ids must be non-empty strings' });
+      }
+
+      const skipped: BulkSkipEntry[] = [];
+      const typedEntity = entity as BulkDeleteEntity;
+
+      if (typedEntity === 'workflows') {
+        const archived = await prisma.workflow.findMany({
+          where: { id: { in: ids }, is_archived: true },
+          select: { id: true },
+        });
+        const archivedSet = new Set(archived.map((row) => row.id));
+        for (const id of ids) {
+          if (!archivedSet.has(id)) skipped.push({ id, reason: 'not_found' });
+        }
+        const candidateIds = ids.filter((id) => archivedSet.has(id));
+        const result = await archivePurgeService.purgeWorkflowsByIds(candidateIds);
+        for (const blockedId of result.blocked) {
+          skipped.push({ id: blockedId, reason: 'workflow_archived' });
+        }
+        return res.json({ deleted: result.purged, skipped });
+      }
+
+      if (typedEntity === 'executions') {
+        const archived = await prisma.workflowExecution.findMany({
+          where: { id: { in: ids }, is_archived: true },
+          select: { id: true, workflow: { select: { is_archived: true } } },
+        });
+        const archivedById = new Map(archived.map((row) => [row.id, row]));
+        const deletable: string[] = [];
+        for (const id of ids) {
+          const row = archivedById.get(id);
+          if (!row) {
+            skipped.push({ id, reason: 'not_found' });
+            continue;
+          }
+          if (row.workflow?.is_archived) {
+            skipped.push({ id, reason: 'workflow_archived' });
+            continue;
+          }
+          deletable.push(id);
+        }
+        await archivePurgeService.purgeExecutionsByIds(deletable);
+        return res.json({ deleted: deletable, skipped });
+      }
+
+      // documents
+      const archived = await prisma.file.findMany({
+        where: { id: { in: ids }, is_archived: true },
+        select: { id: true },
+      });
+      const archivedSet = new Set(archived.map((row) => row.id));
+      for (const id of ids) {
+        if (!archivedSet.has(id)) skipped.push({ id, reason: 'not_found' });
+      }
+      const deletable = ids.filter((id) => archivedSet.has(id));
+      await archivePurgeService.purgeFilesByIds(deletable);
+      return res.json({ deleted: deletable, skipped });
+    } catch (error) {
+      console.error('bulkDeleteArchived error:', error);
       return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
     }
   },

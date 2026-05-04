@@ -7,6 +7,7 @@ import { processDocumentOcr } from '../services/ocr.service';
 // Mock Prisma
 jest.mock('../lib/prisma', () => ({
   prisma: {
+    fileHistoryEvent: { create: jest.fn().mockResolvedValue({ id: 'h1' }) },
     file: {
       findUnique: jest.fn(),
       findFirst: jest.fn(),
@@ -19,6 +20,8 @@ jest.mock('../lib/prisma', () => ({
     profileGroupMember: { findMany: jest.fn() },
     folderPermission: { findMany: jest.fn() },
     filesMetadataValue: { findMany: jest.fn() },
+    filesMetadataKey: { findFirst: jest.fn() },
+    documentPermissionRule: { count: jest.fn(), findMany: jest.fn() },
     $queryRaw: jest.fn(),
   },
 }));
@@ -182,5 +185,63 @@ describe('OCR Endpoints', () => {
 
       expect(response.status).toBe(200);
     });
+  });
+
+  describe('GET /api/companies/:companyId/documents/metadata-value-suggestions', () => {
+    it('returns matching values for a valid key and query', async () => {
+      (prisma.userCompany.findFirst as jest.Mock).mockResolvedValue({
+        user_id: mockUser.id,
+        company_id: 'company-1',
+        role: 'company_admin',
+      });
+      (prisma.profileGroupMember.findMany as jest.Mock).mockResolvedValue([]);
+      (prisma.filesMetadataKey.findFirst as jest.Mock).mockResolvedValue({ id: 'key-number' });
+      (prisma.file.findMany as jest.Mock).mockResolvedValue([{ id: 'file-1' }]);
+      (prisma.filesMetadataValue.findMany as jest.Mock)
+        .mockResolvedValueOnce([]) // metadata map for access resolution
+        .mockResolvedValueOnce([{ value: 'A-123' }, { value: 'A-124' }]); // suggestions query
+
+      const response = await request(app)
+        .get('/api/companies/company-1/documents/metadata-value-suggestions?metadata_key_id=key-number&q=A-12')
+        .set('Authorization', `Bearer ${authToken}`);
+
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({ values: ['A-123', 'A-124'] });
+    });
+
+    it('returns empty values when user has no accessible files', async () => {
+      (prisma.userCompany.findFirst as jest.Mock).mockResolvedValue({
+        user_id: mockUser.id,
+        company_id: 'company-1',
+        role: 'company_admin',
+      });
+      (prisma.profileGroupMember.findMany as jest.Mock).mockResolvedValue([]);
+      (prisma.filesMetadataKey.findFirst as jest.Mock).mockResolvedValue({ id: 'key-number' });
+      (prisma.file.findMany as jest.Mock).mockResolvedValue([]);
+
+      const response = await request(app)
+        .get('/api/companies/company-1/documents/metadata-value-suggestions?metadata_key_id=key-number')
+        .set('Authorization', `Bearer ${authToken}`);
+
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({ values: [] });
+    });
+
+    it('returns 404 when metadata key is not found for company', async () => {
+      (prisma.userCompany.findFirst as jest.Mock).mockResolvedValue({
+        user_id: mockUser.id,
+        company_id: 'company-1',
+        role: 'company_admin',
+      });
+      (prisma.profileGroupMember.findMany as jest.Mock).mockResolvedValue([]);
+      (prisma.filesMetadataKey.findFirst as jest.Mock).mockResolvedValue(null);
+
+      const response = await request(app)
+        .get('/api/companies/company-1/documents/metadata-value-suggestions?metadata_key_id=missing-key')
+        .set('Authorization', `Bearer ${authToken}`);
+
+      expect(response.status).toBe(404);
+    });
+
   });
 });

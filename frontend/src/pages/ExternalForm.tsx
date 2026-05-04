@@ -632,6 +632,7 @@ export const ExternalForm = () => {
                             });
                         }
                     }}
+                    companyId={data?.company_id}
                     onUpload={handleFileUpload}
                     onViewFile={handleViewFile}
                     signedUrl={signedUrl}
@@ -680,6 +681,7 @@ export const ExternalForm = () => {
                                 field={childField}
                                 value={childValue}
                                 onChange={onChildChange}
+                                companyId={data?.company_id}
                                 disabled={isDisabled}
                                 required={isRequired}
                                 labelPosition={hideLabel ? "hidden" : "top"}

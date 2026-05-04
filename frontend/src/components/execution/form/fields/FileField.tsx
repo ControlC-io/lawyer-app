@@ -1,10 +1,12 @@
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
-import { Loader2, Upload, File, Eye, X, Camera } from "lucide-react";
-import { useRef } from "react";
+import { Loader2, Upload, File, Eye, X, Camera, Video, PenLine, Pencil } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { toast } from "@/hooks/use-toast";
+import { ImageAnnotationDialog } from "../ImageAnnotationDialog";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 interface FileFieldProps {
   field: any;
@@ -116,7 +118,8 @@ const validateFileType = (file: File, allowedTypes?: string[]): boolean => {
              fileMimeType.includes("spreadsheet") || fileExtension.match(/\.(doc|docx|xls|xlsx)$/);
     }
     if (normalizedType === "video") {
-      return fileMimeType.startsWith("video/");
+      if (fileMimeType.startsWith("video/")) return true;
+      return /\.(mp4|webm|mov|mkv|m4v|3gp|3g2)$/i.test(file.name);
     }
     if (normalizedType === "audio") {
       return fileMimeType.startsWith("audio/");
@@ -135,6 +138,72 @@ const validateFileType = (file: File, allowedTypes?: string[]): boolean => {
 const portalFileTriggerProps = (primaryColor?: string) =>
   primaryColor ? { "data-portal-file-trigger": "" as const } : {};
 
+const getUploadButtonLabel = (allowedTypes?: string[]): string => {
+  if (!allowedTypes || allowedTypes.length === 0) {
+    return "Upload File";
+  }
+
+  const normalizedTypes = Array.from(
+    new Set(
+      allowedTypes
+        .map((type) => type?.toLowerCase().trim())
+        .filter((type): type is string => Boolean(type)),
+    ),
+  );
+
+  if (normalizedTypes.length === 0 || normalizedTypes.includes("all")) {
+    return "Upload File";
+  }
+
+  if (normalizedTypes.length !== 1) {
+    return "Upload File";
+  }
+
+  const [onlyType] = normalizedTypes;
+  if (onlyType === "image" || onlyType.startsWith("image/")) {
+    return "Upload Photo";
+  }
+  if (onlyType === "video" || onlyType.startsWith("video/")) {
+    return "Upload Video";
+  }
+  if (onlyType === "pdf" || onlyType === "application/pdf" || onlyType === ".pdf") {
+    return "Upload PDF";
+  }
+
+  return "Upload File";
+};
+
+/** Filename or path segment — used for inline image preview */
+const looksLikeImageFilename = (nameOrPath: string): boolean => {
+  if (!nameOrPath) return false;
+  const base = nameOrPath.split("?")[0].split("/").pop() || "";
+  return /\.(png|jpe?g|gif|webp|svg|bmp|avif)$/i.test(base);
+};
+
+/** Raster images only — SVG is not supported in the bitmap editor */
+const looksLikeRasterImageFilename = (nameOrPath: string): boolean => {
+  if (!nameOrPath) return false;
+  const base = nameOrPath.split("?")[0].split("/").pop() || "";
+  return /\.(png|jpe?g|gif|webp|bmp|avif)$/i.test(base);
+};
+
+const coerceFileValueObject = (raw: unknown): Record<string, unknown> => {
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    return { ...(raw as Record<string, unknown>) };
+  }
+  return {};
+};
+
+/** Last-dot split: `report.tar.gz` → stem `report.tar`, extension `.gz`. */
+const splitStemAndExtension = (displayName: string): { stem: string; extension: string } => {
+  const base = displayName.split("/").pop()?.split("?")[0] ?? displayName;
+  const lastDot = base.lastIndexOf(".");
+  if (lastDot <= 0 || lastDot >= base.length - 1) {
+    return { stem: base, extension: "" };
+  }
+  return { stem: base.slice(0, lastDot), extension: base.slice(lastDot) };
+};
+
 export const FileField = ({
   field,
   value,
@@ -149,10 +218,17 @@ export const FileField = ({
   primaryColor,
   labelPosition = "top"
 }: FileFieldProps) => {
+  const { t } = useLanguage();
   const fileTriggerProps = portalFileTriggerProps(primaryColor);
   const inputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
+  const videoCameraInputRef = useRef<HTMLInputElement>(null);
+  const renameInputRef = useRef<HTMLInputElement>(null);
   const isMobile = useIsMobile();
+  const [annotateOpen, setAnnotateOpen] = useState(false);
+  const [isRenaming, setIsRenaming] = useState(false);
+  const [stemDraft, setStemDraft] = useState("");
+  const [lockedExtension, setLockedExtension] = useState("");
   const getFileName = (filePath: string, originalName?: string) => {
     // If we have the original name stored, use it
     if (originalName) {
@@ -177,12 +253,42 @@ export const FileField = ({
   const rawPath = typeof value === 'string' ? value : (value?.value ?? value);
   const filePath =
     typeof rawPath === 'string' && rawPath.length > 0 ? rawPath : null;
-  const originalName = typeof value === 'string' ? undefined : value?.original_name;
+  const originalName = typeof value === "string" ? undefined : value?.original_name;
   const fileName = filePath ? getFileName(filePath, originalName) : "";
+  const showImagePreview =
+    Boolean(filePath && signedUrl && looksLikeImageFilename(fileName || filePath));
 
-  const allowedTypes = field.allowed_file_types;
+  useEffect(() => {
+    setIsRenaming(false);
+    setAnnotateOpen(false);
+  }, [filePath]);
+
+  useEffect(() => {
+    if (isRenaming) {
+      renameInputRef.current?.focus();
+      renameInputRef.current?.select();
+    }
+  }, [isRenaming]);
+
+  const allowedTypes: string[] | undefined = field.allowed_file_types;
   const acceptAttribute = getAcceptAttribute(allowedTypes);
-  const allowsImages = !allowedTypes || allowedTypes.some(type => type.toLowerCase() === "image" || type.toLowerCase().startsWith("image"));
+  const uploadButtonLabel = getUploadButtonLabel(allowedTypes);
+  const typeAllows = (token: "image" | "video") =>
+    !allowedTypes ||
+    allowedTypes.length === 0 ||
+    allowedTypes.some((type) => {
+      const x = type.toLowerCase();
+      if (x === "all") return true;
+      if (token === "image") return x === "image" || x.startsWith("image/");
+      return x === "video" || x.startsWith("video/");
+    });
+  const allowsImages = typeAllows("image");
+  const allowsVideos = typeAllows("video");
+  const showMobileCaptureRow = isMobile && (allowsImages || allowsVideos);
+  const canAnnotateImage =
+    allowsImages &&
+    Boolean(filePath && signedUrl && looksLikeRasterImageFilename(fileName || filePath)) &&
+    !disabled;
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -203,6 +309,9 @@ export const FileField = ({
     }
     if (cameraInputRef.current) {
       cameraInputRef.current.value = "";
+    }
+    if (videoCameraInputRef.current) {
+      videoCameraInputRef.current.value = "";
     }
   };
 
@@ -230,8 +339,57 @@ export const FileField = ({
     onChange(null);
   };
 
+  const persistDisplayName = (nextOriginalName: string) => {
+    if (!filePath) return;
+    onChange({
+      ...coerceFileValueObject(value),
+      value: filePath,
+      original_name: nextOriginalName,
+    });
+  };
+
+  const persistStemAndExtension = (stem: string) => {
+    if (!filePath) return;
+    const ext = lockedExtension;
+    const trimmedStem = stem.trim();
+    const fallbackFull = getFileName(filePath);
+    const { stem: fallbackStem } = splitStemAndExtension(fallbackFull);
+    const finalStem = trimmedStem.length > 0 ? trimmedStem : fallbackStem || "file";
+    persistDisplayName(finalStem + ext);
+  };
+
+  const toggleRenaming = () => {
+    if (disabled || !filePath) return;
+    if (isRenaming) {
+      persistStemAndExtension(stemDraft);
+      setIsRenaming(false);
+      return;
+    }
+    const { stem, extension } = splitStemAndExtension(fileName);
+    setLockedExtension(extension);
+    setStemDraft(stem);
+    setIsRenaming(true);
+  };
+
+  const handleRenameBlur = () => {
+    if (!isRenaming || !filePath || disabled) return;
+    persistStemAndExtension(stemDraft);
+    setIsRenaming(false);
+  };
+
   return (
     <div className="space-y-1.5 w-full">
+      {canAnnotateImage && (
+        <ImageAnnotationDialog
+          open={annotateOpen}
+          onOpenChange={setAnnotateOpen}
+          imageUrl={signedUrl!}
+          filename={fileName || filePath || "image.png"}
+          onSave={(file) => {
+            void Promise.resolve(onUpload(file));
+          }}
+        />
+      )}
       {labelPosition !== "hidden" && (
         <Label className="text-sm font-medium flex items-center gap-1">
           {field.label || field.name || field.id}
@@ -259,47 +417,132 @@ export const FileField = ({
             capture="environment"
           />
         )}
+        {isMobile && allowsVideos && (
+          <Input
+            ref={videoCameraInputRef}
+            type="file"
+            className="hidden"
+            onChange={handleCameraCapture}
+            disabled={disabled || isUploading}
+            accept="video/*"
+            capture="environment"
+          />
+        )}
 
         {filePath ? (
-          <div className="flex-1 flex items-center gap-2 p-2 border rounded-md bg-muted/50">
-            <File className="h-4 w-4 text-muted-foreground shrink-0" />
-            <span className="text-sm flex-1 truncate" title={fileName}>
-              {fileName}
-            </span>
-            <div className="flex items-center gap-1">
-              {signedUrl && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8"
-                  onClick={() => onView(signedUrl, fileName, filePath)}
-                  title="View file"
-                >
-                  <Eye className="h-4 w-4" />
-                </Button>
-              )}
-              {!disabled && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8 text-destructive hover:text-destructive"
-                  onClick={handleRemove}
-                  title="Remove file"
-                >
-                  <X className="h-4 w-4" />
-                </Button>
-              )}
+          <div className="flex min-w-0 flex-1 flex-wrap items-start gap-3 rounded-md border bg-muted/50 p-2 sm:flex-nowrap sm:items-center">
+            {showImagePreview ? (
+              <img
+                src={signedUrl}
+                alt={fileName ? `Preview: ${fileName}` : "File preview"}
+                className="h-28 w-28 shrink-0 rounded-md border bg-background object-contain p-1 sm:h-36 sm:w-36"
+              />
+            ) : (
+              <File className="h-8 w-8 shrink-0 text-muted-foreground sm:h-10 sm:w-10" />
+            )}
+            <div className="flex min-w-0 flex-1 flex-col gap-1">
+              <div className="flex min-w-0 items-center gap-2">
+                <div className="flex min-w-0 flex-1 items-center gap-1">
+                  {!disabled && (
+                    <Button
+                      type="button"
+                      variant={isRenaming ? "secondary" : "ghost"}
+                      size="icon"
+                      className="h-8 w-8"
+                      onMouseDown={(e) => {
+                        // Avoid input blur firing first (would persist + exit rename, then click would re-open).
+                        if (isRenaming) e.preventDefault();
+                      }}
+                      onClick={() => toggleRenaming()}
+                      title={isRenaming ? "Done renaming" : "Rename file"}
+                    >
+                      <PenLine className="h-4 w-4" />
+                    </Button>
+                  )}
+                  {isRenaming && !disabled ? (
+                    <div className="flex min-w-0 flex-1 items-center gap-0.5 rounded-md border border-input bg-background px-2 py-1">
+                      <Input
+                        ref={renameInputRef}
+                        type="text"
+                        className="h-8 min-w-0 flex-1 border-0 bg-transparent px-0 py-0 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
+                        value={stemDraft}
+                        onChange={(e) => setStemDraft(e.target.value)}
+                        onBlur={handleRenameBlur}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            (e.target as HTMLInputElement).blur();
+                          }
+                          if (e.key === "Escape") {
+                            e.preventDefault();
+                            const { stem } = splitStemAndExtension(fileName);
+                            setStemDraft(stem);
+                            setIsRenaming(false);
+                          }
+                        }}
+                        title="File name (without extension)"
+                        aria-label="File name without extension"
+                      />
+                      {lockedExtension ? (
+                        <span className="shrink-0 select-none text-sm tabular-nums text-muted-foreground">
+                          {lockedExtension}
+                        </span>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <span className="min-w-0 flex-1 truncate text-sm" title={fileName}>
+                      {fileName}
+                    </span>
+                  )}
+                </div>
+                <div className="ml-auto flex shrink-0 items-center gap-1">
+                  {canAnnotateImage && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8"
+                      onClick={() => setAnnotateOpen(true)}
+                      title={String(t("imageAnnotation.title"))}
+                      aria-label={String(t("imageAnnotation.title"))}
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                  )}
+                  {signedUrl && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8"
+                      onClick={() => onView(signedUrl, fileName, filePath)}
+                      title="View file"
+                    >
+                      <Eye className="h-4 w-4" />
+                    </Button>
+                  )}
+                  {!disabled && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 text-destructive hover:text-destructive"
+                      onClick={handleRemove}
+                      title="Remove file"
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
-        ) : (
-          isMobile && allowsImages ? (
-            <div className="flex gap-2">
+        ) : showMobileCaptureRow ? (
+            <div className="flex flex-wrap gap-2 w-full">
               <Button
                 type="button"
                 variant="outline"
-                className="flex-1 portal-primary-btn"
+                className="flex-1 min-w-[7rem] portal-primary-btn"
                 onClick={() => inputRef.current?.click()}
                 disabled={disabled || isUploading}
                 data-portal-color={primaryColor ? "true" : undefined}
@@ -310,24 +553,44 @@ export const FileField = ({
                 ) : (
                   <Upload className="h-4 w-4 mr-2" />
                 )}
-                {isUploading ? "Uploading..." : "Choose File"}
+                {isUploading ? "Uploading..." : uploadButtonLabel}
               </Button>
-              <Button
-                type="button"
-                variant="outline"
-                className="flex-1 portal-primary-btn"
-                onClick={() => cameraInputRef.current?.click()}
-                disabled={disabled || isUploading}
-                data-portal-color={primaryColor ? "true" : undefined}
-                {...fileTriggerProps}
-              >
-                {isUploading ? (
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                ) : (
-                  <Camera className="h-4 w-4 mr-2" />
-                )}
-                {isUploading ? "Uploading..." : "Camera"}
-              </Button>
+              {allowsImages && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="flex-1 min-w-[7rem] portal-primary-btn"
+                  onClick={() => cameraInputRef.current?.click()}
+                  disabled={disabled || isUploading}
+                  data-portal-color={primaryColor ? "true" : undefined}
+                  {...fileTriggerProps}
+                >
+                  {isUploading ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                    <Camera className="h-4 w-4 mr-2" />
+                  )}
+                  {isUploading ? "Uploading..." : "Camera"}
+                </Button>
+              )}
+              {allowsVideos && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="flex-1 min-w-[7rem] portal-primary-btn"
+                  onClick={() => videoCameraInputRef.current?.click()}
+                  disabled={disabled || isUploading}
+                  data-portal-color={primaryColor ? "true" : undefined}
+                  {...fileTriggerProps}
+                >
+                  {isUploading ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                    <Video className="h-4 w-4 mr-2" />
+                  )}
+                  {isUploading ? "Uploading..." : "Record video"}
+                </Button>
+              )}
             </div>
           ) : (
             <Button
@@ -344,9 +607,8 @@ export const FileField = ({
               ) : (
                 <Upload className="h-4 w-4 mr-2" />
               )}
-              {isUploading ? "Uploading..." : "Upload File"}
+              {isUploading ? "Uploading..." : uploadButtonLabel}
             </Button>
-          )
         )}
       </div>
 

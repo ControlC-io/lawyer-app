@@ -1,5 +1,6 @@
 import { stepReminderService } from '../services/stepReminder.service';
 import { prisma } from '../lib/prisma';
+import { notificationService } from '../services/notification.service';
 
 jest.mock('../lib/prisma', () => ({
   prisma: {
@@ -84,5 +85,6 @@ describe('stepReminder.service', () => {
         }),
       })
     );
+    expect(notificationService.dispatchAssignmentForExecutionStep).toHaveBeenCalledWith('exec-step-1');
   });
 });

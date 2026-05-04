@@ -9,6 +9,10 @@ jest.mock('../services/storage', () => ({
 jest.mock('../services/email.service', () => ({
   emailService: {
     sendEmail: jest.fn().mockResolvedValue(undefined),
+    sendInvitation: jest.fn().mockResolvedValue(undefined),
+    sendAssignmentNotification: jest.fn().mockResolvedValue(undefined),
+    sendExternalFormLink: jest.fn().mockResolvedValue(undefined),
+    sendWorkflowActionEmail: jest.fn().mockResolvedValue(undefined),
   }
 }));
 

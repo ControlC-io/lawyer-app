@@ -71,18 +71,22 @@ export function resolveStepNotificationSettings(step: StepNotificationInput): St
     .sort((a: number, b: number) => a - b)
     .filter((value: number, index: number, arr: number[]) => index === 0 || value !== arr[index - 1]);
 
+  const assignmentEnabled = assignment.enabled !== false;
+  const effectiveReminderMode: ReminderMode = assignmentEnabled ? reminderMode : 'none';
+
   return {
-    assignmentEnabled: assignment.enabled !== false,
-    reminderMode,
+    assignmentEnabled,
+    reminderMode: effectiveReminderMode,
     reminderDelayMinutes:
-      reminderMode === 'repeat' ? parsePositiveInteger(reminder.delay_minutes, 24 * 60) : 24 * 60,
+      effectiveReminderMode === 'repeat' ? parsePositiveInteger(reminder.delay_minutes, 24 * 60) : 24 * 60,
     repeatEveryMinutes:
-      reminderMode === 'repeat' ? parsePositiveInteger(reminder.repeat_every_minutes, 24 * 60) : 24 * 60,
+      effectiveReminderMode === 'repeat' ? parsePositiveInteger(reminder.repeat_every_minutes, 24 * 60) : 24 * 60,
     maxCount:
-      reminderMode === 'repeat' && reminder.max_count !== null && reminder.max_count !== undefined
+      effectiveReminderMode === 'repeat' && reminder.max_count !== null && reminder.max_count !== undefined
         ? parsePositiveInteger(reminder.max_count, 1)
         : undefined,
-    scheduleMinutes: reminderMode === 'schedule' && scheduleMinutes.length > 0 ? scheduleMinutes : [24 * 60],
+    scheduleMinutes:
+      effectiveReminderMode === 'schedule' && scheduleMinutes.length > 0 ? scheduleMinutes : [24 * 60],
   };
 }
 

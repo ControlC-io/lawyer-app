@@ -72,8 +72,14 @@ function legacyWorkflowPermissionType(type: string): string {
 }
 
 type ReminderMode = 'none' | 'repeat' | 'schedule';
+type EmailRecipientSource = 'creator' | 'static' | 'user_field';
 type NormalizedStepNotifications = {
-  assignment: { enabled: boolean };
+  assignment: {
+    enabled: boolean;
+    use_custom_notification: boolean;
+    subject_template: string;
+    content_template: string;
+  };
   reminder: {
     mode: ReminderMode;
     delay_minutes: number;
@@ -82,6 +88,21 @@ type NormalizedStepNotifications = {
     schedule_minutes: number[];
   };
 };
+type NormalizedEmailActionConfig = {
+  subject_template: string;
+  body_template_html: string;
+  recipient_sources: EmailRecipientSource[];
+  static_recipients: string[];
+  user_field_ids: string[];
+  attachment_field_ids: string[];
+};
+
+const EMAIL_ACTION_ALLOWED_TYPES = new Set(['manual', 'automatic', 'agent', 'email']);
+const EMAIL_ACTION_ALLOWED_RECIPIENT_SOURCES = new Set<EmailRecipientSource>([
+  'creator',
+  'static',
+  'user_field',
+]);
 
 function parsePositiveInteger(value: unknown, fallbackValue: number): number {
   const parsed = Number(value);
@@ -104,7 +125,12 @@ function normalizeStepNotifications(input: unknown): {
   if (input === null || input === undefined) {
     return {
       value: {
-        assignment: { enabled: true },
+        assignment: {
+          enabled: true,
+          use_custom_notification: false,
+          subject_template: '',
+          content_template: '',
+        },
         reminder: {
           mode: 'none',
           delay_minutes: 24 * 60,
@@ -155,9 +181,29 @@ function normalizeStepNotifications(input: unknown): {
     return { error: 'notifications.reminder.schedule_minutes must contain at least one positive delay' };
   }
 
+  const subjectTemplate =
+    typeof assignmentInput.subject_template === 'string' ? assignmentInput.subject_template.trim() : '';
+  const contentTemplate =
+    typeof assignmentInput.content_template === 'string' ? assignmentInput.content_template.trim() : '';
+  const useCustomNotification =
+    typeof assignmentInput.use_custom_notification === 'boolean'
+      ? assignmentInput.use_custom_notification
+      : subjectTemplate.length > 0 || contentTemplate.length > 0;
+
   return {
     value: {
-      assignment: { enabled: assignmentInput.enabled !== false },
+      assignment: {
+        enabled: assignmentInput.enabled !== false,
+        use_custom_notification: useCustomNotification,
+        subject_template:
+          typeof assignmentInput.subject_template === 'string'
+            ? assignmentInput.subject_template.trim()
+            : '',
+        content_template:
+          typeof assignmentInput.content_template === 'string'
+            ? assignmentInput.content_template.trim()
+            : '',
+      },
       reminder: {
         mode: normalizedMode,
         delay_minutes: normalizedMode === 'repeat' ? delayMinutes : 24 * 60,
@@ -187,6 +233,132 @@ function normalizeStepExplanation(input: unknown): string | undefined {
 
   if (!plainText) return undefined;
   return trimmed;
+}
+
+function hasMeaningfulHtmlContent(input: string): boolean {
+  const plainText = input
+    .replace(/<br\s*\/?>/gi, ' ')
+    .replace(/<\/p>/gi, ' ')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&nbsp;|&#160;/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  return plainText.length > 0;
+}
+
+type WorkflowDataStructureField = {
+  id?: unknown;
+  field_type?: unknown;
+  parent_item_id?: unknown;
+};
+
+function normalizeWorkflowDataStructure(input: unknown): WorkflowDataStructureField[] {
+  if (!Array.isArray(input)) return [];
+  return input.filter((field) => field && typeof field === 'object') as WorkflowDataStructureField[];
+}
+
+function validateWorkflowUserFields(dataStructureInput: unknown): string | null {
+  const fields = normalizeWorkflowDataStructure(dataStructureInput);
+  for (const field of fields) {
+    if (field.field_type !== 'user') continue;
+    if (typeof field.id !== 'string' || !field.id.trim()) {
+      return 'Every user field must have a non-empty id';
+    }
+  }
+  return null;
+}
+
+function getTopLevelUserFieldIds(dataStructureInput: unknown): Set<string> {
+  const fields = normalizeWorkflowDataStructure(dataStructureInput);
+  return new Set(
+    fields
+      .filter((field) => field.field_type === 'user' && !field.parent_item_id && typeof field.id === 'string' && field.id.trim())
+      .map((field) => field.id as string)
+  );
+}
+
+function getDataStructureFieldIdsByType(
+  dataStructureInput: unknown,
+  fieldType: string
+): Set<string> {
+  const fields = normalizeWorkflowDataStructure(dataStructureInput);
+  return new Set(
+    fields
+      .filter((field) => field.field_type === fieldType && typeof field.id === 'string' && field.id.trim())
+      .map((field) => field.id as string)
+  );
+}
+
+function normalizeStringArray(input: unknown): string[] {
+  if (!Array.isArray(input)) return [];
+  return input
+    .map((entry) => (typeof entry === 'string' ? entry.trim() : ''))
+    .filter((entry) => entry.length > 0);
+}
+
+function isValidEmailAddress(input: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input);
+}
+
+function normalizeEmailActionConfig(
+  input: unknown,
+  options: { validUserFieldIds: Set<string>; validFileFieldIds: Set<string> }
+): {
+  value?: NormalizedEmailActionConfig;
+  error?: string;
+} {
+  if (input !== null && input !== undefined && typeof input !== 'object') {
+    return { error: 'email_action must be an object' };
+  }
+
+  const source = (input ?? {}) as Record<string, unknown>;
+  const subjectTemplate =
+    typeof source.subject_template === 'string' ? source.subject_template.trim() : '';
+  const bodyTemplateHtml =
+    typeof source.body_template_html === 'string' ? source.body_template_html.trim() : '';
+
+  const rawRecipientSources = normalizeStringArray(source.recipient_sources);
+  const recipientSources = Array.from(
+    new Set(
+      rawRecipientSources.filter(
+        (entry): entry is EmailRecipientSource =>
+          EMAIL_ACTION_ALLOWED_RECIPIENT_SOURCES.has(entry as EmailRecipientSource)
+      )
+    )
+  );
+
+  const staticRecipients = Array.from(new Set(normalizeStringArray(source.static_recipients)));
+  for (const recipient of staticRecipients) {
+    if (!isValidEmailAddress(recipient)) {
+      return { error: `email_action.static_recipients contains invalid email: ${recipient}` };
+    }
+  }
+
+  const userFieldIds = Array.from(new Set(normalizeStringArray(source.user_field_ids)));
+  for (const fieldId of userFieldIds) {
+    if (!options.validUserFieldIds.has(fieldId)) {
+      return { error: `email_action.user_field_ids contains unsupported field id: ${fieldId}` };
+    }
+  }
+
+  const attachmentFieldIds = Array.from(new Set(normalizeStringArray(source.attachment_field_ids)));
+  for (const fieldId of attachmentFieldIds) {
+    if (!options.validFileFieldIds.has(fieldId)) {
+      return { error: `email_action.attachment_field_ids contains unsupported file field id: ${fieldId}` };
+    }
+  }
+
+  return {
+    value: {
+      subject_template: subjectTemplate,
+      body_template_html: bodyTemplateHtml,
+      recipient_sources: recipientSources,
+      static_recipients: recipientSources.includes('static') ? staticRecipients : [],
+      user_field_ids: recipientSources.includes('user_field') ? userFieldIds : [],
+      attachment_field_ids: attachmentFieldIds,
+    },
+  };
 }
 
 export const workflowDefinitionController = {
@@ -376,6 +548,14 @@ export const workflowDefinitionController = {
       const access = await ensureCompanyAccess(req, companyId);
       if (access.error) return res.status(access.error.status).json(access.error.body);
 
+      const userFieldValidationError = validateWorkflowUserFields(body.data_structure);
+      if (userFieldValidationError) {
+        return res.status(400).json({
+          error: 'Invalid data structure',
+          details: userFieldValidationError,
+        });
+      }
+
       const workflow = await prisma.workflow.create({
         data: {
           company_id: companyId,
@@ -428,7 +608,16 @@ export const workflowDefinitionController = {
       if (typeof body.portal_enabled === 'boolean') updateData.portal_enabled = body.portal_enabled;
       if (body.category_id !== undefined) updateData.category_id = body.category_id || null;
       if (body.icon !== undefined) updateData.icon = body.icon;
-      if (body.data_structure !== undefined) updateData.data_structure = body.data_structure;
+      if (body.data_structure !== undefined) {
+        const userFieldValidationError = validateWorkflowUserFields(body.data_structure);
+        if (userFieldValidationError) {
+          return res.status(400).json({
+            error: 'Invalid data structure',
+            details: userFieldValidationError,
+          });
+        }
+        updateData.data_structure = body.data_structure;
+      }
       if (body.canvas_comments !== undefined) updateData.canvas_comments = body.canvas_comments;
       if (body.default_status_id !== undefined) updateData.default_status_id = body.default_status_id || null;
 
@@ -461,7 +650,7 @@ export const workflowDefinitionController = {
 
       const workflow = await prisma.workflow.findFirst({
         where: { id: workflowId, company_id: companyId, is_archived: false },
-        select: { id: true },
+        select: { id: true, data_structure: true },
       });
       if (!workflow) {
         return res.status(404).json({ error: 'Workflow not found', details: 'Workflow not found or access denied' });
@@ -522,7 +711,7 @@ export const workflowDefinitionController = {
 
       const workflow = await prisma.workflow.findFirst({
         where: { id: workflowId, company_id: companyId, is_archived: false },
-        select: { id: true },
+        select: { id: true, data_structure: true },
       });
       if (!workflow) {
         return res.status(404).json({ error: 'Workflow not found', details: 'Workflow not found or access denied' });
@@ -532,11 +721,20 @@ export const workflowDefinitionController = {
         return res.status(400).json({ error: 'Invalid body', details: 'steps must be an array' });
       }
 
+      const topLevelUserFieldIds = getTopLevelUserFieldIds(workflow.data_structure);
+      const userFieldIds = getDataStructureFieldIdsByType(workflow.data_structure, 'user');
+      const fileFieldIds = getDataStructureFieldIdsByType(workflow.data_structure, 'file');
+
       const isStepAssigned = (step: Record<string, any>): boolean => {
         const config = (step.config ?? {}) as Record<string, any>;
         const assignToExecutionCreator = config.assign_to_execution_creator !== false;
+        const hasFieldAssignment =
+          config.assignment_source === 'field' &&
+          typeof config.assignment_source_field_id === 'string' &&
+          config.assignment_source_field_id.trim().length > 0;
         return Boolean(
           assignToExecutionCreator ||
+          hasFieldAssignment ||
           step.assigned_to_user_id ||
           step.assigned_to_group_id ||
           config.assigned_to_user_id ||
@@ -550,11 +748,27 @@ export const workflowDefinitionController = {
         const decisionNodeType = step.decision_node_type || 'Human';
         const originalConfig = (step.config ?? {}) as Record<string, any>;
         const config: Record<string, any> = { ...originalConfig };
+        const assignmentSource = config.assignment_source;
+        const assignmentSourceFieldId =
+          typeof config.assignment_source_field_id === 'string'
+            ? config.assignment_source_field_id.trim()
+            : '';
         const normalizedExplanation = normalizeStepExplanation(config.explanation);
         const isAgentDecision = stepType === 'decision' && ['Agent', 'Agent_Human'].includes(decisionNodeType);
         const isExternalForm = stepType === 'edit_form' && config.allow_external_assignment === true;
         const supportsNotifications = stepSupportsNotifications(stepType, actionType, decisionNodeType);
         const normalizedNotifications = normalizeStepNotifications(config.notifications);
+        const normalizedEmailAction = normalizeEmailActionConfig(config.email_action, {
+          validUserFieldIds: userFieldIds,
+          validFileFieldIds: fileFieldIds,
+        });
+
+        if (stepType === 'action' && !EMAIL_ACTION_ALLOWED_TYPES.has(actionType)) {
+          return res.status(400).json({
+            error: 'Invalid step configuration',
+            details: `Step "${step.name || 'Unnamed step'}" has an unsupported action type`,
+          });
+        }
 
         if (normalizedExplanation) {
           config.explanation = normalizedExplanation;
@@ -574,6 +788,65 @@ export const workflowDefinitionController = {
         } else if ('notifications' in config) {
           delete config.notifications;
         }
+
+        if (normalizedEmailAction.error) {
+          return res.status(400).json({
+            error: 'Invalid email action configuration',
+            details: `Step "${step.name || 'Unnamed step'}" ${normalizedEmailAction.error}`,
+          });
+        }
+
+        if (stepType === 'action' && actionType === 'email') {
+          const emailActionConfig = normalizedEmailAction.value!;
+
+          if (!emailActionConfig.subject_template) {
+            return res.status(400).json({
+              error: 'Invalid email action configuration',
+              details: `Step "${step.name || 'Unnamed step'}" email_action.subject_template is required`,
+            });
+          }
+
+          if (
+            !emailActionConfig.body_template_html ||
+            !hasMeaningfulHtmlContent(emailActionConfig.body_template_html)
+          ) {
+            return res.status(400).json({
+              error: 'Invalid email action configuration',
+              details: `Step "${step.name || 'Unnamed step'}" email_action.body_template_html must contain content`,
+            });
+          }
+
+          if (emailActionConfig.recipient_sources.length === 0) {
+            return res.status(400).json({
+              error: 'Invalid email action configuration',
+              details: `Step "${step.name || 'Unnamed step'}" email_action.recipient_sources must include at least one source`,
+            });
+          }
+
+          if (
+            emailActionConfig.recipient_sources.includes('static') &&
+            emailActionConfig.static_recipients.length === 0
+          ) {
+            return res.status(400).json({
+              error: 'Invalid email action configuration',
+              details: `Step "${step.name || 'Unnamed step'}" static recipients are required when recipient source includes static`,
+            });
+          }
+
+          if (
+            emailActionConfig.recipient_sources.includes('user_field') &&
+            emailActionConfig.user_field_ids.length === 0
+          ) {
+            return res.status(400).json({
+              error: 'Invalid email action configuration',
+              details: `Step "${step.name || 'Unnamed step'}" at least one user field is required when recipient source includes user_field`,
+            });
+          }
+
+          config.email_action = emailActionConfig;
+        } else if ('email_action' in config) {
+          delete config.email_action;
+        }
         step.config = config;
 
         const requiresAssignment =
@@ -585,6 +858,27 @@ export const workflowDefinitionController = {
           return res.status(400).json({
             error: 'Invalid step assignment',
             details: `Step "${step.name || 'Unnamed step'}" requires a user or group assignment`,
+          });
+        }
+
+        if (assignmentSource === 'field') {
+          if (!assignmentSourceFieldId) {
+            return res.status(400).json({
+              error: 'Invalid step assignment',
+              details: `Step "${step.name || 'Unnamed step'}" must select a user field for field-based assignment`,
+            });
+          }
+          if (!topLevelUserFieldIds.has(assignmentSourceFieldId)) {
+            return res.status(400).json({
+              error: 'Invalid step assignment',
+              details: `Step "${step.name || 'Unnamed step'}" assignment field must reference a top-level user field`,
+            });
+          }
+          config.assignment_source_field_id = assignmentSourceFieldId;
+        } else if (assignmentSource !== undefined && assignmentSource !== 'creator' && assignmentSource !== 'static') {
+          return res.status(400).json({
+            error: 'Invalid step assignment',
+            details: `Step "${step.name || 'Unnamed step'}" has an unsupported assignment source`,
           });
         }
 

@@ -3,12 +3,20 @@ import { prisma } from '../lib/prisma';
 import { AuthRequest, resolveCompanyForRequest } from '../middleware/auth';
 import { getDocumentProxyUrl } from '../lib/documentUrl';
 import { workflowService } from '../services/workflow.service';
-import { notificationService } from '../services/notification.service';
-import { emailService } from '../services/email.service';
+import {
+  buildDisplayNameByFieldId,
+  buildFieldValuesByName,
+  notificationService,
+  renderNotificationTemplate,
+  type NotificationTemplateContext,
+} from '../services/notification.service';
+import { emailService, type WorkflowEmailAttachment } from '../services/email.service';
 import { storageService } from '../services/storage.service';
 import { aiService } from '../services/ai.service';
 import { resolvePromptTemplate, type PromptValues } from '../lib/promptTemplate';
+import { ensureCompanyUser, isUserField, normalizeUserFieldValue } from '../lib/workflowUserField';
 import crypto from 'crypto';
+import { Readable } from 'stream';
 
 async function resolveExecutionVisibilityForUser(userId: string, companyId: string) {
   const membership = await prisma.userCompany.findFirst({
@@ -93,6 +101,127 @@ function getStepClosedByLabel(stepData: unknown): string | null {
   return null;
 }
 
+function getExecutionDataRawValues(
+  rows: Array<{ values: unknown }>
+): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  rows.forEach((row) => {
+    const rowValues = row?.values && typeof row.values === 'object' && !Array.isArray(row.values)
+      ? (row.values as Record<string, unknown>)
+      : {};
+    Object.entries(rowValues).forEach(([fieldId, fieldValue]) => {
+      result[fieldId] = fieldValue;
+    });
+  });
+  return result;
+}
+
+function extractTemplateValuesFromRawValues(rawValues: Record<string, unknown>): Record<string, unknown> {
+  const snapshot: Record<string, unknown> = {};
+  Object.entries(rawValues).forEach(([fieldId, fieldValue]) => {
+    if (fieldValue && typeof fieldValue === 'object' && !Array.isArray(fieldValue) && 'value' in (fieldValue as Record<string, unknown>)) {
+      snapshot[fieldId] = (fieldValue as Record<string, unknown>).value;
+      return;
+    }
+    snapshot[fieldId] = fieldValue;
+  });
+  return snapshot;
+}
+
+function normalizeEmailArray(values: unknown): string[] {
+  if (!Array.isArray(values)) return [];
+  return values
+    .map((entry) => (typeof entry === 'string' ? entry.trim() : ''))
+    .filter((entry) => entry.length > 0);
+}
+
+function normalizeStringArray(values: unknown): string[] {
+  if (!Array.isArray(values)) return [];
+  return values
+    .map((entry) => (typeof entry === 'string' ? entry.trim() : ''))
+    .filter((entry) => entry.length > 0);
+}
+
+function collectUserIdsFromUnknown(value: unknown): string[] {
+  if (value === null || value === undefined) return [];
+  if (Array.isArray(value)) {
+    return value.flatMap((entry) => collectUserIdsFromUnknown(entry));
+  }
+
+  const normalized = normalizeUserFieldValue(value);
+  return normalized ? [normalized] : [];
+}
+
+function safeFileNameFromPath(path: string): string {
+  const normalized = path.trim();
+  if (!normalized) return 'attachment';
+  const segments = normalized.split('/').filter(Boolean);
+  return segments.length > 0 ? segments[segments.length - 1] : 'attachment';
+}
+
+function collectFileEntriesFromRawField(rawFieldValue: unknown): Array<{ path: string; filename: string }> {
+  if (rawFieldValue === null || rawFieldValue === undefined) return [];
+
+  if (typeof rawFieldValue === 'string') {
+    const trimmed = rawFieldValue.trim();
+    if (!trimmed) return [];
+    return [{ path: trimmed, filename: safeFileNameFromPath(trimmed) }];
+  }
+
+  if (Array.isArray(rawFieldValue)) {
+    return rawFieldValue.flatMap((entry) => collectFileEntriesFromRawField(entry));
+  }
+
+  if (typeof rawFieldValue !== 'object') return [];
+
+  const objectValue = rawFieldValue as Record<string, unknown>;
+  const rawValue = objectValue.value;
+  const rawName = objectValue.original_name;
+
+  if (typeof rawValue === 'string' && rawValue.trim()) {
+    const filePath = rawValue.trim();
+    const fileName = typeof rawName === 'string' && rawName.trim()
+      ? rawName.trim()
+      : safeFileNameFromPath(filePath);
+    return [{ path: filePath, filename: fileName }];
+  }
+
+  if (Array.isArray(rawValue)) {
+    if (rawValue.length > 0 && rawValue.every((entry) => typeof entry === 'string')) {
+      const names = Array.isArray(rawName) ? rawName : [];
+      return rawValue
+        .map((entry, index) => {
+          const filePath = entry.trim();
+          if (!filePath) return null;
+          const candidateName = typeof names[index] === 'string' ? names[index].trim() : '';
+          return {
+            path: filePath,
+            filename: candidateName || safeFileNameFromPath(filePath),
+          };
+        })
+        .filter((entry): entry is { path: string; filename: string } => entry !== null);
+    }
+    return rawValue.flatMap((entry) => collectFileEntriesFromRawField(entry));
+  }
+
+  return [];
+}
+
+async function streamToBuffer(stream: Readable): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  return new Promise((resolve, reject) => {
+    stream.on('data', (chunk) => {
+      if (Buffer.isBuffer(chunk)) {
+        chunks.push(chunk);
+      } else {
+        chunks.push(Buffer.from(chunk));
+      }
+    });
+    stream.on('end', () => resolve(Buffer.concat(chunks)));
+    stream.on('error', reject);
+  });
+}
+
 export const workflowController = {
   /**
    * POST /api/workflows/:workflowId/trigger
@@ -156,6 +285,7 @@ export const workflowController = {
     let executionStep: any | null = null;
     let workflowStep: any | null = null;
     let shouldAutoCompleteActionStep = false;
+    let isEmailActionStep = false;
 
     try {
       if (!executionId || !stepId) {
@@ -208,27 +338,200 @@ export const workflowController = {
 
       workflowStep = executionStep.step;
 
-      // Check if automatic/agent step
+      // Check if supported processable step
       const isAutomaticAction =
         workflowStep.step_type === 'action' && workflowStep.action_type === 'automatic';
       const isAgentAction =
         workflowStep.step_type === 'action' && workflowStep.action_type === 'agent';
+      const isEmailAction =
+        workflowStep.step_type === 'action' && workflowStep.action_type === 'email';
+      isEmailActionStep = isEmailAction;
       const isAgentDecision =
         workflowStep.step_type === 'decision' &&
         (workflowStep.decision_node_type === 'Agent' || workflowStep.decision_node_type === 'Agent_Human' ||
           (workflowStep.decision_node_type && workflowStep.decision_node_type.toLowerCase() === 'agent'));
 
-      shouldAutoCompleteActionStep = workflowStep.step_type === 'action' && (isAutomaticAction || isAgentAction);
+      shouldAutoCompleteActionStep = workflowStep.step_type === 'action' && (isAutomaticAction || isAgentAction || isEmailAction);
 
-      if (!isAutomaticAction && !isAgentDecision && !isAgentAction) {
+      if (!isAutomaticAction && !isAgentDecision && !isAgentAction && !isEmailAction) {
         return res.json({
           success: true,
-          message: 'Step is not an automatic/agent step, skipping',
+          message: 'Step is not a processable automatic step, skipping',
         });
       }
 
       // Extract API configuration
       const config = (workflowStep.config as any) || {};
+
+      if (isEmailAction) {
+        const execution = await prisma.workflowExecution.findFirst({
+          where: { id: executionId },
+          select: { created_by: true },
+        });
+        const rawExecutionRows = await prisma.workflowExecutionData.findMany({
+          where: { execution_id: executionId },
+          select: { values: true },
+        });
+        const rawExecutionData = getExecutionDataRawValues(rawExecutionRows);
+        const executionDataSnapshot = extractTemplateValuesFromRawValues(rawExecutionData);
+        const emailActionConfig =
+          config.email_action && typeof config.email_action === 'object'
+            ? (config.email_action as Record<string, unknown>)
+            : {};
+
+        const subjectTemplate =
+          typeof emailActionConfig.subject_template === 'string'
+            ? emailActionConfig.subject_template.trim()
+            : '';
+        const bodyTemplateHtml =
+          typeof emailActionConfig.body_template_html === 'string'
+            ? emailActionConfig.body_template_html.trim()
+            : '';
+        const recipientSources = normalizeStringArray(emailActionConfig.recipient_sources);
+        const staticRecipients = normalizeEmailArray(emailActionConfig.static_recipients);
+        const userFieldIds = normalizeStringArray(emailActionConfig.user_field_ids);
+        const attachmentFieldIds = normalizeStringArray(emailActionConfig.attachment_field_ids);
+
+        const executionLink = `${process.env.APP_URL || 'http://localhost'}/workflows/executions/${executionId}`;
+        const displayNameByFieldId = buildDisplayNameByFieldId((executionStep.step as any)?.workflow?.data_structure);
+        const templateContext: NotificationTemplateContext = {
+          executionLink,
+          fieldValuesByName: buildFieldValuesByName(displayNameByFieldId, executionDataSnapshot),
+        };
+
+        const renderedSubject = renderNotificationTemplate(subjectTemplate, templateContext).trim();
+        const renderedHtml = renderNotificationTemplate(bodyTemplateHtml, templateContext).trim();
+        if (!renderedSubject || !renderedHtml) {
+          return res.status(400).json({
+            success: false,
+            error: 'Invalid email action configuration',
+            details: 'Rendered subject and body must be non-empty',
+          });
+        }
+
+        const recipientSet = new Set<string>();
+        if (recipientSources.includes('static')) {
+          staticRecipients.forEach((email) => recipientSet.add(email.toLowerCase()));
+        }
+
+        if (recipientSources.includes('creator') && execution?.created_by) {
+          const creatorProfile = await prisma.profile.findUnique({
+            where: { id: execution.created_by },
+            select: { email: true },
+          });
+          if (creatorProfile?.email) {
+            recipientSet.add(creatorProfile.email.toLowerCase());
+          }
+        }
+
+        if (recipientSources.includes('user_field') && userFieldIds.length > 0) {
+          const userIds = Array.from(
+            new Set(userFieldIds.flatMap((fieldId) => collectUserIdsFromUnknown(executionDataSnapshot[fieldId])))
+          );
+
+          const validUserIds: string[] = [];
+          for (const userId of userIds) {
+            if (await ensureCompanyUser(executionStep.company_id!, userId)) {
+              validUserIds.push(userId);
+            }
+          }
+
+          if (validUserIds.length > 0) {
+            const profiles = await prisma.profile.findMany({
+              where: { id: { in: validUserIds } },
+              select: { email: true },
+            });
+            profiles.forEach((profile) => {
+              if (profile.email) {
+                recipientSet.add(profile.email.toLowerCase());
+              }
+            });
+          }
+        }
+
+        const recipients = Array.from(recipientSet);
+        if (recipients.length === 0) {
+          return res.status(400).json({
+            success: false,
+            error: 'No recipients resolved for email action',
+          });
+        }
+
+        const attachments: WorkflowEmailAttachment[] = [];
+        const seenAttachmentKeys = new Set<string>();
+        const documentsBucket = storageService.getDocumentsBucket();
+        const fallbackBucket = storageService.getBucketName();
+
+        for (const fieldId of attachmentFieldIds) {
+          const rawFieldValue = rawExecutionData[fieldId] ?? executionDataSnapshot[fieldId];
+          const fileEntries = collectFileEntriesFromRawField(rawFieldValue);
+
+          for (const entry of fileEntries) {
+            if (!entry.path) continue;
+            const dedupeKey = `${entry.path}:${entry.filename}`;
+            if (seenAttachmentKeys.has(dedupeKey)) continue;
+            seenAttachmentKeys.add(dedupeKey);
+
+            let stream: Readable;
+            try {
+              stream = await storageService.downloadFile(documentsBucket, entry.path);
+            } catch {
+              stream = await storageService.downloadFile(fallbackBucket, entry.path);
+            }
+            const fileBuffer = await streamToBuffer(stream);
+            attachments.push({
+              filename: entry.filename || safeFileNameFromPath(entry.path),
+              content: fileBuffer.toString('base64'),
+              disposition: 'attachment',
+            });
+          }
+        }
+
+        for (const recipient of recipients) {
+          await emailService.sendWorkflowActionEmail(recipient, renderedSubject, renderedHtml, {
+            text: renderedHtml.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim(),
+            attachments,
+          });
+        }
+
+        const completedAt = new Date();
+        const stepDataWithMeta = attachStepCompletionMeta(executionDataSnapshot, {
+          startedAt: executionStep.started_at,
+          completedAt,
+          closedBySource: 'system',
+          closedByName: 'system',
+        });
+
+        await workflowService.cancelReminderForExecutionStep(stepId);
+        await prisma.workflowExecutionStep.update({
+          where: { id: stepId },
+          data: {
+            status: 'completed',
+            completed_at: completedAt,
+            step_data: stepDataWithMeta,
+          },
+        });
+
+        const triggeredSteps = await workflowService.advanceWorkflow(
+          executionId,
+          executionStep.step_id,
+          executionStep.company_id!
+        );
+        const latestExecution = await prisma.workflowExecution.findUnique({
+          where: { id: executionId },
+          select: { status: true },
+        });
+
+        return res.json({
+          success: true,
+          message: 'Email action completed',
+          recipients_count: recipients.length,
+          attachments_count: attachments.length,
+          triggered_steps: triggeredSteps,
+          execution_status: latestExecution?.status ?? 'running',
+        });
+      }
+
       const hasAgentSource = Boolean(config.agent_id);
       const hasIntegrationSource = Boolean(config.api_configuration_id);
       if (isAgentDecision && hasAgentSource === hasIntegrationSource) {
@@ -470,7 +773,7 @@ export const workflowController = {
     } catch (error) {
       console.error('Error processing automatic step:', error);
       // Dispatch-only contract: keep the step open for `/complete` callback.
-      if (shouldAutoCompleteActionStep && executionStep?.status === 'running') {
+      if (shouldAutoCompleteActionStep && !isEmailActionStep && executionStep?.status === 'running') {
         try {
           const executionDataSnapshot = await workflowService.getExecutionDataSnapshot(executionId);
           await prisma.workflowExecutionStep.update({
@@ -1111,11 +1414,48 @@ export const workflowController = {
             value: newItems,
           };
         } else {
-          // Regular field update
-          transformedValues[fieldId] = {
-            ...currentValues[fieldId],
-            value,
-          };
+          let normalizedValue = value;
+          if (isUserField(field)) {
+            const normalizedUserId = normalizeUserFieldValue(value);
+            if (normalizedUserId) {
+              const isAllowedUser = await ensureCompanyUser(companyId, normalizedUserId);
+              if (!isAllowedUser) {
+                return res.status(400).json({
+                  error: 'invalid user field value',
+                  details: `Field "${field.name || fieldId}" must reference a user in this company`,
+                });
+              }
+            }
+            normalizedValue = normalizedUserId;
+          }
+
+          const isFileLikePayload = (v: unknown): v is { value: string; original_name?: unknown } =>
+            v !== null &&
+            typeof v === 'object' &&
+            !Array.isArray(v) &&
+            typeof (v as { value?: unknown }).value === 'string';
+
+          const isFileOrSignatureField =
+            field.field_type === 'file' || field.field_type === 'signature';
+
+          if (isFileOrSignatureField && isFileLikePayload(normalizedValue)) {
+            const path = normalizedValue.value.trim();
+            const trimmedName =
+              typeof normalizedValue.original_name === 'string'
+                ? normalizedValue.original_name.trim()
+                : '';
+            transformedValues[fieldId] = {
+              ...currentValues[fieldId],
+              value: path,
+              ...(trimmedName.length > 0 ? { original_name: trimmedName } : {}),
+            };
+          } else {
+            // Regular field update
+            transformedValues[fieldId] = {
+              ...currentValues[fieldId],
+              value: normalizedValue,
+            };
+          }
         }
       }
 

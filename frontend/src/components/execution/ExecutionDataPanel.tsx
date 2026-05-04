@@ -222,9 +222,7 @@ export const ExecutionDataPanel = ({
       if (!runningStep) return;
 
       // Check if it's an automatic file step
-      const isAutomaticFileStep =
-        runningStep.workflow_steps?.step_type === 'file' &&
-        runningStep.workflow_steps?.action_type === 'automatic';
+      const isAutomaticFileStep = runningStep.workflow_steps?.step_type === 'file';
 
       if (!isAutomaticFileStep) return;
 
@@ -755,64 +753,67 @@ export const ExecutionDataPanel = ({
     }
   };
 
-  const handleFormSubmit = async (step: any) => {
-    // Validate required fields first
-    const validation = validateRequiredFields(step);
-    if (!validation.isValid) {
-      const fieldList = validation.missingFields.join(", ");
-      toast({
-        title: t("executionDataPanel.requiredFieldsMissing"),
-        description: `${t("executionDataPanel.requiredFieldsMissingDescription")} ${fieldList}`,
-        variant: "destructive"
-      });
-      return false;
-    }
-
-    // Field-level validation rules (format, length, range, etc.)
-    {
-      const cfg2 = (step?.workflow_steps?.config || {}) as any;
-      const fieldValidations = (cfg2.field_validations as FieldValidationRule[] | undefined) ?? [];
-      if (fieldValidations.length > 0) {
-        const allFields2 = getAllFields();
-        const currentValues2: Record<string, any> = {};
-        allFields2.forEach(f => {
-          const execRow = f.execRow;
-          const editingKey = `${execRow.id}-${f.id}`;
-          if (form.editingValues[editingKey] !== undefined) {
-            currentValues2[f.id] = form.editingValues[editingKey];
-          } else {
-            currentValues2[f.id] = (execRow.values as any)?.[f.id]?.value;
-          }
+  const handleFormSubmit = async (step: any, opts?: { skipValidation?: boolean }) => {
+    const skipValidation = !!opts?.skipValidation;
+    if (!skipValidation) {
+      // Validate required fields first
+      const validation = validateRequiredFields(step);
+      if (!validation.isValid) {
+        const fieldList = validation.missingFields.join(", ");
+        toast({
+          title: t("executionDataPanel.requiredFieldsMissing"),
+          description: `${t("executionDataPanel.requiredFieldsMissingDescription")} ${fieldList}`,
+          variant: "destructive"
         });
-        const validationErrors = validateAllFields(fieldValidations, currentValues2);
-        if (Object.keys(validationErrors).length > 0) {
-          const errorLines: string[] = [];
-          for (const [fieldId, errors] of Object.entries(validationErrors)) {
-            const fieldDef = allFields2.find(f => f.id === fieldId);
-            const fieldName = fieldDef?.name || fieldId;
-            errorLines.push(`${fieldName}: ${errors.join(", ")}`);
-          }
-          toast({
-            title: t("executionDataPanel.fieldValidationFailed"),
-            description: errorLines.join("\n"),
-            variant: "destructive",
+        return false;
+      }
+
+      // Field-level validation rules (format, length, range, etc.)
+      {
+        const cfg2 = (step?.workflow_steps?.config || {}) as any;
+        const fieldValidations = (cfg2.field_validations as FieldValidationRule[] | undefined) ?? [];
+        if (fieldValidations.length > 0) {
+          const allFields2 = getAllFields();
+          const currentValues2: Record<string, any> = {};
+          allFields2.forEach(f => {
+            const execRow = f.execRow;
+            const editingKey = `${execRow.id}-${f.id}`;
+            if (form.editingValues[editingKey] !== undefined) {
+              currentValues2[f.id] = form.editingValues[editingKey];
+            } else {
+              currentValues2[f.id] = (execRow.values as any)?.[f.id]?.value;
+            }
           });
-          return false;
+          const validationErrors = validateAllFields(fieldValidations, currentValues2);
+          if (Object.keys(validationErrors).length > 0) {
+            const errorLines: string[] = [];
+            for (const [fieldId, errors] of Object.entries(validationErrors)) {
+              const fieldDef = allFields2.find(f => f.id === fieldId);
+              const fieldName = fieldDef?.name || fieldId;
+              errorLines.push(`${fieldName}: ${errors.join(", ")}`);
+            }
+            toast({
+              title: t("executionDataPanel.fieldValidationFailed"),
+              description: errorLines.join("\n"),
+              variant: "destructive",
+            });
+            return false;
+          }
         }
       }
-    }
 
-    // AI form validation gate (internal edit_form):
-    // Must be explicitly validated via "Validate data" button.
-    const cfg = (step?.workflow_steps?.config || {}) as any;
-    const aiEnabled = step?.workflow_steps?.step_type === "edit_form" && !!cfg.ai_form_validation_enabled;
-    if (aiEnabled && aiFormValidation.status !== "valid") {
-      toast({
-        title: t("executionDataPanel.validationRequired"),
-        description: t("executionDataPanel.validationRequiredDescription"),
-        variant: "destructive",
-      });
-      return false;
+      // AI form validation gate (internal edit_form):
+      // Must be explicitly validated via "Validate data" button.
+      const cfg = (step?.workflow_steps?.config || {}) as any;
+      const aiEnabled = step?.workflow_steps?.step_type === "edit_form" && !!cfg.ai_form_validation_enabled;
+      if (aiEnabled && aiFormValidation.status !== "valid") {
+        toast({
+          title: t("executionDataPanel.validationRequired"),
+          description: t("executionDataPanel.validationRequiredDescription"),
+          variant: "destructive",
+        });
+        return false;
+      }
     }
 
     // Save all pending form changes
@@ -948,11 +949,11 @@ export const ExecutionDataPanel = ({
   }
   const isDecisionStep = runningStep.workflow_steps?.step_type === 'decision';
   const isManualActionStep = runningStep.workflow_steps?.step_type === 'action' && runningStep.workflow_steps?.action_type === 'manual';
-  const isManualFileStep = runningStep.workflow_steps?.step_type === 'file' && runningStep.workflow_steps?.action_type !== 'automatic';
-  const isActionStep = runningStep.workflow_steps?.action_type === 'manual' || runningStep.workflow_steps?.step_type === 'edit_form';
+  const isFileStep = runningStep.workflow_steps?.step_type === 'file';
   const isAutomaticAction = runningStep.workflow_steps?.step_type === 'action' && runningStep.workflow_steps?.action_type === 'automatic';
-  const isAutomaticFileStep = runningStep.workflow_steps?.step_type === 'file' && runningStep.workflow_steps?.action_type === 'automatic';
+  const isAutomaticFileStep = isFileStep;
   const isAgentAction = runningStep.workflow_steps?.action_type === 'agent';
+  const isEmailAction = runningStep.workflow_steps?.step_type === 'action' && runningStep.workflow_steps?.action_type === 'email';
   // Agent decision steps (not Agent_Human) are fully automatic - user cannot make decision
   const isAgentDecision = isDecisionStep && runningStep.workflow_steps?.decision_node_type === 'Agent';
   // Agent_Human decision steps: agent makes decision first, then human confirms
@@ -964,7 +965,7 @@ export const ExecutionDataPanel = ({
   const agentDecisionReason = stepData.agent_decision_reason;
   // For Agent_Human, wait for agent decision before allowing human interaction
   const isWaitingForAgentDecision = isAgentPlusHumanDecision && !agentDecisionChoice;
-  const isApiProcessedAction = isAutomaticAction || isAgentAction || isAutomaticFileStep || isAgentDecision || isWaitingForAgentDecision;
+  const isApiProcessedAction = isAutomaticAction || isAgentAction || isEmailAction || isAutomaticFileStep || isAgentDecision || isWaitingForAgentDecision;
   const outgoingConnections = (connections || []).filter((c: any) => c.source_step_id === runningStep.workflow_steps?.id);
   const isAssignee = runningStep.assigned_to_user_id === profile?.id;
   const isGroupMember = runningStep.assigned_to_group_id && myGroupIds?.includes(runningStep.assigned_to_group_id);
@@ -1081,6 +1082,7 @@ export const ExecutionDataPanel = ({
               form.handleValueChange(editingKey, val);
             }
           }}
+          companyId={companyId ?? undefined}
           disabled={disabled}
           required={required}
           labelPosition={labelPosition}
@@ -1119,6 +1121,7 @@ export const ExecutionDataPanel = ({
                 field={childField}
                 value={childValue}
                 onChange={onChildChange}
+                companyId={companyId ?? undefined}
                 disabled={isDisabled}
                 required={isRequired}
                 labelPosition={hideLabel ? "hidden" : "top"}
@@ -1425,7 +1428,7 @@ export const ExecutionDataPanel = ({
                 } else {
                   form.handleValueChange(editingKey, val);
                 }
-              }} disabled={disabled} required={required}
+              }} companyId={companyId ?? undefined} disabled={disabled} required={required}
                 primaryColor={FIXED_FORM_PRIMARY_COLOR}
                 // OptionField props
                 dynamicOptions={form.dynamicOptions[fieldUuid]} isLoadingDynamic={form.loadingDynamicOptions[fieldUuid]} dynamicError={form.dynamicOptionsErrors[fieldUuid]} onRetryDynamic={() => form.retryDynamicOptions(fieldUuid)}
@@ -1442,7 +1445,7 @@ export const ExecutionDataPanel = ({
                   const childFieldType = childField.field_type || childField.type;
                   const isFileChild = childFieldType === 'file';
                   const childFilePath = isFileChild && childValue ? (typeof childValue === 'string' ? childValue : childValue?.value) : null;
-                  return <FieldRenderer field={childField} value={childValue} onChange={onChildChange} disabled={isDisabled}
+                  return <FieldRenderer field={childField} value={childValue} onChange={onChildChange} companyId={companyId ?? undefined} disabled={isDisabled}
                     required={isRequired}
                     labelPosition={hideLabel ? "hidden" : "top"}
                     primaryColor={FIXED_FORM_PRIMARY_COLOR}
@@ -1916,8 +1919,8 @@ export const ExecutionDataPanel = ({
                   </>
                 )}
 
-                {/* Save button - available for all form steps */}
-                {(isActionStep || runningStep.workflow_steps?.step_type === 'edit_form') && !isApiProcessedAction && (
+                {/* Save button - available only for form steps */}
+                {runningStep.workflow_steps?.step_type === 'edit_form' && !isApiProcessedAction && (
                   <Button
                     size="sm"
                     variant="outline"
@@ -1966,11 +1969,11 @@ export const ExecutionDataPanel = ({
 
                 {outgoingConnections.length > 0 ? (
                   <>
-                    {(isManualActionStep || isManualFileStep) ? (() => {
+                    {isManualActionStep ? (() => {
                       // Get the custom output name from config, or default to "Done"
                       const outputName = runningStep.workflow_steps?.config?.outputs?.[0] || "Done";
                       return (
-                        // Manual action/file steps: single custom button
+                        // Manual action steps: single custom button
                         <Button size="sm" variant="default" onClick={async () => {
                           if (!canCompleteStep) {
                             toast({
@@ -1978,31 +1981,6 @@ export const ExecutionDataPanel = ({
                               description: t("executionDataPanel.unauthorizedStep"),
                               variant: "destructive"
                             });
-                            return;
-                          }
-
-                          // Special handling for file steps
-                          if (isManualFileStep) {
-                            try {
-                              await api.post(
-                                `/api/files/workflows/executions/${executionId}/steps/${runningStep.id}/process-file`,
-                                { workflow_step_id: runningStep.workflow_steps?.id ?? runningStep.step?.id },
-                                { apiKey: apiKey ?? undefined }
-                              );
-                              toast({
-                                title: t("executionDataPanel.fileProcessed"),
-                                description: t("executionDataPanel.fileProcessedDescription")
-                              });
-                              queryClient.invalidateQueries({ queryKey: ["workflow_execution_steps", executionId] });
-                              queryClient.invalidateQueries({ queryKey: ["workflow_execution", executionId] });
-                            } catch (error: unknown) {
-                              console.error('Error processing file step:', error);
-                              toast({
-                                title: t("common.error"),
-                                description: error instanceof Error ? error.message : t("executionDataPanel.failedToProcessFileStep"),
-                                variant: "destructive"
-                              });
-                            }
                             return;
                           }
 
@@ -2035,6 +2013,7 @@ export const ExecutionDataPanel = ({
                           const buttonLabel = outputName === "default" ? "Continue" : outputName;
                           const buttonStyle = runningStep.workflow_steps?.config?.output_styles?.[outputName] || (connIndex === 0 ? "primary" : "secondary");
                           const buttonVariant = buttonStyle === "primary" ? "default" : "outline";
+                          const isSecondaryOutput = buttonStyle === "secondary";
                           const isAgentSuggestedChoice = isAgentPlusHumanDecision && !!agentDecisionChoice && agentDecisionChoice === outputName;
                           return <Button key={`group-${outputName}`} size="sm" variant={buttonVariant} onClick={async () => {
                             if (!canCompleteStep) {
@@ -2048,7 +2027,7 @@ export const ExecutionDataPanel = ({
                             form.pendingConnectionRef.current = {
                               choice: outputName
                             };
-                            const saved = await handleFormSubmit(runningStep);
+                            const saved = await handleFormSubmit(runningStep, { skipValidation: isSecondaryOutput });
                             if (saved) {
                               const comment = form.decisionComments[`decision-${runningStep.id}`] || "";
                               if (isDecisionStep) {
@@ -2070,7 +2049,7 @@ export const ExecutionDataPanel = ({
                                 });
                               }
                             }
-                          }} className={cn(isAgentSuggestedChoice && "relative ring-4 ring-amber-400 ring-offset-2 ring-offset-background shadow-lg after:content-['Agent'] after:absolute after:-top-2 after:-right-2 after:rounded after:bg-amber-500 after:text-white after:text-[10px] after:px-1.5 after:py-0.5 after:leading-none after:shadow-md")} disabled={!canCompleteStep || navigation.makeDecisionMutation.isPending || navigation.completeStepMutation.isPending || form.updateValueMutation.isPending || aiSubmitBlocked}>
+                          }} className={cn(isAgentSuggestedChoice && "relative ring-4 ring-amber-400 ring-offset-2 ring-offset-background shadow-lg after:content-['Agent'] after:absolute after:-top-2 after:-right-2 after:rounded after:bg-amber-500 after:text-white after:text-[10px] after:px-1.5 after:py-0.5 after:leading-none after:shadow-md")} disabled={!canCompleteStep || navigation.makeDecisionMutation.isPending || navigation.completeStepMutation.isPending || form.updateValueMutation.isPending || (!isSecondaryOutput && aiSubmitBlocked)}>
                             {navigation.makeDecisionMutation.isPending || navigation.completeStepMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                             {buttonLabel}
                             <ArrowRight className="ml-2 h-4 w-4" />
@@ -2091,30 +2070,6 @@ export const ExecutionDataPanel = ({
                       return;
                     }
 
-                    // Special handling for manual file steps
-                    if (isManualFileStep) {
-                      try {
-                        await api.post(
-                          `/api/files/workflows/executions/${executionId}/steps/${runningStep.id}/process-file`,
-                          { workflow_step_id: runningStep.workflow_steps?.id ?? runningStep.step?.id },
-                          { apiKey: apiKey ?? undefined }
-                        );
-                        toast({
-                          title: t("executionDataPanel.fileProcessed"),
-                          description: t("executionDataPanel.fileProcessedDescription")
-                        });
-                        queryClient.invalidateQueries({ queryKey: ["workflow_execution_steps", executionId] });
-                        queryClient.invalidateQueries({ queryKey: ["workflow_execution", executionId] });
-                      } catch (error: unknown) {
-                        console.error('Error processing file step:', error);
-                        toast({
-                          title: t("common.error"),
-                          description: error instanceof Error ? error.message : t("executionDataPanel.failedToProcessFileStep"),
-                          variant: "destructive"
-                        });
-                      }
-                      return;
-                    }
                     const saved = await handleFormSubmit(runningStep);
                     if (saved) {
                       const comment = form.decisionComments[`decision-${runningStep.id}`] || "";
@@ -2132,7 +2087,7 @@ export const ExecutionDataPanel = ({
                     }
                   }} disabled={!canCompleteStep || navigation.completeStepMutation.isPending || navigation.makeDecisionMutation.isPending || aiSubmitBlocked}>
                     {navigation.completeStepMutation.isPending || navigation.makeDecisionMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                    {isManualFileStep ? (runningStep.workflow_steps?.config?.outputs?.[0] || 'Done') : 'Mark as Completed'}
+                    Mark as Completed
                     <ArrowRight className="ml-2 h-4 w-4" />
                   </Button>
                 )}
@@ -2276,7 +2231,7 @@ export const ExecutionDataPanel = ({
                 const fieldValue = values[field.id]?.value;
                 // Get field config to apply same settings (like compact_mode for arrays)
                 const fieldConfig = formFields[field.id];
-                return <FieldRenderer key={field.id} field={field} value={fieldValue} onChange={() => { }} disabled={true}
+                return <FieldRenderer key={field.id} field={field} value={fieldValue} onChange={() => { }} companyId={companyId ?? undefined} disabled={true}
                   primaryColor={FIXED_FORM_PRIMARY_COLOR}
                   // Dynamic options props for OptionField
                   dynamicOptions={form.dynamicOptions[field.id]} isLoadingDynamic={form.loadingDynamicOptions[field.id]} dynamicError={form.dynamicOptionsErrors[field.id]} onRetryDynamic={() => form.retryDynamicOptions(field.id)}
@@ -2289,7 +2244,7 @@ export const ExecutionDataPanel = ({
                     const cfType = cf.field_type || cf.type;
                     const isFileChild = cfType === 'file';
                     const cfFilePath = isFileChild && cv ? (typeof cv === 'string' ? cv : cv?.value) : null;
-                    return <FieldRenderer field={cf} value={cv} onChange={onChildChange || (() => { })} disabled={true}
+                    return <FieldRenderer field={cf} value={cv} onChange={onChildChange || (() => { })} companyId={companyId ?? undefined} disabled={true}
                     required={required}
                     labelPosition={hideLabel ? "hidden" : "top"}
                     primaryColor={FIXED_FORM_PRIMARY_COLOR}

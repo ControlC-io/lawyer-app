@@ -5,6 +5,7 @@ import { prisma } from '../lib/prisma';
 import { validateMetadataValueForKey } from '../services/files-metadata-validation';
 import { canUserAccessFolder, getUserFolderPermissionLevel, getUserGroupIdsInCompany } from '../lib/folderAccess';
 import { canUserAccessFileByMetadata } from '../lib/documentAccess';
+import { appendFileHistoryEvent, FILE_HISTORY_EVENT_TYPE, normalizeFileHistoryActorId } from '../lib/fileHistory';
 import { getDocumentProxyUrl } from '../lib/documentUrl';
 import { storageService } from '../services/storage.service';
 import { workflowService } from '../services/workflow.service';
@@ -626,9 +627,39 @@ export const filesController = {
           ? JSON.parse(config.api_data)
           : config.api_data
         : [];
+      const extractMetadataAfterOcr = config.extractMetadataAfterOcr === true;
+      const rawExtractMetadataKeyIds = config.extractMetadataKeyIds;
+      const extractMetadataKeyIds = (
+        Array.isArray(rawExtractMetadataKeyIds)
+          ? rawExtractMetadataKeyIds
+          : typeof rawExtractMetadataKeyIds === 'string'
+            ? (() => {
+                try {
+                  const parsed = JSON.parse(rawExtractMetadataKeyIds);
+                  return Array.isArray(parsed) ? parsed : [];
+                } catch {
+                  return [];
+                }
+              })()
+            : []
+      )
+        .map((id: unknown) => String(id).trim())
+        .filter((id: string, index: number, list: string[]) => !!id && list.indexOf(id) === index);
 
       if (!sourceFileId || sourceFileId === 'none') {
         return res.status(400).json({ error: 'Source file not configured' });
+      }
+      if (extractMetadataAfterOcr && extractMetadataKeyIds.length > 0) {
+        const extractKeys = await prisma.filesMetadataKey.findMany({
+          where: {
+            company_id: execution.company_id!,
+            id: { in: extractMetadataKeyIds },
+          },
+          select: { id: true },
+        });
+        if (extractKeys.length !== extractMetadataKeyIds.length) {
+          return res.status(400).json({ error: 'One or more extractMetadataKeyIds are invalid for this company' });
+        }
       }
 
       // Fetch workflow data_structure to check if source field is an array child
@@ -757,7 +788,21 @@ export const filesController = {
             mime_type: fileStat.contentType || null,
             company_id: execution.company_id!,
             uploaded_by: executionStep.assigned_to_user_id,
+            ...(config.ocrEnabled && extractMetadataAfterOcr && extractMetadataKeyIds.length > 0
+              ? {
+                  ocr_pending_metadata_key_ids: extractMetadataKeyIds,
+                  metadata_ai_extract_status: 'pending',
+                }
+              : {}),
           },
+        });
+
+        await appendFileHistoryEvent({
+          companyId: execution.company_id!,
+          fileId: newFile.id,
+          eventType: FILE_HISTORY_EVENT_TYPE.FILE_UPLOADED,
+          actorId: normalizeFileHistoryActorId(executionStep.assigned_to_user_id),
+          details: { source: 'workflow', name: originalFileName },
         });
 
         if (metadataValues.length > 0) {
@@ -769,10 +814,37 @@ export const filesController = {
               company_id: execution.company_id!,
             })),
           });
+          const keyRowsForHistory = await prisma.filesMetadataKey.findMany({
+            where: { id: { in: metadataValues.map((m) => m.keyId) } },
+            select: { id: true, name: true },
+          });
+          const idToLabel = new Map(keyRowsForHistory.map((k) => [k.id, k.name?.trim() || k.id]));
+          await appendFileHistoryEvent({
+            companyId: execution.company_id!,
+            fileId: newFile.id,
+            eventType: FILE_HISTORY_EVENT_TYPE.METADATA_CHANGED,
+            actorId: normalizeFileHistoryActorId(executionStep.assigned_to_user_id),
+            details: {
+              source: 'workflow',
+              changes: metadataValues.map((m) => ({
+                key: idToLabel.get(m.keyId) || m.keyId,
+                keyId: m.keyId,
+                action: 'add' as const,
+                next: m.value,
+              })),
+            },
+          });
         }
 
         // Trigger OCR if enabled
         if (config.ocrEnabled) {
+          await appendFileHistoryEvent({
+            companyId: execution.company_id!,
+            fileId: newFile.id,
+            eventType: FILE_HISTORY_EVENT_TYPE.OCR_REQUESTED,
+            actorId: null,
+            details: { source: 'workflow' },
+          });
           const { processDocumentOcr } = require('../services/ocr.service');
           processDocumentOcr(newFile.id).catch((err: Error) => {
             console.error(`OCR processing failed for workflow file ${newFile.id}:`, err);
@@ -1011,9 +1083,24 @@ export const filesController = {
         },
       });
 
+      await appendFileHistoryEvent({
+        companyId,
+        fileId: fileRecord.id,
+        eventType: FILE_HISTORY_EVENT_TYPE.FILE_UPLOADED,
+        actorId: normalizeFileHistoryActorId(userId),
+        details: { name: file.originalname, source: 'folder_upload' },
+      });
+
       // Trigger OCR if requested
       const ocrRequested = req.body?.ocr === 'true' || req.body?.ocr === true;
       if (ocrRequested) {
+        await appendFileHistoryEvent({
+          companyId,
+          fileId: fileRecord.id,
+          eventType: FILE_HISTORY_EVENT_TYPE.OCR_REQUESTED,
+          actorId: normalizeFileHistoryActorId(userId),
+          details: { source: 'folder_upload' },
+        });
         const { processDocumentOcr } = require('../services/ocr.service');
         processDocumentOcr(fileRecord.id).catch((err: Error) => {
           console.error(`OCR processing failed for file ${fileRecord.id}:`, err);

@@ -7,13 +7,20 @@ import fetch from 'node-fetch';
 jest.mock('../lib/prisma', () => ({
   prisma: {
     company: { findUnique: jest.fn() },
+    workflow: { findFirst: jest.fn() },
     workflowExecution: { findFirst: jest.fn(), findUnique: jest.fn() },
     workflowExecutionData: { findFirst: jest.fn(), update: jest.fn() },
     workflowExecutionStep: { findFirst: jest.fn(), update: jest.fn(), findUnique: jest.fn() },
     workflowStep: { findUnique: jest.fn() },
-    file: { create: jest.fn() },
-    filesMetadataKey: { findMany: jest.fn() },
-    filesMetadataValue: { createMany: jest.fn() },
+    file: { create: jest.fn(), findMany: jest.fn(), findFirst: jest.fn(), update: jest.fn() },
+    filesMetadataKey: { findMany: jest.fn(), create: jest.fn() },
+    filesMetadataValue: {
+      createMany: jest.fn(),
+      findFirst: jest.fn(),
+      update: jest.fn(),
+      create: jest.fn(),
+      deleteMany: jest.fn(),
+    },
     $queryRaw: jest.fn(),
   },
 }));
@@ -38,6 +45,7 @@ jest.mock('../services/storage.service', () => ({
 jest.mock('../services/workflow.service', () => ({
   workflowService: {
     advanceWorkflow: jest.fn().mockResolvedValue([]),
+    cancelReminderForExecutionStep: jest.fn().mockResolvedValue(undefined),
   }
 }));
 
@@ -52,6 +60,9 @@ describe('Files Endpoints', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     (prisma.company.findUnique as jest.Mock).mockResolvedValue(mockCompany);
+    (prisma.workflow.findFirst as jest.Mock).mockResolvedValue({
+      data_structure: [{ id: 'f1', field_type: 'file', parent_item_id: null }],
+    });
     mockUploadFile.mockResolvedValue({ etag: 'test-etag', path: 'test-path' });
     mockGetSignedUrl.mockResolvedValue('http://signed-url.com');
     mockGetFileStat.mockResolvedValue({ contentType: 'image/png' });
@@ -316,6 +327,132 @@ describe('Files Endpoints', () => {
 
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
+    });
+
+    it('should queue OCR metadata extraction when configured', async () => {
+      (prisma.workflowStep.findUnique as jest.Mock).mockResolvedValue({
+        config: {
+          source_file_id: 'f1',
+          ocrEnabled: true,
+          extractMetadataAfterOcr: true,
+          extractMetadataKeyIds: ['meta-1'],
+        },
+      });
+      (prisma.workflowExecutionData.findFirst as jest.Mock).mockResolvedValue({
+        values: { f1: { value: 'old/path.png' } },
+      });
+      (prisma.workflowExecution.findUnique as jest.Mock).mockResolvedValue({ company_id: 'company-123' });
+      (prisma.workflowExecutionStep.findFirst as jest.Mock).mockResolvedValue({ assigned_to_user_id: 'user-1' });
+      (prisma.workflowExecutionStep.findUnique as jest.Mock).mockResolvedValue({ step_id: 'step-1', company_id: 'company-123' });
+      (prisma.filesMetadataKey.findMany as jest.Mock).mockResolvedValue([{ id: 'meta-1' }]);
+      const mockStream = {
+        [Symbol.asyncIterator]: async function* () {
+          yield Buffer.from('test data');
+        }
+      };
+      mockDownloadFile.mockResolvedValue(mockStream);
+      (prisma.file.create as jest.Mock).mockResolvedValue({ id: 'new-file-456' });
+
+      const response = await request(app)
+        .post('/api/files/workflows/executions/exec-123/steps/step-123/process-file')
+        .set(mockAuthHeaders)
+        .send({ workflow_step_id: 'wf-step-1' });
+
+      expect(response.status).toBe(200);
+      expect(prisma.filesMetadataKey.findMany).toHaveBeenCalledWith({
+        where: { company_id: 'company-123', id: { in: ['meta-1'] } },
+        select: { id: true },
+      });
+      expect(prisma.file.create).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({
+          ocr_pending_metadata_key_ids: ['meta-1'],
+          metadata_ai_extract_status: 'pending',
+        }),
+      }));
+    });
+  });
+
+  describe('POST /api/companies/:companyId/documents/bulk-metadata', () => {
+    it('updates only provided metadata keys and keeps other keys unchanged', async () => {
+      (prisma.filesMetadataKey.findMany as jest.Mock).mockResolvedValue([
+        { id: 'meta-update', name: 'Department', value_kind: 'free_text', allowed_values: [] },
+        { id: 'meta-keep', name: 'Status', value_kind: 'free_text', allowed_values: [] },
+      ]);
+      (prisma.file.findMany as jest.Mock).mockResolvedValue([{ id: 'file-1' }]);
+      (prisma.filesMetadataValue.findFirst as jest.Mock).mockResolvedValue({ id: 'mv-update-1' });
+
+      const res = await request(app)
+        .post('/api/companies/company-123/documents/bulk-metadata')
+        .set(mockAuthHeaders)
+        .send({
+          file_ids: ['file-1'],
+          entries: [{ key: 'Department', value: 'Finance' }],
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ updated: 1 });
+      expect(prisma.filesMetadataValue.update).toHaveBeenCalledWith({
+        where: { id: 'mv-update-1' },
+        data: { value: 'Finance' },
+      });
+      expect(prisma.filesMetadataValue.deleteMany).not.toHaveBeenCalled();
+      expect(prisma.filesMetadataValue.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects replace mode to prevent destructive metadata erasure', async () => {
+      const res = await request(app)
+        .post('/api/companies/company-123/documents/bulk-metadata')
+        .set(mockAuthHeaders)
+        .send({
+          file_ids: ['file-1'],
+          entries: [{ key: 'Department', value: 'Finance' }],
+          mode: 'replace',
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/replace mode/i);
+      expect(prisma.filesMetadataValue.deleteMany).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('PATCH /api/companies/:companyId/documents/files/:fileId/rename', () => {
+    it('renames only the file base name and preserves extension', async () => {
+      (prisma.file.findFirst as jest.Mock).mockResolvedValue({
+        id: 'file-1',
+        name: 'Old Report.PDF',
+      });
+
+      const res = await request(app)
+        .patch('/api/companies/company-123/documents/files/file-1/rename')
+        .set(mockAuthHeaders)
+        .send({ name: 'Invoice 2026 04' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.name).toBe('Invoice 2026 04.PDF');
+      expect(prisma.file.update).toHaveBeenCalledWith({
+        where: { id: 'file-1' },
+        data: { name: 'Invoice 2026 04.PDF' },
+      });
+    });
+
+    it('rejects empty file names', async () => {
+      const res = await request(app)
+        .patch('/api/companies/company-123/documents/files/file-1/rename')
+        .set(mockAuthHeaders)
+        .send({ name: '   ' });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/name is required/i);
+      expect(prisma.file.findFirst).not.toHaveBeenCalled();
+      expect(prisma.file.update).not.toHaveBeenCalled();
+    });
+
+    it('returns 401 when request is unauthenticated', async () => {
+      const res = await request(app)
+        .patch('/api/companies/company-123/documents/files/file-1/rename')
+        .send({ name: 'Invoice' });
+
+      expect(res.status).toBe(401);
     });
   });
 });

@@ -68,7 +68,17 @@ const menuSections: { groupLabelKey: string; items: MenuItem[] }[] = [
 
 export function AppSidebar() {
   const { open } = useSidebar();
-  const { signOut, profile, loading, userCompanies, isSuperAdmin, isCompanyAdmin, hasPermission, companyBranding } = useAuth();
+  const {
+    signOut,
+    profile,
+    loading,
+    userCompanies,
+    isSuperAdmin,
+    isCompanyAdmin,
+    hasPermission,
+    companyBranding,
+    selectedCompanyId,
+  } = useAuth();
   const location = useLocation();
   const [startWorkflowDialogOpen, setStartWorkflowDialogOpen] = useState(false);
   const [logoLoadFailed, setLogoLoadFailed] = useState(false);
@@ -286,8 +296,31 @@ export function AppSidebar() {
             </Button>
           </div>
           {open && profile && (
-            <div className="mt-1.5 px-1 text-center text-xs text-muted-foreground truncate flex flex-col items-center gap-0.5" title={`${profile.full_name || profile.email}\n${profile.email}${isSuperAdmin ? '\nSuper Admin' : ''}`}>
+            <div
+              className="mt-1.5 px-1 text-center text-xs text-muted-foreground truncate flex flex-col items-center gap-0.5"
+              title={[
+                profile.full_name || profile.email,
+                profile.email,
+                userCompanies.length > 1 &&
+                  selectedCompanyId &&
+                  companyBranding?.companyId === selectedCompanyId &&
+                  companyBranding.name
+                  ? companyBranding.name
+                  : null,
+                isSuperAdmin ? "Super Admin" : null,
+              ]
+                .filter(Boolean)
+                .join("\n")}
+            >
               <span className="truncate w-full">{profile.full_name || profile.email}</span>
+              {userCompanies.length > 1 &&
+                selectedCompanyId &&
+                companyBranding?.companyId === selectedCompanyId &&
+                companyBranding.name && (
+                  <span className="truncate w-full font-medium text-foreground/80" title={companyBranding.name}>
+                    {companyBranding.name}
+                  </span>
+                )}
               {isSuperAdmin && (
                 <Badge variant="secondary" className="text-[10px] px-1.5 py-0 font-medium shrink-0">
                   Super Admin

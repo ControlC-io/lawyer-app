@@ -5,6 +5,21 @@ interface PermissionCondition {
   value: string;
 }
 
+function groupMetadataFiltersByKey(
+  metadataFilters: PermissionCondition[],
+): Map<string, Set<string>> {
+  const grouped = new Map<string, Set<string>>();
+  for (const filter of metadataFilters) {
+    let values = grouped.get(filter.key_id);
+    if (!values) {
+      values = new Set<string>();
+      grouped.set(filter.key_id, values);
+    }
+    values.add(filter.value);
+  }
+  return grouped;
+}
+
 interface RuleWithAssignments {
   id: string;
   permission_type: string;
@@ -174,11 +189,12 @@ export async function getAccessibleFileIds(params: {
   // Apply user metadata filters first (narrows result set)
   let candidateFileIds = fileIds;
   if (metadataFilters && metadataFilters.length > 0) {
+    const groupedFilters = groupMetadataFiltersByKey(metadataFilters);
     candidateFileIds = candidateFileIds.filter((fid) => {
-      const fileMeta = metadataByFile.get(fid) || new Map();
-      return metadataFilters.every((f) => {
-        const values = fileMeta.get(f.key_id);
-        return values != null && values.includes(f.value);
+      const fileMeta = metadataByFile.get(fid) || new Map<string, string[]>();
+      return Array.from(groupedFilters.entries()).every(([keyId, wantedValues]) => {
+        const values = fileMeta.get(keyId);
+        return values != null && values.some((value) => wantedValues.has(value));
       });
     });
   }
@@ -255,11 +271,12 @@ export async function getAccessibleFileIdsWithLevels(params: {
 
   let candidateFileIds = fileIds;
   if (metadataFilters && metadataFilters.length > 0) {
+    const groupedFilters = groupMetadataFiltersByKey(metadataFilters);
     candidateFileIds = candidateFileIds.filter((fid) => {
-      const fileMeta = metadataByFile.get(fid) || new Map();
-      return metadataFilters.every((f) => {
-        const values = fileMeta.get(f.key_id);
-        return values != null && values.includes(f.value);
+      const fileMeta = metadataByFile.get(fid) || new Map<string, string[]>();
+      return Array.from(groupedFilters.entries()).every(([keyId, wantedValues]) => {
+        const values = fileMeta.get(keyId);
+        return values != null && values.some((value) => wantedValues.has(value));
       });
     });
   }

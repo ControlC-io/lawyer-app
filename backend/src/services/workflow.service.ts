@@ -6,6 +6,82 @@ import { resolveStepNotificationSettings, stepReminderService } from './stepRemi
 type WorkflowStepRow = Awaited<ReturnType<typeof prisma.workflowStep.findMany>>[number];
 type WorkflowConnectionRow = Awaited<ReturnType<typeof prisma.workflowConnection.findMany>>[number];
 
+function extractUserIdFromFieldValue(value: unknown): string | null {
+  if (typeof value === 'string' && value.trim()) return value.trim();
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const objectValue = value as Record<string, unknown>;
+  if (typeof objectValue.id === 'string' && objectValue.id.trim()) return objectValue.id.trim();
+  if (typeof objectValue.user_id === 'string' && objectValue.user_id.trim()) return objectValue.user_id.trim();
+  if (typeof objectValue.value === 'string' && objectValue.value.trim()) return objectValue.value.trim();
+  return null;
+}
+
+async function resolveStepAssignment(params: {
+  step: {
+    config?: unknown;
+    assigned_to_user_id?: string | null;
+    assigned_to_group_id?: string | null;
+  };
+  executionCreatedBy: string | null;
+  companyId: string;
+  executionDataSnapshot?: Record<string, unknown>;
+}): Promise<{ assignedUserId: string | null; assignedGroupId: string | null }> {
+  const { step, executionCreatedBy, companyId, executionDataSnapshot = {} } = params;
+  const stepConfig = (step.config as Record<string, unknown>) || {};
+  const staticAssignedUserId = step.assigned_to_user_id || null;
+  const staticAssignedGroupId = step.assigned_to_group_id || null;
+  const assignmentSource = typeof stepConfig.assignment_source === 'string' ? stepConfig.assignment_source : null;
+
+  if (assignmentSource === 'field') {
+    const assignmentFieldId =
+      typeof stepConfig.assignment_source_field_id === 'string'
+        ? stepConfig.assignment_source_field_id.trim()
+        : '';
+    if (assignmentFieldId) {
+      const candidateUserId = extractUserIdFromFieldValue(executionDataSnapshot[assignmentFieldId]);
+      if (candidateUserId) {
+        const member = await prisma.userCompany.findFirst({
+          where: { company_id: companyId, user_id: candidateUserId },
+          select: { user_id: true },
+        });
+        if (member) {
+          return { assignedUserId: candidateUserId, assignedGroupId: null };
+        }
+      }
+    }
+    return {
+      assignedUserId: staticAssignedUserId,
+      assignedGroupId: staticAssignedGroupId,
+    };
+  }
+
+  if (assignmentSource === 'static') {
+    return {
+      assignedUserId: staticAssignedUserId,
+      assignedGroupId: staticAssignedGroupId,
+    };
+  }
+
+  if (assignmentSource === 'creator') {
+    return {
+      assignedUserId: executionCreatedBy,
+      assignedGroupId: null,
+    };
+  }
+
+  const hasExplicitAssignee = !!(staticAssignedUserId || staticAssignedGroupId);
+  const assignToCreator = stepConfig.assign_to_execution_creator === true
+    ? true
+    : stepConfig.assign_to_execution_creator === false
+      ? false
+      : !hasExplicitAssignee;
+
+  return {
+    assignedUserId: assignToCreator ? executionCreatedBy : staticAssignedUserId,
+    assignedGroupId: assignToCreator ? null : staticAssignedGroupId,
+  };
+}
+
 export const workflowService = {
   /**
    * Create a workflow execution and advance to the first step(s).
@@ -53,25 +129,31 @@ export const workflowService = {
       },
     });
 
-    const executionSteps = workflowSteps
-      .filter((step: WorkflowStepRow) => step.step_type !== 'start' && step.step_type !== 'end')
-      .map((step: WorkflowStepRow) => {
-        const stepConfig = (step.config as Record<string, unknown>) || {};
-        const hasExplicitAssignee = !!(step.assigned_to_user_id || step.assigned_to_group_id);
-        const assignToCreator = stepConfig.assign_to_execution_creator === true
-          ? true
-          : stepConfig.assign_to_execution_creator === false
-            ? false
-            : !hasExplicitAssignee;
-        return {
-          execution_id: execution.id,
-          step_id: step.id,
-          status: 'pending' as const,
-          assigned_to_user_id: assignToCreator ? execution.created_by : step.assigned_to_user_id,
-          assigned_to_group_id: assignToCreator ? null : step.assigned_to_group_id,
-          company_id: companyId,
-        };
+    const executionSteps: Array<{
+      execution_id: string;
+      step_id: string;
+      status: 'pending';
+      assigned_to_user_id: string | null;
+      assigned_to_group_id: string | null;
+      company_id: string;
+    }> = [];
+    for (const step of workflowSteps) {
+      if (step.step_type === 'start' || step.step_type === 'end') continue;
+      const assignment = await resolveStepAssignment({
+        step,
+        executionCreatedBy: execution.created_by,
+        companyId,
+        executionDataSnapshot: {},
       });
+      executionSteps.push({
+        execution_id: execution.id,
+        step_id: step.id,
+        status: 'pending' as const,
+        assigned_to_user_id: assignment.assignedUserId,
+        assigned_to_group_id: assignment.assignedGroupId,
+        company_id: companyId,
+      });
+    }
 
     if (executionSteps.length > 0) {
       await prisma.workflowExecutionStep.createMany({
@@ -121,7 +203,10 @@ export const workflowService = {
           this.handleStepActivation(execStep.id, firstStep, companyId).catch((err) => {
             console.error('Error handling step activation notifications/reminders:', err);
           });
-          if (firstStep.step_type === 'action' && firstStep.action_type === 'automatic') {
+          if (
+            firstStep.step_type === 'action' &&
+            ['automatic', 'agent', 'email'].includes((firstStep.action_type || '').toLowerCase())
+          ) {
             this.triggerStepProcessing(execution.id, execStep.id).catch((err) => {
               console.error('Error triggering step processing:', err);
             });
@@ -191,6 +276,7 @@ export const workflowService = {
       }
 
       const triggeredSteps: string[] = [];
+      let executionDataSnapshot: Record<string, unknown> | null = null;
 
       for (const connection of outgoingConnections) {
         const targetStepId = connection.target_step_id;
@@ -267,20 +353,16 @@ export const workflowService = {
 
         if (!execution) continue;
 
-        // Determine assignment
-        const stepConfig = (targetStep.config as any) || {};
-        const hasExplicitAssignee = !!(targetStep.assigned_to_user_id || targetStep.assigned_to_group_id);
-        const assignToCreator = stepConfig.assign_to_execution_creator === true
-          ? true
-          : stepConfig.assign_to_execution_creator === false
-            ? false
-            : !hasExplicitAssignee;
-        const assignedUserId = assignToCreator
-          ? execution.created_by
-          : targetStep.assigned_to_user_id;
-        const assignedGroupId = assignToCreator
-          ? null
-          : targetStep.assigned_to_group_id;
+        const targetStepConfig = (targetStep.config as Record<string, unknown>) || {};
+        if (targetStepConfig.assignment_source === 'field' && executionDataSnapshot === null) {
+          executionDataSnapshot = await this.getExecutionDataSnapshot(executionId);
+        }
+        const assignment = await resolveStepAssignment({
+          step: targetStep,
+          executionCreatedBy: execution.created_by,
+          companyId,
+          executionDataSnapshot: executionDataSnapshot || {},
+        });
 
         // Check if this step is already running
         const existingRunning = await prisma.workflowExecutionStep.findFirst({
@@ -313,8 +395,8 @@ export const workflowService = {
             data: {
               status: 'running',
               started_at: new Date(),
-              assigned_to_user_id: assignedUserId,
-              assigned_to_group_id: assignedGroupId,
+              assigned_to_user_id: assignment.assignedUserId,
+              assigned_to_group_id: assignment.assignedGroupId,
             },
           });
         } else {
@@ -326,8 +408,8 @@ export const workflowService = {
               status: 'running',
               started_at: new Date(),
               company_id: companyId,
-              assigned_to_user_id: assignedUserId,
-              assigned_to_group_id: assignedGroupId,
+              assigned_to_user_id: assignment.assignedUserId,
+              assigned_to_group_id: assignment.assignedGroupId,
             },
           });
         }
@@ -351,13 +433,15 @@ export const workflowService = {
           targetStep.step_type === 'action' && targetStep.action_type === 'automatic';
         const isAgentAction =
           targetStep.step_type === 'action' && targetStep.action_type === 'agent';
+        const isEmailAction =
+          targetStep.step_type === 'action' && targetStep.action_type === 'email';
         const isAgentDecision =
           targetStep.step_type === 'decision' &&
           (targetStep.decision_node_type === 'Agent' || targetStep.decision_node_type === 'Agent_Human' ||
             (targetStep.decision_node_type &&
               targetStep.decision_node_type.toLowerCase() === 'agent'));
 
-        if (isAutomaticAction || isAgentAction || isAgentDecision) {
+        if (isAutomaticAction || isAgentAction || isEmailAction || isAgentDecision) {
           // Trigger step processing (can be async)
           this.triggerStepProcessing(executionId, newExecutionStep.id).catch(
             (error) => {

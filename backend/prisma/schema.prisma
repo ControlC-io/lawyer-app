@@ -119,6 +119,7 @@ model Company {
   document_permission_assignments DocumentPermissionAssignment[]
   user_document_tree_configs     UserDocumentTreeConfig[]
   document_split_presets         DocumentSplitPreset[]
+  file_history_events            FileHistoryEvent[]
 
   @@map("companies")
   @@schema("public")
@@ -146,6 +147,7 @@ model Profile {
   workflow_permissions  WorkflowPermission[]
   document_permission_assignments DocumentPermissionAssignment[]
   document_tree_configs          UserDocumentTreeConfig[]
+  file_history_events_as_actor   FileHistoryEvent[] @relation("FileHistoryActor")
 
   @@map("profiles")
   @@schema("public")
@@ -337,20 +339,33 @@ model File {
   ocr_pending_metadata_key_ids Json?
   metadata_ai_extract_status   String?
   metadata_ai_extract_error      String?   @db.Text
-  ragie_document_id             String?
-  ragie_partition               String?
-  ragie_uploaded_at             DateTime? @db.Timestamptz(6)
-  ragie_status                  String?
-  ragie_metadata                Json?
 
   folder          Folder?              @relation(fields: [folder_id], references: [id])
   uploader        Profile?             @relation(fields: [uploaded_by], references: [id])
   company         Company?             @relation(fields: [company_id], references: [id])
   metadata_values FilesMetadataValue[]
   workflow_files  WorkflowFile[]
+  history_events  FileHistoryEvent[]
 
   @@index([is_archived, archived_datetime], map: "idx_files_archive")
   @@map("files")
+  @@schema("public")
+}
+
+model FileHistoryEvent {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  company_id  String   @db.Uuid
+  file_id     String   @db.Uuid
+  event_type  String
+  actor_id    String?  @db.Uuid
+  details     Json?
+  created_at  DateTime @default(now()) @db.Timestamptz(6)
+  company     Company  @relation(fields: [company_id], references: [id], onDelete: Restrict)
+  file        File     @relation(fields: [file_id], references: [id], onDelete: Cascade)
+  actor       Profile? @relation("FileHistoryActor", fields: [actor_id], references: [id], onDelete: SetNull)
+
+  @@index([file_id, created_at(sort: Desc)], map: "idx_file_history_events_file_created")
+  @@map("file_history_events")
   @@schema("public")
 }
 

@@ -137,6 +137,11 @@ router.delete('/:companyId/folders/:folderId/permissions/:permissionId', require
 router.get('/:companyId/files', requirePermission('documents.view'), asyncHandler(companiesController.listFiles));
 router.post('/:companyId/files', requirePermission('documents.view'), asyncHandler(companiesController.createFile));
 router.get('/:companyId/files/by-metadata', requirePermission('documents.view'), asyncHandler(companiesController.getFileIdsByMetadata));
+router.get(
+  '/:companyId/files/:fileId/history',
+  requirePermission('documents.view'),
+  asyncHandler(companiesController.getFileHistory),
+);
 router.post('/:companyId/folders/:folderId/upload', filesController.uploadMiddleware, requirePermission('documents.view'), asyncHandler(filesController.uploadCompanyDocument));
 router.put('/:companyId/files/:fileId/metadata', requirePermission('documents.view'), asyncHandler(companiesController.updateFileMetadata));
 router.delete('/:companyId/files/:fileId', requirePermission('documents.view'), asyncHandler(filesController.deleteCompanyFile));
@@ -177,6 +182,11 @@ router.delete('/:companyId/document-permission-rules/:ruleId/assignments/:assign
 
 // Flat file listing (metadata-permission-filtered)
 router.get('/:companyId/documents/flat', requirePermission('documents.view'), asyncHandler(documentsController.listFlatFiles));
+router.get(
+  '/:companyId/documents/metadata-value-suggestions',
+  requirePermission('documents.view'),
+  asyncHandler(documentsController.listMetadataValueSuggestions),
+);
 
 // Virtual tree view
 router.get('/:companyId/documents/tree', requirePermission('documents.view'), asyncHandler(documentsController.getVirtualTree));
@@ -191,6 +201,11 @@ router.post(
   filesController.uploadFlatDocumentsMiddleware,
   requirePermission('documents.view'),
   asyncHandler(documentsController.uploadFlatFile),
+);
+router.patch(
+  '/:companyId/documents/files/:fileId/rename',
+  requirePermission('documents.view'),
+  asyncHandler(documentsController.renameFlatFile),
 );
 
 router.post(
@@ -234,16 +249,6 @@ router.post(
   '/:companyId/documents/extract-metadata-from-ocr',
   requirePermission('documents.view'),
   asyncHandler(documentsController.extractMetadataFromOcr),
-);
-router.post(
-  '/:companyId/documents/:fileId/ragie/upload',
-  requirePermission('documents.view'),
-  asyncHandler(documentsController.uploadFileToRagie),
-);
-router.delete(
-  '/:companyId/documents/:fileId/ragie',
-  requirePermission('documents.view'),
-  asyncHandler(documentsController.removeFileFromRagie),
 );
 
 // Bulk metadata assignment

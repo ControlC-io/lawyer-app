@@ -1,8 +1,12 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
+import { appendFileHistoryEvent, FILE_HISTORY_EVENT_TYPE } from '../lib/fileHistory';
 import { storageService } from './storage.service';
 import { getOcrProvider } from './ocr/index';
-import { runPendingMetadataExtractionAfterOcr } from './metadata-from-ocr-extraction.service';
+import {
+  parsePendingMetadataExtractConfig,
+  runPendingMetadataExtractionAfterOcr,
+} from './metadata-from-ocr-extraction.service';
 
 const SUPPORTED_MIME_TYPES = [
   'application/pdf',
@@ -16,7 +20,7 @@ const SUPPORTED_MIME_TYPES = [
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50 MB
 
 function hasPendingMetadataExtract(pending: unknown): boolean {
-  return Array.isArray(pending) && pending.length > 0;
+  return parsePendingMetadataExtractConfig(pending).metadataKeyIds.length > 0;
 }
 
 export async function processDocumentOcr(fileId: string): Promise<void> {
@@ -25,6 +29,7 @@ export async function processDocumentOcr(fileId: string): Promise<void> {
     select: {
       id: true,
       name: true,
+      company_id: true,
       storage_path: true,
       mime_type: true,
       size_bytes: true,
@@ -34,6 +39,7 @@ export async function processDocumentOcr(fileId: string): Promise<void> {
 
   if (!file) throw new Error('File not found');
 
+  const companyId = file.company_id;
   const pendingExtract = hasPendingMetadataExtract(file.ocr_pending_metadata_key_ids);
 
   // Check mime type
@@ -52,6 +58,15 @@ export async function processDocumentOcr(fileId: string): Promise<void> {
           : {}),
       },
     });
+    if (companyId) {
+      await appendFileHistoryEvent({
+        companyId,
+        fileId,
+        eventType: FILE_HISTORY_EVENT_TYPE.OCR_FAILED,
+        actorId: null,
+        details: { reason: 'unsupported_mime', mimeType: file.mime_type },
+      });
+    }
     return;
   }
 
@@ -72,6 +87,15 @@ export async function processDocumentOcr(fileId: string): Promise<void> {
           : {}),
       },
     });
+    if (companyId) {
+      await appendFileHistoryEvent({
+        companyId,
+        fileId,
+        eventType: FILE_HISTORY_EVENT_TYPE.OCR_FAILED,
+        actorId: null,
+        details: { reason: 'file_too_large', sizeBytes },
+      });
+    }
     return;
   }
 
@@ -80,6 +104,15 @@ export async function processDocumentOcr(fileId: string): Promise<void> {
     where: { id: fileId },
     data: { ocr_status: 'processing' },
   });
+  if (companyId) {
+    await appendFileHistoryEvent({
+      companyId,
+      fileId,
+      eventType: FILE_HISTORY_EVENT_TYPE.OCR_STARTED,
+      actorId: null,
+      details: {},
+    });
+  }
 
   try {
     // Download file from MinIO
@@ -110,6 +143,16 @@ export async function processDocumentOcr(fileId: string): Promise<void> {
       },
     });
 
+    if (companyId) {
+      await appendFileHistoryEvent({
+        companyId,
+        fileId,
+        eventType: FILE_HISTORY_EVENT_TYPE.OCR_COMPLETED,
+        actorId: null,
+        details: { provider: result.provider, model: result.model },
+      });
+    }
+
     await runPendingMetadataExtractionAfterOcr(fileId);
   } catch (error) {
     await prisma.file.update({
@@ -126,6 +169,15 @@ export async function processDocumentOcr(fileId: string): Promise<void> {
           : {}),
       },
     });
+    if (companyId) {
+      await appendFileHistoryEvent({
+        companyId,
+        fileId,
+        eventType: FILE_HISTORY_EVENT_TYPE.OCR_FAILED,
+        actorId: null,
+        details: { message: error instanceof Error ? error.message : 'Unknown OCR error' },
+      });
+    }
   }
 }
 
