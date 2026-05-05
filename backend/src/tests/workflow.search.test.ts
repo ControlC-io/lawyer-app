@@ -362,4 +362,27 @@ describe('POST /api/workflows/:workflowId/executions/search', () => {
       expect.objectContaining({ includeArchived: false })
     );
   });
+
+  it('JWT user with no company_id on token resolves companyId from the workflow', async () => {
+    // Real JWT users have only {id, email, super_admin} on req.user — no company_id.
+    mockJwtVerify.mockReturnValue({ id: 'user-1', email: 'u@example.com', super_admin: false });
+    (prisma.user.findUnique as jest.Mock).mockResolvedValue({
+      id: 'user-1',
+      email: 'u@example.com',
+      profile: { admin_role: { super_admin: false } },
+    });
+    (prisma.userCompany.findFirst as jest.Mock).mockResolvedValue({ role: 'member' });
+    (prisma.profileGroupMember.findMany as jest.Mock).mockResolvedValue([]);
+    (workflowService.searchExecutionsByData as jest.Mock).mockResolvedValue({ total: 0, executionIds: [] });
+
+    const response = await request(app)
+      .post('/api/workflows/wf-1/executions/search')
+      .set('Authorization', 'Bearer test-jwt')
+      .send({ filters: { event_id: 1 } });
+
+    expect(response.status).toBe(200);
+    expect(workflowService.searchExecutionsByData).toHaveBeenCalledWith(
+      expect.objectContaining({ companyId: 'company-1' }),
+    );
+  });
 });
