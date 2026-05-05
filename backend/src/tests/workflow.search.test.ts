@@ -103,4 +103,97 @@ describe('POST /api/workflows/:workflowId/executions/search', () => {
       })
     );
   });
+
+  it('returns 400 invalid_filters when filters is missing', async () => {
+    const response = await request(app)
+      .post('/api/workflows/wf-1/executions/search')
+      .set(apiKeyHeaders)
+      .send({});
+    expect(response.status).toBe(400);
+    expect(response.body.error).toBe('invalid_filters');
+  });
+
+  it('returns 400 invalid_filters when filters is empty', async () => {
+    const response = await request(app)
+      .post('/api/workflows/wf-1/executions/search')
+      .set(apiKeyHeaders)
+      .send({ filters: {} });
+    expect(response.status).toBe(400);
+    expect(response.body.error).toBe('invalid_filters');
+  });
+
+  it('returns 400 invalid_filters when filters is not an object', async () => {
+    const response = await request(app)
+      .post('/api/workflows/wf-1/executions/search')
+      .set(apiKeyHeaders)
+      .send({ filters: [1, 2] });
+    expect(response.status).toBe(400);
+    expect(response.body.error).toBe('invalid_filters');
+  });
+
+  it('returns 400 unknown_fields with the unknown names', async () => {
+    const response = await request(app)
+      .post('/api/workflows/wf-1/executions/search')
+      .set(apiKeyHeaders)
+      .send({ filters: { evnet_id: 1, also_wrong: 'x' } });
+    expect(response.status).toBe(400);
+    expect(response.body.error).toBe('unknown_fields');
+    expect(response.body.unknown.sort()).toEqual(['also_wrong', 'evnet_id']);
+  });
+
+  it('returns 400 invalid_field_value when scalar gets an object', async () => {
+    const response = await request(app)
+      .post('/api/workflows/wf-1/executions/search')
+      .set(apiKeyHeaders)
+      .send({ filters: { event_id: { contains: 1 } } });
+    expect(response.status).toBe(400);
+    expect(response.body.error).toBe('invalid_field_value');
+    expect(response.body.field).toBe('event_id');
+  });
+
+  it('returns 400 invalid_field_value when array field gets a primitive', async () => {
+    const response = await request(app)
+      .post('/api/workflows/wf-1/executions/search')
+      .set(apiKeyHeaders)
+      .send({ filters: { items: 'oops' } });
+    expect(response.status).toBe(400);
+    expect(response.body.error).toBe('invalid_field_value');
+    expect(response.body.field).toBe('items');
+  });
+
+  it('returns 400 invalid_pagination for limit > 200', async () => {
+    const response = await request(app)
+      .post('/api/workflows/wf-1/executions/search')
+      .set(apiKeyHeaders)
+      .send({ filters: { event_id: 1 }, limit: 500 });
+    expect(response.status).toBe(400);
+    expect(response.body.error).toBe('invalid_pagination');
+  });
+
+  it('returns 400 invalid_pagination for negative offset', async () => {
+    const response = await request(app)
+      .post('/api/workflows/wf-1/executions/search')
+      .set(apiKeyHeaders)
+      .send({ filters: { event_id: 1 }, offset: -1 });
+    expect(response.status).toBe(400);
+    expect(response.body.error).toBe('invalid_pagination');
+  });
+
+  it('passes valid limit/offset through to the service', async () => {
+    (workflowService.searchExecutionsByData as jest.Mock).mockResolvedValue({
+      total: 42,
+      executionIds: [],
+    });
+
+    const response = await request(app)
+      .post('/api/workflows/wf-1/executions/search')
+      .set(apiKeyHeaders)
+      .send({ filters: { event_id: 1 }, limit: 10, offset: 20 });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({ total: 42, limit: 10, offset: 20, executions: [] });
+    expect(workflowService.searchExecutionsByData).toHaveBeenCalledWith(
+      expect.objectContaining({ limit: 10, offset: 20 })
+    );
+  });
 });
