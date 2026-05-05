@@ -1328,6 +1328,221 @@ export const workflowController = {
   },
 
   /**
+   * POST /api/workflows/:workflowId/executions/search
+   * Find executions by matching values inside the workflow's data structure.
+   * Auth: API Key OR JWT (super admin key accepted via either path).
+   */
+  async searchExecutions(req: AuthRequest, res: Response) {
+    try {
+      const { workflowId } = req.params;
+      const body = (req.body ?? {}) as {
+        filters?: unknown;
+        limit?: unknown;
+        offset?: unknown;
+        includeArchived?: unknown;
+      };
+
+      // --- Pagination ---
+      const limit = body.limit === undefined ? 50 : Number(body.limit);
+      const offset = body.offset === undefined ? 0 : Number(body.offset);
+      if (!Number.isInteger(limit) || limit < 1 || limit > 200 ||
+          !Number.isInteger(offset) || offset < 0) {
+        return res.status(400).json({ error: 'invalid_pagination' });
+      }
+
+      // --- Filters shape ---
+      const rawFilters = body.filters;
+      if (!rawFilters || typeof rawFilters !== 'object' || Array.isArray(rawFilters)) {
+        return res.status(400).json({ error: 'invalid_filters' });
+      }
+      const filterEntries = Object.entries(rawFilters as Record<string, unknown>);
+      if (filterEntries.length === 0) {
+        return res.status(400).json({ error: 'invalid_filters' });
+      }
+
+      // --- Caller-shape detection ---
+      const userId = req.user?.id;
+      const isSuperAdmin = !!req.user?.super_admin;
+      const apiKeyCompanyId = req.company?.id;
+      const jwtCompanyId = (req.user as any)?.company_id as string | undefined;
+
+      let companyId: string | undefined = apiKeyCompanyId ?? jwtCompanyId;
+
+      // --- Workflow lookup ---
+      const workflow = await prisma.workflow.findFirst({
+        where: {
+          id: workflowId,
+          ...(isSuperAdmin ? {} : (companyId ? { company_id: companyId } : { id: '__none__' })),
+        },
+        select: {
+          id: true,
+          company_id: true,
+          is_public: true,
+          visibility_scope: true,
+          data_structure: true,
+        },
+      });
+      if (!workflow) {
+        return res.status(404).json({ error: 'workflow_not_found' });
+      }
+      if (isSuperAdmin) companyId = workflow.company_id ?? undefined;
+      if (!companyId) {
+        return res.status(401).json({ error: 'Missing company authorization' });
+      }
+
+      // --- Permissions (JWT users only) ---
+      const isApiKeyCaller = !!apiKeyCompanyId && !req.user;
+      if (!isSuperAdmin && !isApiKeyCaller && userId) {
+        const visibility = await resolveExecutionVisibilityForUser(userId, companyId);
+        if (!visibility.canAccessCompany) {
+          return res.status(403).json({ error: 'Access denied to this workflow' });
+        }
+        const allowed = await hasWorkflowVisibility({
+          workflow: {
+            id: workflow.id,
+            is_public: workflow.is_public,
+            visibility_scope: (workflow as any).visibility_scope,
+          },
+          userId,
+          groupIds: visibility.groupIds,
+        });
+        if (!allowed) {
+          return res.status(403).json({ error: 'Access denied to this workflow' });
+        }
+      }
+
+      // --- Translate filter names → field UUIDs ---
+      const fields: WorkflowDataStructureField[] = Array.isArray(workflow.data_structure)
+        ? (workflow.data_structure as WorkflowDataStructureField[])
+        : [];
+      const topLevelByName = new Map<string, WorkflowDataStructureField>();
+      for (const f of fields) {
+        if (!f.parent_item_id) topLevelByName.set(f.name, f);
+      }
+
+      const unknown: string[] = [];
+      const resolved: import('../services/workflow.service').ResolvedSearchFilter[] = [];
+      const isPrimitive = (v: unknown) =>
+        v === null || ['string', 'number', 'boolean'].includes(typeof v);
+
+      for (const [name, value] of filterEntries) {
+        const field = topLevelByName.get(name);
+        if (!field) {
+          unknown.push(name);
+          continue;
+        }
+        if (field.field_type === 'array') {
+          if (!value || typeof value !== 'object' || Array.isArray(value)) {
+            return res.status(400).json({
+              error: 'invalid_field_value',
+              field: name,
+              reason: 'array field requires an object of child filters',
+            });
+          }
+          const childEntries = Object.entries(value as Record<string, unknown>);
+          if (childEntries.length === 0) {
+            return res.status(400).json({
+              error: 'invalid_field_value',
+              field: name,
+              reason: 'array filter requires at least one child predicate',
+            });
+          }
+          const children: { childId: string; value: any }[] = [];
+          const childByName = new Map<string, WorkflowDataStructureField>();
+          for (const f of fields) {
+            if (f.parent_item_id === field.id) childByName.set(f.name, f);
+          }
+          for (const [childName, childValue] of childEntries) {
+            const childField = childByName.get(childName);
+            if (!childField) {
+              return res.status(400).json({
+                error: 'invalid_field_value',
+                field: name,
+                reason: `unknown child field "${childName}"`,
+              });
+            }
+            if (!isPrimitive(childValue)) {
+              return res.status(400).json({
+                error: 'invalid_field_value',
+                field: name,
+                reason: `child "${childName}" requires a primitive value`,
+              });
+            }
+            children.push({ childId: childField.id, value: childValue as any });
+          }
+          resolved.push({ kind: 'array', fieldId: field.id, children });
+        } else {
+          if (!isPrimitive(value)) {
+            return res.status(400).json({
+              error: 'invalid_field_value',
+              field: name,
+              reason: 'scalar field requires a primitive value',
+            });
+          }
+          resolved.push({ kind: 'scalar', fieldId: field.id, value: value as any });
+        }
+      }
+
+      if (unknown.length > 0) {
+        return res.status(400).json({ error: 'unknown_fields', unknown });
+      }
+
+      // --- Archived flag (honored only for super admin / API-key callers) ---
+      const includeArchivedRequested = body.includeArchived === true;
+      const includeArchived = includeArchivedRequested && (isSuperAdmin || isApiKeyCaller);
+
+      // --- Search ---
+      const { total, executionIds } = await workflowService.searchExecutionsByData({
+        workflowId: workflow.id,
+        companyId,
+        filters: resolved,
+        limit,
+        offset,
+        includeArchived,
+      });
+
+      if (executionIds.length === 0) {
+        return res.json({ total, limit, offset, executions: [] });
+      }
+
+      const rows = await prisma.workflowExecution.findMany({
+        where: { id: { in: executionIds } },
+        include: {
+          workflow: { select: { data_structure: true } },
+          execution_data_records: true,
+        },
+      });
+      const orderIndex = new Map(executionIds.map((id, idx) => [id, idx]));
+      rows.sort((a, b) => (orderIndex.get(a.id)! - orderIndex.get(b.id)!));
+
+      const executions = rows.map((row) => {
+        const { execution_data_mapped } = buildMappedExecutionData(
+          row.workflow,
+          (row as any).execution_data_records?.[0]
+        );
+        return {
+          id: row.id,
+          workflow_id: row.workflow_id,
+          name: (row as any).name,
+          status: row.status,
+          current_step_id: row.current_step_id,
+          created_at: row.created_at,
+          started_at: row.started_at,
+          completed_at: row.completed_at,
+          execution_data_mapped,
+        };
+      });
+
+      return res.json({ total, limit, offset, executions });
+    } catch (error) {
+      console.error('Error searching executions:', error);
+      return res.status(500).json({
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  },
+
+  /**
    * PUT /api/workflows/executions/:executionId/data
    * Update execution data (was: update-execution-data)
    */
