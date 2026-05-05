@@ -1369,10 +1369,14 @@ export const workflowController = {
       let companyId: string | undefined = apiKeyCompanyId ?? jwtCompanyId;
 
       // --- Workflow lookup ---
+      // Super admin and JWT users (who never have company_id on req.user) look up by workflowId
+      // alone; company membership is validated in the permissions block below.
+      // API-key callers scope the lookup to their company to prevent cross-company enumeration.
+      const jwtUserNoCompany = !!userId && !isSuperAdmin && !companyId;
       const workflow = await prisma.workflow.findFirst({
         where: {
           id: workflowId,
-          ...(isSuperAdmin ? {} : (companyId ? { company_id: companyId } : { id: '__none__' })),
+          ...(isSuperAdmin || jwtUserNoCompany ? {} : (companyId ? { company_id: companyId } : { id: '__none__' })),
         },
         select: {
           id: true,
@@ -1385,7 +1389,7 @@ export const workflowController = {
       if (!workflow) {
         return res.status(404).json({ error: 'workflow_not_found' });
       }
-      if (isSuperAdmin) companyId = workflow.company_id ?? undefined;
+      if (isSuperAdmin || jwtUserNoCompany) companyId = workflow.company_id ?? undefined;
       if (!companyId) {
         return res.status(401).json({ error: 'Missing company authorization' });
       }

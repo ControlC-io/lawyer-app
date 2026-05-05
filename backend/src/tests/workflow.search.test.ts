@@ -2,6 +2,16 @@ import request from 'supertest';
 import { app } from '../app';
 import { prisma } from '../lib/prisma';
 import { workflowService } from '../services/workflow.service';
+import jwt from 'jsonwebtoken';
+const mockJwtVerify = jwt.verify as jest.Mock;
+
+const jwtUser = {
+  id: 'user-1',
+  email: 'u@example.com',
+  company_id: 'company-1',
+  super_admin: false,
+};
+const _superAdminUser = { id: 'super-admin-api', email: 'sa@api', super_admin: true };
 
 jest.mock('../lib/prisma', () => ({
   prisma: {
@@ -243,5 +253,113 @@ describe('POST /api/workflows/:workflowId/executions/search', () => {
     expect(response.status).toBe(400);
     expect(response.body.error).toBe('invalid_field_value');
     expect(response.body.field).toBe('items');
+  });
+
+  it('returns 401 with no auth headers', async () => {
+    const response = await request(app)
+      .post('/api/workflows/wf-1/executions/search')
+      .send({ filters: { event_id: 1 } });
+    expect(response.status).toBe(401);
+  });
+
+  it('JWT user with workflow visibility (all_company) → 200', async () => {
+    mockJwtVerify.mockReturnValue(jwtUser);
+    (prisma.user.findUnique as jest.Mock).mockResolvedValue({
+      id: 'user-1',
+      email: 'u@example.com',
+      profile: { admin_role: { super_admin: false } },
+    });
+    (prisma.userCompany.findFirst as jest.Mock).mockResolvedValue({ role: 'member' });
+    (prisma.profileGroupMember.findMany as jest.Mock).mockResolvedValue([]);
+    (workflowService.searchExecutionsByData as jest.Mock).mockResolvedValue({ total: 0, executionIds: [] });
+
+    const response = await request(app)
+      .post('/api/workflows/wf-1/executions/search')
+      .set('Authorization', 'Bearer test-jwt')
+      .send({ filters: { event_id: 1 } });
+
+    expect(response.status).toBe(200);
+  });
+
+  it('JWT user without workflow visibility → 403', async () => {
+    (prisma.workflow.findFirst as jest.Mock).mockResolvedValue({
+      id: 'wf-1',
+      company_id: 'company-1',
+      is_public: false,
+      visibility_scope: 'restricted',
+      data_structure: baseDataStructure,
+    });
+    mockJwtVerify.mockReturnValue(jwtUser);
+    (prisma.user.findUnique as jest.Mock).mockResolvedValue({
+      id: 'user-1',
+      email: 'u@example.com',
+      profile: { admin_role: { super_admin: false } },
+    });
+    (prisma.userCompany.findFirst as jest.Mock).mockResolvedValue({ role: 'member' });
+    (prisma.profileGroupMember.findMany as jest.Mock).mockResolvedValue([]);
+    (prisma.workflowPermission.findFirst as jest.Mock).mockResolvedValue(null);
+
+    const response = await request(app)
+      .post('/api/workflows/wf-1/executions/search')
+      .set('Authorization', 'Bearer test-jwt')
+      .send({ filters: { event_id: 1 } });
+
+    expect(response.status).toBe(403);
+  });
+
+  it('Super admin via x-super-admin-api-key → resolves company from workflow', async () => {
+    process.env.SUPER_ADMIN_API_KEY = 'sa-secret';
+    (prisma.workflow.findFirst as jest.Mock).mockResolvedValue({
+      id: 'wf-1',
+      company_id: 'company-1',
+      is_public: false,
+      visibility_scope: 'restricted',
+      data_structure: baseDataStructure,
+    });
+    (workflowService.searchExecutionsByData as jest.Mock).mockResolvedValue({ total: 0, executionIds: [] });
+
+    const response = await request(app)
+      .post('/api/workflows/wf-1/executions/search')
+      .set('x-super-admin-api-key', 'sa-secret')
+      .send({ filters: { event_id: 1 } });
+
+    expect(response.status).toBe(200);
+    expect(workflowService.searchExecutionsByData).toHaveBeenCalledWith(
+      expect.objectContaining({ companyId: 'company-1' })
+    );
+  });
+
+  it('honors includeArchived for company API key callers', async () => {
+    (workflowService.searchExecutionsByData as jest.Mock).mockResolvedValue({ total: 0, executionIds: [] });
+
+    await request(app)
+      .post('/api/workflows/wf-1/executions/search')
+      .set(apiKeyHeaders)
+      .send({ filters: { event_id: 1 }, includeArchived: true });
+
+    expect(workflowService.searchExecutionsByData).toHaveBeenCalledWith(
+      expect.objectContaining({ includeArchived: true })
+    );
+  });
+
+  it('ignores includeArchived for JWT users', async () => {
+    mockJwtVerify.mockReturnValue(jwtUser);
+    (prisma.user.findUnique as jest.Mock).mockResolvedValue({
+      id: 'user-1',
+      email: 'u@example.com',
+      profile: { admin_role: { super_admin: false } },
+    });
+    (prisma.userCompany.findFirst as jest.Mock).mockResolvedValue({ role: 'member' });
+    (prisma.profileGroupMember.findMany as jest.Mock).mockResolvedValue([]);
+    (workflowService.searchExecutionsByData as jest.Mock).mockResolvedValue({ total: 0, executionIds: [] });
+
+    await request(app)
+      .post('/api/workflows/wf-1/executions/search')
+      .set('Authorization', 'Bearer test-jwt')
+      .send({ filters: { event_id: 1 }, includeArchived: true });
+
+    expect(workflowService.searchExecutionsByData).toHaveBeenCalledWith(
+      expect.objectContaining({ includeArchived: false })
+    );
   });
 });
