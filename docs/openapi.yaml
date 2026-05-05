@@ -317,6 +317,157 @@ paths:
         404:
           description: Workflow not found
 
+  /workflows/{workflowId}/executions/search:
+    post:
+      summary: Search executions by data structure values
+      description: |
+        Find executions of a workflow by matching values inside the workflow's `data_structure`.
+        Filter keys are top-level field **names** from the workflow definition (e.g. `event_id`,
+        `event_name`); values are matched against `WorkflowExecutionData.values` using
+        Postgres `jsonb_path_exists`. Comparison is type-strict — `1234` (number) does not
+        match a stored `"1234"` (string).
+
+        For an `array` field, pass an object whose keys are child field names. Semantics:
+        at least one element in the array satisfies **all** child equality predicates
+        (predicates must hold on the *same* item, not split across items).
+
+        Auth: company API key, JWT, or super admin key (via `x-api-key` or
+        `x-super-admin-api-key`). JWT users must have workflow visibility (workflow is
+        public, scope is `all_company`, or an explicit `WorkflowPermission` of type
+        `visibility`/`view` exists for the user or one of their groups). The `includeArchived`
+        flag is honored for super admin and company-API-key callers; ignored for JWT users.
+      tags: [Workflows]
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+        - SuperAdminApiKey: []
+      parameters:
+        - name: workflowId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [filters]
+              properties:
+                filters:
+                  type: object
+                  description: |
+                    Map of top-level field name → match value. For scalar fields, the value
+                    must be a non-null JSON primitive (string, number, or boolean). For array
+                    fields, the value must be a non-empty object whose keys are child field
+                    names and whose values are non-null primitives. `null` is not a valid
+                    filter value — jsonpath equality with null is unknown, so a null filter
+                    would silently match nothing; the endpoint rejects it with
+                    `invalid_field_value` instead.
+                  additionalProperties: true
+                  example:
+                    event_id: 1234
+                    event_name: "alpha"
+                    items:
+                      sku: "ABC-1"
+                      qty: 10
+                limit:
+                  type: integer
+                  minimum: 1
+                  maximum: 200
+                  default: 50
+                offset:
+                  type: integer
+                  minimum: 0
+                  default: 0
+                includeArchived:
+                  type: boolean
+                  default: false
+                  description: Honored for super admin and company-API-key callers; ignored for JWT users.
+      responses:
+        200:
+          description: Matching executions (paginated)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total:
+                    type: integer
+                    description: Total number of matches across all pages
+                  limit:
+                    type: integer
+                  offset:
+                    type: integer
+                  executions:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                        workflow_id:
+                          type: string
+                          format: uuid
+                        name:
+                          type: string
+                          nullable: true
+                        status:
+                          type: string
+                        current_step_id:
+                          type: string
+                          format: uuid
+                          nullable: true
+                        created_at:
+                          type: string
+                          format: date-time
+                        started_at:
+                          type: string
+                          format: date-time
+                          nullable: true
+                        completed_at:
+                          type: string
+                          format: date-time
+                          nullable: true
+                        execution_data_mapped:
+                          type: object
+                          description: |
+                            Top-level fields keyed by name. Array fields contain items
+                            reshaped to use child-field names instead of UUIDs.
+                          additionalProperties: true
+        400:
+          description: |
+            Invalid request. The `error` field identifies the specific failure:
+            - `invalid_filters` — `filters` missing, empty, or not an object.
+            - `unknown_fields` — one or more keys don't match a top-level field name. Response includes `unknown: string[]`.
+            - `invalid_field_value` — wrong type for a scalar field, primitive/array passed for an array field, unknown child field name, or non-primitive child value. Response includes `field` and `reason`.
+            - `invalid_pagination` — `limit` outside `[1, 200]` or `offset` < 0.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    enum: [invalid_filters, unknown_fields, invalid_field_value, invalid_pagination]
+                  unknown:
+                    type: array
+                    items:
+                      type: string
+                  field:
+                    type: string
+                  reason:
+                    type: string
+        401:
+          description: No auth headers, or company could not be resolved.
+        403:
+          description: JWT user lacks workflow visibility.
+        404:
+          description: Workflow not found, or caller's company doesn't own it.
+
   /workflows/executions/{executionId}:
     get:
       summary: Get execution data

@@ -38,6 +38,38 @@ async function resolveExecutionVisibilityForUser(userId: string, companyId: stri
   return { canAccessCompany: true, isAdmin, groupIds };
 }
 
+/**
+ * Returns true if the user has *workflow*-level visibility — either via workflow scope
+ * (is_public, all_company) or an explicit WorkflowPermission row of type visibility/view.
+ *
+ * This is the same boolean previously computed inline in getExecutionData. It does NOT
+ * include the step-assignment fallback that getExecutionData applies; callers that want
+ * step-scoped fallback handle it themselves.
+ */
+async function hasWorkflowVisibility(params: {
+  workflow: { id: string; is_public?: boolean | null; visibility_scope?: string | null };
+  userId: string;
+  groupIds: string[];
+}): Promise<boolean> {
+  const { workflow, userId, groupIds } = params;
+  const scopeAllowsAll =
+    workflow.visibility_scope === 'all_company' || workflow.is_public === true;
+  if (scopeAllowsAll) return true;
+
+  const permission = await prisma.workflowPermission.findFirst({
+    where: {
+      workflow_id: workflow.id,
+      permission_type: { in: ['visibility', 'view'] },
+      OR: [
+        { user_id: userId },
+        ...(groupIds.length > 0 ? [{ group_id: { in: groupIds } }] : []),
+      ],
+    },
+    select: { id: true },
+  });
+  return !!permission;
+}
+
 function attachStepCompletionMeta(
   rawStepData: unknown,
   params: {
@@ -220,6 +252,117 @@ async function streamToBuffer(stream: Readable): Promise<Buffer> {
     stream.on('end', () => resolve(Buffer.concat(chunks)));
     stream.on('error', reject);
   });
+}
+
+type WorkflowDataStructureField = {
+  id: string;
+  name: string;
+  field_type: string;
+  parent_item_id?: string | null;
+};
+
+/**
+ * Builds the name-keyed views (`execution_data_array`, `execution_data_mapped`) and the
+ * file_signed_urls map for an execution, given its first execution_data record. Pure
+ * function: does not mutate inputs and does not call out to storage.
+ *
+ * Extracted from getExecutionData so searchExecutions can reuse it without duplicating
+ * the array-item child-name remapping logic.
+ */
+function buildMappedExecutionData(
+  workflow: { data_structure: unknown },
+  executionDataRecord: { values: unknown } | null | undefined
+): {
+  execution_data_array: Array<Record<string, unknown>>;
+  execution_data_mapped: Record<string, unknown>;
+  file_signed_urls: Record<string, string>;
+} {
+  const empty = {
+    execution_data_array: [] as Array<Record<string, unknown>>,
+    execution_data_mapped: {} as Record<string, unknown>,
+    file_signed_urls: {} as Record<string, string>,
+  };
+
+  if (!Array.isArray(workflow.data_structure)) return empty;
+
+  const fields = workflow.data_structure as WorkflowDataStructureField[];
+  const values = (executionDataRecord?.values && typeof executionDataRecord.values === 'object'
+    ? (executionDataRecord.values as Record<string, { value?: unknown }>)
+    : {});
+
+  const fileSignedUrls: Record<string, string> = {};
+  for (const field of fields) {
+    const fieldValue = values[field.id];
+    try {
+      if (field.field_type === 'file' && fieldValue?.value) {
+        fileSignedUrls[field.id] = getDocumentProxyUrl(fieldValue.value as string);
+      }
+    } catch {
+      // Keep response available even when signed URL generation fails.
+    }
+  }
+
+  const topLevelFields = fields.filter((f) => !f.parent_item_id);
+
+  const childFieldIdToName: Record<string, Record<string, string>> = {};
+  for (const field of fields) {
+    if (field.field_type === 'array' && !field.parent_item_id) {
+      const childFields = fields.filter((f) => f.parent_item_id === field.id);
+      childFieldIdToName[field.id] = {};
+      for (const childField of childFields) {
+        if (childField.id && childField.name) {
+          childFieldIdToName[field.id][childField.id] = childField.name;
+        }
+      }
+    }
+  }
+
+  const transformArrayItem = (item: unknown, arrayFieldId: string): unknown => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return item;
+    const idToNameMap = childFieldIdToName[arrayFieldId] || {};
+    const transformed: Record<string, unknown> = {};
+    const itemRecord = item as Record<string, unknown>;
+    if (itemRecord._id) transformed._id = itemRecord._id;
+    for (const [key, value] of Object.entries(itemRecord)) {
+      if (key === '_id') continue;
+      const fieldName = idToNameMap[key];
+      transformed[fieldName ?? key] = value;
+    }
+    return transformed;
+  };
+
+  const execution_data_array: Array<Record<string, unknown>> = topLevelFields.map((field) => {
+    const fieldValue = values[field.id];
+    let processedValue: unknown = fieldValue?.value ?? null;
+    if (field.field_type === 'array' && Array.isArray(processedValue)) {
+      processedValue = processedValue.map((item) => transformArrayItem(item, field.id));
+    }
+    const result: Record<string, unknown> = {
+      field_id: field.id,
+      field_name: field.name,
+      field_type: field.field_type,
+      value: processedValue,
+    };
+    if (field.field_type === 'file' && fileSignedUrls[field.id]) {
+      result.signed_url = fileSignedUrls[field.id];
+    }
+    return result;
+  });
+
+  const execution_data_mapped: Record<string, unknown> = {};
+  for (const field of topLevelFields) {
+    const fieldValue = values[field.id];
+    let value: unknown = fieldValue?.value ?? null;
+    if (field.field_type === 'array' && Array.isArray(value)) {
+      value = value.map((item) => transformArrayItem(item, field.id));
+    }
+    execution_data_mapped[field.name] = value;
+    if (field.field_type === 'file' && fileSignedUrls[field.id]) {
+      execution_data_mapped[`${field.name}_signed_url`] = fileSignedUrls[field.id];
+    }
+  }
+
+  return { execution_data_array, execution_data_mapped, file_signed_urls: fileSignedUrls };
 }
 
 export const workflowController = {
@@ -1108,31 +1251,23 @@ export const workflowController = {
         ));
 
         const hasStepAssignmentAccess = allowedExecutionSteps.length > 0;
-        const workflowVisibilityTypes = ['visibility', 'view'];
-        const workflowScope = (execution.workflow as any).visibility_scope;
-        const hasWorkflowScopeVisibility = workflowScope === 'all_company' || execution.workflow.is_public === true;
-        const hasWorkflowPermissionVisibility = hasWorkflowScopeVisibility
-          ? true
-          : !!(await prisma.workflowPermission.findFirst({
-              where: {
-                workflow_id: execution.workflow_id,
-                permission_type: { in: workflowVisibilityTypes },
-                OR: [
-                  { user_id: userId },
-                  ...(visibility.groupIds.length > 0 ? [{ group_id: { in: visibility.groupIds } }] : []),
-                ],
-              },
-              select: { id: true },
-            }));
-        const hasWorkflowVisibility = hasWorkflowScopeVisibility || hasWorkflowPermissionVisibility;
+        const userHasWorkflowVisibility = await hasWorkflowVisibility({
+          workflow: {
+            id: execution.workflow_id,
+            is_public: execution.workflow.is_public,
+            visibility_scope: (execution.workflow as any).visibility_scope,
+          },
+          userId,
+          groupIds: visibility.groupIds,
+        });
 
-        if (!hasWorkflowVisibility && !hasStepAssignmentAccess) {
+        if (!userHasWorkflowVisibility && !hasStepAssignmentAccess) {
           return res.status(403).json({ error: 'You do not have access to this execution' });
         }
 
         // With workflow visibility, user can inspect full execution history/steps.
         // Without workflow visibility, keep data scoped to assigned steps only.
-        if (!hasWorkflowVisibility) {
+        if (!userHasWorkflowVisibility) {
           const allowedExecutionStepIds = new Set(allowedExecutionSteps.map((step) => step.id));
           execution.execution_steps = allowedExecutionSteps;
           execution.execution_logs = execution.execution_logs.filter((log) => (
@@ -1174,104 +1309,243 @@ export const workflowController = {
         };
       });
 
-      // Process execution data if data structure exists
-      if (execution.workflow.data_structure && Array.isArray(execution.workflow.data_structure)) {
-        const dataStructure = { fields: execution.workflow.data_structure as any[] };
-        const executionDataValues =
-          execution.execution_data_records[0]?.values || {};
+      const { execution_data_array, execution_data_mapped, file_signed_urls } =
+        buildMappedExecutionData(execution.workflow, execution.execution_data_records[0]);
 
-        // Get document URLs for file fields (proxy through backend, same logic as /api/files/signed-url for documents)
-        const fileSignedUrls: Record<string, any> = {};
-
-        for (const field of dataStructure.fields) {
-          const fieldValue = (executionDataValues as any)[field.id];
-
-          try {
-            if (field.field_type === 'file' && fieldValue?.value) {
-              fileSignedUrls[field.id] = getDocumentProxyUrl(fieldValue.value);
-            }
-          } catch {
-            // Keep execution response available even when signed URL generation fails.
-          }
-        }
-
-        // Add file signed URLs
-        if (Object.keys(fileSignedUrls).length > 0 && execution.execution_data_records[0]) {
-          (execution.execution_data_records[0] as any).file_signed_urls = fileSignedUrls;
-        }
-
-        // Build execution_data_array and execution_data_mapped
-        const topLevelFields = dataStructure.fields.filter((f) => !(f as any).parent_item_id);
-
-        // Build child field ID -> name maps for array transformation
-        const childFieldIdToName: Record<string, Record<string, string>> = {};
-        for (const field of dataStructure.fields) {
-          if (field.field_type === 'array' && !(field as any).parent_item_id) {
-            const childFields = dataStructure.fields.filter((f: any) => f.parent_item_id === field.id);
-            childFieldIdToName[field.id] = {};
-            childFields.forEach((childField: any) => {
-              if (childField.id && childField.name) {
-                childFieldIdToName[field.id][childField.id] = childField.name;
-              }
-            });
-          }
-        }
-
-        const transformArrayItem = (item: any, arrayFieldId: string): any => {
-          if (!item || typeof item !== 'object') return item;
-          const idToNameMap = childFieldIdToName[arrayFieldId] || {};
-          const transformed: any = {};
-          if (item._id) transformed._id = item._id;
-          for (const [key, value] of Object.entries(item)) {
-            if (key === '_id') continue;
-            const fieldName = idToNameMap[key];
-            transformed[fieldName || key] = value;
-          }
-          return transformed;
-        };
-
-        (execution as any).execution_data_array = topLevelFields.map((field: any) => {
-          const fieldValue = (executionDataValues as any)[field.id];
-          let processedValue = fieldValue?.value ?? null;
-
-          if (field.field_type === 'array' && Array.isArray(processedValue)) {
-            processedValue = processedValue.map((item: any) => transformArrayItem(item, field.id));
-          }
-
-          const result: any = {
-            field_id: field.id,
-            field_name: field.name,
-            field_type: field.field_type,
-            value: processedValue,
-          };
-
-          if (field.field_type === 'file' && fileSignedUrls[field.id]) {
-            result.signed_url = fileSignedUrls[field.id];
-          }
-
-          return result;
-        });
-
-        (execution as any).execution_data_mapped = {};
-        topLevelFields.forEach((field: any) => {
-          const fieldValue = (executionDataValues as any)[field.id];
-          let value = fieldValue?.value ?? null;
-
-          if (field.field_type === 'array' && Array.isArray(value)) {
-            value = value.map((item: any) => transformArrayItem(item, field.id));
-          }
-
-          (execution as any).execution_data_mapped[field.name] = value;
-
-          if (field.field_type === 'file' && fileSignedUrls[field.id]) {
-            (execution as any).execution_data_mapped[`${field.name}_signed_url`] = fileSignedUrls[field.id];
-          }
-        });
+      if (Object.keys(file_signed_urls).length > 0 && execution.execution_data_records[0]) {
+        (execution.execution_data_records[0] as any).file_signed_urls = file_signed_urls;
       }
+      (execution as any).execution_data_array = execution_data_array;
+      (execution as any).execution_data_mapped = execution_data_mapped;
 
       return res.json(execution);
     } catch (error) {
       console.error('Error getting execution data:', error);
+      return res.status(500).json({
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  },
+
+  /**
+   * POST /api/workflows/:workflowId/executions/search
+   * Find executions by matching values inside the workflow's data structure.
+   * Auth: API Key OR JWT (super admin key accepted via either path).
+   */
+  async searchExecutions(req: AuthRequest, res: Response) {
+    try {
+      const { workflowId } = req.params;
+      const body = (req.body ?? {}) as {
+        filters?: unknown;
+        limit?: unknown;
+        offset?: unknown;
+        includeArchived?: unknown;
+      };
+
+      // --- Pagination ---
+      const limit = body.limit === undefined ? 50 : Number(body.limit);
+      const offset = body.offset === undefined ? 0 : Number(body.offset);
+      if (!Number.isInteger(limit) || limit < 1 || limit > 200 ||
+          !Number.isInteger(offset) || offset < 0) {
+        return res.status(400).json({ error: 'invalid_pagination' });
+      }
+
+      // --- Filters shape ---
+      const rawFilters = body.filters;
+      if (!rawFilters || typeof rawFilters !== 'object' || Array.isArray(rawFilters)) {
+        return res.status(400).json({ error: 'invalid_filters' });
+      }
+      const filterEntries = Object.entries(rawFilters as Record<string, unknown>);
+      if (filterEntries.length === 0) {
+        return res.status(400).json({ error: 'invalid_filters' });
+      }
+
+      // --- Caller-shape detection ---
+      const userId = req.user?.id;
+      const isSuperAdmin = !!req.user?.super_admin;
+      const apiKeyCompanyId = req.company?.id;
+      const jwtCompanyId = (req.user as any)?.company_id as string | undefined;
+
+      let companyId: string | undefined = apiKeyCompanyId ?? jwtCompanyId;
+
+      // --- Workflow lookup ---
+      // Super admin and JWT users (who never have company_id on req.user) look up by workflowId
+      // alone; company membership is validated in the permissions block below.
+      // API-key callers scope the lookup to their company to prevent cross-company enumeration.
+      const jwtUserNoCompany = !!userId && !isSuperAdmin && !companyId;
+      const lookupByWorkflowIdOnly = isSuperAdmin || jwtUserNoCompany;
+      if (!lookupByWorkflowIdOnly && !companyId) {
+        return res.status(401).json({ error: 'Missing company authorization' });
+      }
+      const workflow = await prisma.workflow.findFirst({
+        where: lookupByWorkflowIdOnly
+          ? { id: workflowId }
+          : { id: workflowId, company_id: companyId },
+        select: {
+          id: true,
+          company_id: true,
+          is_public: true,
+          visibility_scope: true,
+          data_structure: true,
+        },
+      });
+      if (!workflow) {
+        return res.status(404).json({ error: 'workflow_not_found' });
+      }
+      if (lookupByWorkflowIdOnly) companyId = workflow.company_id ?? undefined;
+      if (!companyId) {
+        return res.status(401).json({ error: 'Missing company authorization' });
+      }
+
+      // --- Permissions (JWT users only) ---
+      const isApiKeyCaller = !!apiKeyCompanyId && !req.user;
+      if (!isSuperAdmin && !isApiKeyCaller && userId) {
+        const visibility = await resolveExecutionVisibilityForUser(userId, companyId);
+        if (!visibility.canAccessCompany) {
+          return res.status(403).json({ error: 'Access denied to this workflow' });
+        }
+        const allowed = await hasWorkflowVisibility({
+          workflow: {
+            id: workflow.id,
+            is_public: workflow.is_public,
+            visibility_scope: workflow.visibility_scope,
+          },
+          userId,
+          groupIds: visibility.groupIds,
+        });
+        if (!allowed) {
+          return res.status(403).json({ error: 'Access denied to this workflow' });
+        }
+      }
+
+      // --- Translate filter names → field UUIDs ---
+      const fields: WorkflowDataStructureField[] = Array.isArray(workflow.data_structure)
+        ? (workflow.data_structure as WorkflowDataStructureField[])
+        : [];
+      const topLevelByName = new Map<string, WorkflowDataStructureField>();
+      for (const f of fields) {
+        if (!f.parent_item_id) topLevelByName.set(f.name, f);
+      }
+
+      const unknown: string[] = [];
+      const resolved: import('../services/workflow.service').ResolvedSearchFilter[] = [];
+      // null is excluded: `@ == null` evaluates to unknown (not true) under jsonpath,
+      // so a null filter would silently match nothing. Reject at the boundary so callers
+      // get a clear error instead of empty results.
+      const isFilterValue = (v: unknown) =>
+        v !== null && ['string', 'number', 'boolean'].includes(typeof v);
+
+      for (const [name, value] of filterEntries) {
+        const field = topLevelByName.get(name);
+        if (!field) {
+          unknown.push(name);
+          continue;
+        }
+        if (field.field_type === 'array') {
+          if (!value || typeof value !== 'object' || Array.isArray(value)) {
+            return res.status(400).json({
+              error: 'invalid_field_value',
+              field: name,
+              reason: 'array field requires an object of child filters',
+            });
+          }
+          const childEntries = Object.entries(value as Record<string, unknown>);
+          if (childEntries.length === 0) {
+            return res.status(400).json({
+              error: 'invalid_field_value',
+              field: name,
+              reason: 'array filter requires at least one child predicate',
+            });
+          }
+          const children: { childId: string; value: any }[] = [];
+          const childByName = new Map<string, WorkflowDataStructureField>();
+          for (const f of fields) {
+            if (f.parent_item_id === field.id) childByName.set(f.name, f);
+          }
+          for (const [childName, childValue] of childEntries) {
+            const childField = childByName.get(childName);
+            if (!childField) {
+              return res.status(400).json({
+                error: 'invalid_field_value',
+                field: name,
+                reason: `unknown child field "${childName}"`,
+              });
+            }
+            if (!isFilterValue(childValue)) {
+              return res.status(400).json({
+                error: 'invalid_field_value',
+                field: name,
+                reason: `child "${childName}" requires a non-null primitive (string, number, or boolean)`,
+              });
+            }
+            children.push({ childId: childField.id, value: childValue as any });
+          }
+          resolved.push({ kind: 'array', fieldId: field.id, children });
+        } else {
+          if (!isFilterValue(value)) {
+            return res.status(400).json({
+              error: 'invalid_field_value',
+              field: name,
+              reason: 'scalar field requires a non-null primitive (string, number, or boolean)',
+            });
+          }
+          resolved.push({ kind: 'scalar', fieldId: field.id, value: value as any });
+        }
+      }
+
+      if (unknown.length > 0) {
+        return res.status(400).json({ error: 'unknown_fields', unknown });
+      }
+
+      // --- Archived flag (honored only for super admin / API-key callers) ---
+      const includeArchivedRequested = body.includeArchived === true;
+      const includeArchived = includeArchivedRequested && (isSuperAdmin || isApiKeyCaller);
+
+      // --- Search ---
+      const { total, executionIds } = await workflowService.searchExecutionsByData({
+        workflowId: workflow.id,
+        companyId,
+        filters: resolved,
+        limit,
+        offset,
+        includeArchived,
+      });
+
+      if (executionIds.length === 0) {
+        return res.json({ total, limit, offset, executions: [] });
+      }
+
+      const rows = await prisma.workflowExecution.findMany({
+        where: { id: { in: executionIds } },
+        include: {
+          workflow: { select: { data_structure: true } },
+          execution_data_records: true,
+        },
+      });
+      const orderIndex = new Map(executionIds.map((id, idx) => [id, idx]));
+      rows.sort((a, b) => (orderIndex.get(a.id)! - orderIndex.get(b.id)!));
+
+      const executions = rows.map((row) => {
+        const { execution_data_mapped } = buildMappedExecutionData(
+          row.workflow,
+          (row as any).execution_data_records?.[0]
+        );
+        return {
+          id: row.id,
+          workflow_id: row.workflow_id,
+          name: (row as any).name,
+          status: row.status,
+          current_step_id: row.current_step_id,
+          created_at: row.created_at,
+          started_at: row.started_at,
+          completed_at: row.completed_at,
+          execution_data_mapped,
+        };
+      });
+
+      return res.json({ total, limit, offset, executions });
+    } catch (error) {
+      console.error('Error searching executions:', error);
       return res.status(500).json({
         error: error instanceof Error ? error.message : 'Unknown error',
       });

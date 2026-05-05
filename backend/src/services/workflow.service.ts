@@ -1,7 +1,31 @@
 import { prisma } from '../lib/prisma';
+import { Prisma } from '@prisma/client';
 import fetch from 'node-fetch';
 import { notificationService } from './notification.service';
 import { resolveStepNotificationSettings, stepReminderService } from './stepReminder.service';
+
+// Caller-supplied filter values. `null` is intentionally excluded — `@ == null`
+// evaluates to unknown under jsonpath, so a null filter would silently match nothing.
+// Callers must reject null values before reaching this layer.
+export type SearchFilterPrimitive = string | number | boolean;
+
+export type ResolvedSearchFilter =
+  | { kind: 'scalar'; fieldId: string; value: SearchFilterPrimitive }
+  | { kind: 'array'; fieldId: string; children: { childId: string; value: SearchFilterPrimitive }[] };
+
+export type SearchExecutionsParams = {
+  workflowId: string;
+  companyId: string;
+  filters: ResolvedSearchFilter[];
+  limit: number;
+  offset: number;
+  includeArchived: boolean;
+};
+
+export type SearchExecutionsResult = {
+  total: number;
+  executionIds: string[];
+};
 
 type WorkflowStepRow = Awaited<ReturnType<typeof prisma.workflowStep.findMany>>[number];
 type WorkflowConnectionRow = Awaited<ReturnType<typeof prisma.workflowConnection.findMany>>[number];
@@ -616,5 +640,115 @@ export const workflowService = {
     });
 
     return snapshot;
+  },
+
+  async searchExecutionsByData(params: SearchExecutionsParams): Promise<SearchExecutionsResult> {
+    const { workflowId, companyId, filters, limit, offset, includeArchived } = params;
+
+    if (filters.length === 0) {
+      throw new Error('searchExecutionsByData requires at least one filter');
+    }
+
+    const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const assertUuid = (id: string) => {
+      if (!uuidPattern.test(id)) {
+        throw new Error(`invalid field id: ${JSON.stringify(id)}`);
+      }
+    };
+
+    // Build one EXISTS clause per filter. Field UUIDs are spliced into JSONPath text
+    // (validated above); caller-supplied values are bound through `vars::jsonb` so
+    // there is no path where caller input becomes JSONPath syntax.
+    //
+    // Lax mode (the default) is intentional for the array iteration: when an item in
+    // the array lacks one of the queried child fields, lax mode treats the missing
+    // field as an empty sequence and that item is simply filtered out of the match.
+    // Strict mode would raise a structural error and fail the row entirely, which
+    // makes filters brittle against schema drift across heterogeneous executions.
+    const filterClauses: Prisma.Sql[] = filters.map((filter) => {
+      if (filter.kind === 'scalar') {
+        assertUuid(filter.fieldId);
+        const path = `$."${filter.fieldId}".value ? (@ == $v)`;
+        const vars = JSON.stringify({ v: filter.value });
+        return Prisma.sql`
+          jsonb_path_exists(
+            d.values,
+            ${path}::jsonpath,
+            ${vars}::jsonb
+          )
+        `;
+      }
+
+      assertUuid(filter.fieldId);
+      if (filter.children.length === 0) {
+        throw new Error('array filter requires at least one child predicate');
+      }
+
+      const childExprs: string[] = [];
+      const varsObj: Record<string, SearchFilterPrimitive> = {};
+      filter.children.forEach((child, idx) => {
+        assertUuid(child.childId);
+        const varName = `v${idx}`;
+        childExprs.push(`@."${child.childId}" == $${varName}`);
+        varsObj[varName] = child.value;
+      });
+      const path = `$."${filter.fieldId}".value[*] ? (${childExprs.join(' && ')})`;
+      const vars = JSON.stringify(varsObj);
+      return Prisma.sql`
+        jsonb_path_exists(
+          d.values,
+          ${path}::jsonpath,
+          ${vars}::jsonb
+        )
+      `;
+    });
+
+    const existsAnd = Prisma.join(filterClauses, ' AND ');
+
+    const archivedClause = includeArchived
+      ? Prisma.empty
+      : Prisma.sql`AND e.is_archived = false`;
+
+    const rows = await prisma.$queryRaw<Array<{ id: string; total_count: string | number | bigint }>>(Prisma.sql`
+      SELECT e.id, COUNT(*) OVER() AS total_count
+      FROM workflow_executions e
+      WHERE e.workflow_id = ${workflowId}::uuid
+        AND e.company_id = ${companyId}::uuid
+        ${archivedClause}
+        AND EXISTS (
+          SELECT 1 FROM workflow_execution_data d
+          WHERE d.execution_id = e.id
+            AND ${existsAnd}
+        )
+      ORDER BY e.created_at DESC
+      LIMIT ${limit}
+      OFFSET ${offset}
+    `);
+
+    if (rows.length > 0) {
+      return {
+        total: Number(rows[0].total_count),
+        executionIds: rows.map((r) => r.id),
+      };
+    }
+
+    // Empty page — issue a separate COUNT so the caller can distinguish "past end" from "no matches".
+    const countRows = await prisma.$queryRaw<Array<{ total_count: string | number | bigint }>>(Prisma.sql`
+      SELECT COUNT(*) AS total_count
+      FROM workflow_executions e
+      WHERE e.workflow_id = ${workflowId}::uuid
+        AND e.company_id = ${companyId}::uuid
+        ${archivedClause}
+        AND EXISTS (
+          SELECT 1 FROM workflow_execution_data d
+          WHERE d.execution_id = e.id
+            AND ${existsAnd}
+        )
+    `);
+
+    return {
+      total: Number(countRows[0]?.total_count ?? 0),
+      executionIds: [],
+    };
   },
 };

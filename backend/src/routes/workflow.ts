@@ -119,4 +119,19 @@ router.patch(
   asyncHandler(workflowController.updateExecutionStep)
 );
 
+/**
+ * POST /api/workflows/:workflowId/executions/search
+ * Find executions by matching values inside the workflow's data structure.
+ * Auth: API Key OR JWT (super admin key accepted via either path).
+ */
+router.post(
+  '/:workflowId/executions/search',
+  (req, res, next) => {
+    const apiKey = req.headers['x-api-key'];
+    if (apiKey && !req.headers.authorization) return apiKeyAuth(req, res, next);
+    return authMiddleware(req, res, next);
+  },
+  asyncHandler(workflowController.searchExecutions)
+);
+
 export default router;
