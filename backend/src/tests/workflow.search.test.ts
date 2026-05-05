@@ -196,4 +196,52 @@ describe('POST /api/workflows/:workflowId/executions/search', () => {
       expect.objectContaining({ limit: 10, offset: 20 })
     );
   });
+
+  it('translates an array filter into a service ResolvedSearchFilter (kind: array)', async () => {
+    (workflowService.searchExecutionsByData as jest.Mock).mockResolvedValue({
+      total: 0,
+      executionIds: [],
+    });
+
+    const response = await request(app)
+      .post('/api/workflows/wf-1/executions/search')
+      .set(apiKeyHeaders)
+      .send({ filters: { items: { sku: 'ABC-1', qty: 10 } } });
+
+    expect(response.status).toBe(200);
+    expect(workflowService.searchExecutionsByData).toHaveBeenCalledWith(
+      expect.objectContaining({
+        filters: [
+          {
+            kind: 'array',
+            fieldId: FIELD_ITEMS,
+            children: expect.arrayContaining([
+              { childId: CHILD_SKU, value: 'ABC-1' },
+              { childId: CHILD_QTY, value: 10 },
+            ]),
+          },
+        ],
+      })
+    );
+  });
+
+  it('rejects unknown child field name in an array filter', async () => {
+    const response = await request(app)
+      .post('/api/workflows/wf-1/executions/search')
+      .set(apiKeyHeaders)
+      .send({ filters: { items: { not_a_child: 'x' } } });
+    expect(response.status).toBe(400);
+    expect(response.body.error).toBe('invalid_field_value');
+    expect(response.body.field).toBe('items');
+  });
+
+  it('rejects empty child object in an array filter', async () => {
+    const response = await request(app)
+      .post('/api/workflows/wf-1/executions/search')
+      .set(apiKeyHeaders)
+      .send({ filters: { items: {} } });
+    expect(response.status).toBe(400);
+    expect(response.body.error).toBe('invalid_field_value');
+    expect(response.body.field).toBe('items');
+  });
 });
