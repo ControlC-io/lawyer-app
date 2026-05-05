@@ -18,6 +18,7 @@ jest.mock('../lib/prisma', () => ({
     },
     workflowExecution: { findUnique: jest.fn(), update: jest.fn() },
     workflowExecutionData: { findMany: jest.fn() },
+    $queryRaw: jest.fn(),
     stepReminderJob: {
       create: jest.fn(),
       createMany: jest.fn(),
@@ -567,6 +568,82 @@ describe('workflow.service', () => {
       await expect(
         workflowService.triggerFileProcessing('exec-1', 'ex-step-1', 'wf-step-1')
       ).resolves.toBeUndefined();
+    });
+  });
+
+  describe('searchExecutionsByData', () => {
+    const baseParams = {
+      workflowId: 'wf-1',
+      companyId: 'co-1',
+      limit: 50,
+      offset: 0,
+      includeArchived: false,
+    } as const;
+
+    beforeEach(() => {
+      (prisma.$queryRaw as jest.Mock).mockResolvedValue([
+        { id: 'exec-1', total_count: '2' },
+        { id: 'exec-2', total_count: '2' },
+      ]);
+    });
+
+    it('returns ids and total from windowed COUNT(*) for a single scalar filter', async () => {
+      const result = await workflowService.searchExecutionsByData({
+        ...baseParams,
+        filters: [{ kind: 'scalar', fieldId: '11111111-1111-1111-1111-111111111111', value: 1234 }],
+      });
+
+      expect(result).toEqual({ total: 2, executionIds: ['exec-1', 'exec-2'] });
+      expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+    });
+
+    it('falls back to a separate COUNT query when the page is empty', async () => {
+      (prisma.$queryRaw as jest.Mock)
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([{ total_count: '7' }]);
+
+      const result = await workflowService.searchExecutionsByData({
+        ...baseParams,
+        offset: 100,
+        filters: [{ kind: 'scalar', fieldId: '11111111-1111-1111-1111-111111111111', value: 'x' }],
+      });
+
+      expect(result).toEqual({ total: 7, executionIds: [] });
+      expect(prisma.$queryRaw).toHaveBeenCalledTimes(2);
+    });
+
+    it('throws when a fieldId is not a valid UUID (defense-in-depth)', async () => {
+      await expect(
+        workflowService.searchExecutionsByData({
+          ...baseParams,
+          filters: [{ kind: 'scalar', fieldId: "'; DROP TABLE--", value: 1 }],
+        })
+      ).rejects.toThrow(/invalid field id/i);
+    });
+
+    it('throws when filters is empty (caller contract)', async () => {
+      await expect(
+        workflowService.searchExecutionsByData({ ...baseParams, filters: [] })
+      ).rejects.toThrow(/at least one filter/i);
+    });
+
+    it('AND-joins multiple filter clauses into a single query', async () => {
+      (prisma.$queryRaw as jest.Mock).mockResolvedValue([{ id: 'exec-1', total_count: '1' }]);
+
+      const result = await workflowService.searchExecutionsByData({
+        ...baseParams,
+        filters: [
+          { kind: 'scalar', fieldId: '11111111-1111-1111-1111-111111111111', value: 1234 },
+          { kind: 'scalar', fieldId: '22222222-2222-2222-2222-222222222222', value: 'test' },
+        ],
+      });
+
+      expect(result).toEqual({ total: 1, executionIds: ['exec-1'] });
+      // Inspect the assembled Prisma.Sql passed to $queryRaw — both field UUIDs should appear.
+      const calledWith = (prisma.$queryRaw as jest.Mock).mock.calls[0][0];
+      const assembled = (calledWith.strings ?? []).join(' ') + JSON.stringify(calledWith.values ?? []);
+      expect(assembled).toContain('11111111-1111-1111-1111-111111111111');
+      expect(assembled).toContain('22222222-2222-2222-2222-222222222222');
     });
   });
 });
