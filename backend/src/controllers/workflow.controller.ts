@@ -237,7 +237,7 @@ type WorkflowDataStructureField = {
  * Extracted from getExecutionData so searchExecutions can reuse it without duplicating
  * the array-item child-name remapping logic.
  */
-export function buildMappedExecutionData(
+function buildMappedExecutionData(
   workflow: { data_structure: unknown },
   executionDataRecord: { values: unknown } | null | undefined
 ): {
@@ -290,7 +290,7 @@ export function buildMappedExecutionData(
     const idToNameMap = childFieldIdToName[arrayFieldId] || {};
     const transformed: Record<string, unknown> = {};
     const itemRecord = item as Record<string, unknown>;
-    if (itemRecord._id !== undefined) transformed._id = itemRecord._id;
+    if (itemRecord._id) transformed._id = itemRecord._id;
     for (const [key, value] of Object.entries(itemRecord)) {
       if (key === '_id') continue;
       const fieldName = idToNameMap[key];
