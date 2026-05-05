@@ -222,6 +222,117 @@ async function streamToBuffer(stream: Readable): Promise<Buffer> {
   });
 }
 
+type WorkflowDataStructureField = {
+  id: string;
+  name: string;
+  field_type: string;
+  parent_item_id?: string | null;
+};
+
+/**
+ * Builds the name-keyed views (`execution_data_array`, `execution_data_mapped`) and the
+ * file_signed_urls map for an execution, given its first execution_data record. Pure
+ * function: does not mutate inputs and does not call out to storage.
+ *
+ * Extracted from getExecutionData so searchExecutions can reuse it without duplicating
+ * the array-item child-name remapping logic.
+ */
+export function buildMappedExecutionData(
+  workflow: { data_structure: unknown },
+  executionDataRecord: { values: unknown } | null | undefined
+): {
+  execution_data_array: Array<Record<string, unknown>>;
+  execution_data_mapped: Record<string, unknown>;
+  file_signed_urls: Record<string, string>;
+} {
+  const empty = {
+    execution_data_array: [] as Array<Record<string, unknown>>,
+    execution_data_mapped: {} as Record<string, unknown>,
+    file_signed_urls: {} as Record<string, string>,
+  };
+
+  if (!Array.isArray(workflow.data_structure)) return empty;
+
+  const fields = workflow.data_structure as WorkflowDataStructureField[];
+  const values = (executionDataRecord?.values && typeof executionDataRecord.values === 'object'
+    ? (executionDataRecord.values as Record<string, { value?: unknown }>)
+    : {});
+
+  const fileSignedUrls: Record<string, string> = {};
+  for (const field of fields) {
+    const fieldValue = values[field.id];
+    try {
+      if (field.field_type === 'file' && fieldValue?.value) {
+        fileSignedUrls[field.id] = getDocumentProxyUrl(fieldValue.value as string);
+      }
+    } catch {
+      // Keep response available even when signed URL generation fails.
+    }
+  }
+
+  const topLevelFields = fields.filter((f) => !f.parent_item_id);
+
+  const childFieldIdToName: Record<string, Record<string, string>> = {};
+  for (const field of fields) {
+    if (field.field_type === 'array' && !field.parent_item_id) {
+      const childFields = fields.filter((f) => f.parent_item_id === field.id);
+      childFieldIdToName[field.id] = {};
+      for (const childField of childFields) {
+        if (childField.id && childField.name) {
+          childFieldIdToName[field.id][childField.id] = childField.name;
+        }
+      }
+    }
+  }
+
+  const transformArrayItem = (item: unknown, arrayFieldId: string): unknown => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return item;
+    const idToNameMap = childFieldIdToName[arrayFieldId] || {};
+    const transformed: Record<string, unknown> = {};
+    const itemRecord = item as Record<string, unknown>;
+    if (itemRecord._id !== undefined) transformed._id = itemRecord._id;
+    for (const [key, value] of Object.entries(itemRecord)) {
+      if (key === '_id') continue;
+      const fieldName = idToNameMap[key];
+      transformed[fieldName ?? key] = value;
+    }
+    return transformed;
+  };
+
+  const execution_data_array: Array<Record<string, unknown>> = topLevelFields.map((field) => {
+    const fieldValue = values[field.id];
+    let processedValue: unknown = fieldValue?.value ?? null;
+    if (field.field_type === 'array' && Array.isArray(processedValue)) {
+      processedValue = processedValue.map((item) => transformArrayItem(item, field.id));
+    }
+    const result: Record<string, unknown> = {
+      field_id: field.id,
+      field_name: field.name,
+      field_type: field.field_type,
+      value: processedValue,
+    };
+    if (field.field_type === 'file' && fileSignedUrls[field.id]) {
+      result.signed_url = fileSignedUrls[field.id];
+    }
+    return result;
+  });
+
+  const execution_data_mapped: Record<string, unknown> = {};
+  for (const field of topLevelFields) {
+    const fieldValue = values[field.id];
+    let value: unknown = fieldValue?.value ?? null;
+    if (field.field_type === 'array' && Array.isArray(value)) {
+      value = value.map((item) => transformArrayItem(item, field.id));
+    }
+    execution_data_mapped[field.name] = value;
+    if (field.field_type === 'file' && fileSignedUrls[field.id]) {
+      execution_data_mapped[`${field.name}_signed_url`] = fileSignedUrls[field.id];
+    }
+  }
+
+  return { execution_data_array, execution_data_mapped, file_signed_urls: fileSignedUrls };
+}
+
 export const workflowController = {
   /**
    * POST /api/workflows/:workflowId/trigger
@@ -1174,100 +1285,14 @@ export const workflowController = {
         };
       });
 
-      // Process execution data if data structure exists
-      if (execution.workflow.data_structure && Array.isArray(execution.workflow.data_structure)) {
-        const dataStructure = { fields: execution.workflow.data_structure as any[] };
-        const executionDataValues =
-          execution.execution_data_records[0]?.values || {};
+      const { execution_data_array, execution_data_mapped, file_signed_urls } =
+        buildMappedExecutionData(execution.workflow, execution.execution_data_records[0]);
 
-        // Get document URLs for file fields (proxy through backend, same logic as /api/files/signed-url for documents)
-        const fileSignedUrls: Record<string, any> = {};
-
-        for (const field of dataStructure.fields) {
-          const fieldValue = (executionDataValues as any)[field.id];
-
-          try {
-            if (field.field_type === 'file' && fieldValue?.value) {
-              fileSignedUrls[field.id] = getDocumentProxyUrl(fieldValue.value);
-            }
-          } catch {
-            // Keep execution response available even when signed URL generation fails.
-          }
-        }
-
-        // Add file signed URLs
-        if (Object.keys(fileSignedUrls).length > 0 && execution.execution_data_records[0]) {
-          (execution.execution_data_records[0] as any).file_signed_urls = fileSignedUrls;
-        }
-
-        // Build execution_data_array and execution_data_mapped
-        const topLevelFields = dataStructure.fields.filter((f) => !(f as any).parent_item_id);
-
-        // Build child field ID -> name maps for array transformation
-        const childFieldIdToName: Record<string, Record<string, string>> = {};
-        for (const field of dataStructure.fields) {
-          if (field.field_type === 'array' && !(field as any).parent_item_id) {
-            const childFields = dataStructure.fields.filter((f: any) => f.parent_item_id === field.id);
-            childFieldIdToName[field.id] = {};
-            childFields.forEach((childField: any) => {
-              if (childField.id && childField.name) {
-                childFieldIdToName[field.id][childField.id] = childField.name;
-              }
-            });
-          }
-        }
-
-        const transformArrayItem = (item: any, arrayFieldId: string): any => {
-          if (!item || typeof item !== 'object') return item;
-          const idToNameMap = childFieldIdToName[arrayFieldId] || {};
-          const transformed: any = {};
-          if (item._id) transformed._id = item._id;
-          for (const [key, value] of Object.entries(item)) {
-            if (key === '_id') continue;
-            const fieldName = idToNameMap[key];
-            transformed[fieldName || key] = value;
-          }
-          return transformed;
-        };
-
-        (execution as any).execution_data_array = topLevelFields.map((field: any) => {
-          const fieldValue = (executionDataValues as any)[field.id];
-          let processedValue = fieldValue?.value ?? null;
-
-          if (field.field_type === 'array' && Array.isArray(processedValue)) {
-            processedValue = processedValue.map((item: any) => transformArrayItem(item, field.id));
-          }
-
-          const result: any = {
-            field_id: field.id,
-            field_name: field.name,
-            field_type: field.field_type,
-            value: processedValue,
-          };
-
-          if (field.field_type === 'file' && fileSignedUrls[field.id]) {
-            result.signed_url = fileSignedUrls[field.id];
-          }
-
-          return result;
-        });
-
-        (execution as any).execution_data_mapped = {};
-        topLevelFields.forEach((field: any) => {
-          const fieldValue = (executionDataValues as any)[field.id];
-          let value = fieldValue?.value ?? null;
-
-          if (field.field_type === 'array' && Array.isArray(value)) {
-            value = value.map((item: any) => transformArrayItem(item, field.id));
-          }
-
-          (execution as any).execution_data_mapped[field.name] = value;
-
-          if (field.field_type === 'file' && fileSignedUrls[field.id]) {
-            (execution as any).execution_data_mapped[`${field.name}_signed_url`] = fileSignedUrls[field.id];
-          }
-        });
+      if (Object.keys(file_signed_urls).length > 0 && execution.execution_data_records[0]) {
+        (execution.execution_data_records[0] as any).file_signed_urls = file_signed_urls;
       }
+      (execution as any).execution_data_array = execution_data_array;
+      (execution as any).execution_data_mapped = execution_data_mapped;
 
       return res.json(execution);
     } catch (error) {
