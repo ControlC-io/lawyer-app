@@ -11,7 +11,6 @@ const jwtUser = {
   company_id: 'company-1',
   super_admin: false,
 };
-const _superAdminUser = { id: 'super-admin-api', email: 'sa@api', super_admin: true };
 
 jest.mock('../lib/prisma', () => ({
   prisma: {
@@ -384,5 +383,108 @@ describe('POST /api/workflows/:workflowId/executions/search', () => {
     expect(workflowService.searchExecutionsByData).toHaveBeenCalledWith(
       expect.objectContaining({ companyId: 'company-1' }),
     );
+  });
+
+  it('returns 404 workflow_not_found when the workflow does not exist', async () => {
+    (prisma.workflow.findFirst as jest.Mock).mockResolvedValue(null);
+
+    const response = await request(app)
+      .post('/api/workflows/wf-missing/executions/search')
+      .set(apiKeyHeaders)
+      .send({ filters: { event_id: 1 } });
+
+    expect(response.status).toBe(404);
+    expect(response.body.error).toBe('workflow_not_found');
+    expect(workflowService.searchExecutionsByData).not.toHaveBeenCalled();
+  });
+
+  it('returns 404 when an API-key caller targets a workflow in another company', async () => {
+    // Lookup is scoped to req.company.id, so a foreign workflow returns null → 404.
+    (prisma.workflow.findFirst as jest.Mock).mockResolvedValue(null);
+
+    const response = await request(app)
+      .post('/api/workflows/wf-foreign/executions/search')
+      .set(apiKeyHeaders)
+      .send({ filters: { event_id: 1 } });
+
+    expect(response.status).toBe(404);
+    expect(response.body.error).toBe('workflow_not_found');
+    // The lookup must have been scoped by company_id (no cross-company enumeration).
+    expect(prisma.workflow.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ company_id: 'company-1' }),
+      })
+    );
+  });
+
+  it('rejects null as a scalar filter value with invalid_field_value', async () => {
+    // null cannot be expressed in jsonpath equality (`@ == null` is unknown), so the
+    // boundary rejects it explicitly rather than silently returning empty results.
+    const response = await request(app)
+      .post('/api/workflows/wf-1/executions/search')
+      .set(apiKeyHeaders)
+      .send({ filters: { event_name: null } });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toBe('invalid_field_value');
+    expect(response.body.field).toBe('event_name');
+    expect(response.body.reason).toMatch(/non-null/i);
+    expect(workflowService.searchExecutionsByData).not.toHaveBeenCalled();
+  });
+
+  it('rejects null as a child filter value with invalid_field_value', async () => {
+    const response = await request(app)
+      .post('/api/workflows/wf-1/executions/search')
+      .set(apiKeyHeaders)
+      .send({ filters: { items: { sku: null } } });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toBe('invalid_field_value');
+    expect(response.body.field).toBe('items');
+    expect(response.body.reason).toMatch(/non-null/i);
+  });
+
+  it('accepts pagination boundary limit=1', async () => {
+    (workflowService.searchExecutionsByData as jest.Mock).mockResolvedValue({
+      total: 0,
+      executionIds: [],
+    });
+
+    const response = await request(app)
+      .post('/api/workflows/wf-1/executions/search')
+      .set(apiKeyHeaders)
+      .send({ filters: { event_id: 1 }, limit: 1, offset: 0 });
+
+    expect(response.status).toBe(200);
+    expect(workflowService.searchExecutionsByData).toHaveBeenCalledWith(
+      expect.objectContaining({ limit: 1, offset: 0 })
+    );
+  });
+
+  it('accepts pagination boundary limit=200', async () => {
+    (workflowService.searchExecutionsByData as jest.Mock).mockResolvedValue({
+      total: 0,
+      executionIds: [],
+    });
+
+    const response = await request(app)
+      .post('/api/workflows/wf-1/executions/search')
+      .set(apiKeyHeaders)
+      .send({ filters: { event_id: 1 }, limit: 200 });
+
+    expect(response.status).toBe(200);
+    expect(workflowService.searchExecutionsByData).toHaveBeenCalledWith(
+      expect.objectContaining({ limit: 200 })
+    );
+  });
+
+  it('rejects pagination limit=0 below the boundary', async () => {
+    const response = await request(app)
+      .post('/api/workflows/wf-1/executions/search')
+      .set(apiKeyHeaders)
+      .send({ filters: { event_id: 1 }, limit: 0 });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toBe('invalid_pagination');
   });
 });
