@@ -4,7 +4,10 @@ import fetch from 'node-fetch';
 import { notificationService } from './notification.service';
 import { resolveStepNotificationSettings, stepReminderService } from './stepReminder.service';
 
-export type SearchFilterPrimitive = string | number | boolean | null;
+// Caller-supplied filter values. `null` is intentionally excluded — `@ == null`
+// evaluates to unknown under jsonpath, so a null filter would silently match nothing.
+// Callers must reject null values before reaching this layer.
+export type SearchFilterPrimitive = string | number | boolean;
 
 export type ResolvedSearchFilter =
   | { kind: 'scalar'; fieldId: string; value: SearchFilterPrimitive }
@@ -656,6 +659,12 @@ export const workflowService = {
     // Build one EXISTS clause per filter. Field UUIDs are spliced into JSONPath text
     // (validated above); caller-supplied values are bound through `vars::jsonb` so
     // there is no path where caller input becomes JSONPath syntax.
+    //
+    // Lax mode (the default) is intentional for the array iteration: when an item in
+    // the array lacks one of the queried child fields, lax mode treats the missing
+    // field as an empty sequence and that item is simply filtered out of the match.
+    // Strict mode would raise a structural error and fail the row entirely, which
+    // makes filters brittle against schema drift across heterogeneous executions.
     const filterClauses: Prisma.Sql[] = filters.map((filter) => {
       if (filter.kind === 'scalar') {
         assertUuid(filter.fieldId);

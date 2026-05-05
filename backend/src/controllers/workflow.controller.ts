@@ -1373,11 +1373,14 @@ export const workflowController = {
       // alone; company membership is validated in the permissions block below.
       // API-key callers scope the lookup to their company to prevent cross-company enumeration.
       const jwtUserNoCompany = !!userId && !isSuperAdmin && !companyId;
+      const lookupByWorkflowIdOnly = isSuperAdmin || jwtUserNoCompany;
+      if (!lookupByWorkflowIdOnly && !companyId) {
+        return res.status(401).json({ error: 'Missing company authorization' });
+      }
       const workflow = await prisma.workflow.findFirst({
-        where: {
-          id: workflowId,
-          ...(isSuperAdmin || jwtUserNoCompany ? {} : (companyId ? { company_id: companyId } : { id: '__none__' })),
-        },
+        where: lookupByWorkflowIdOnly
+          ? { id: workflowId }
+          : { id: workflowId, company_id: companyId },
         select: {
           id: true,
           company_id: true,
@@ -1389,7 +1392,7 @@ export const workflowController = {
       if (!workflow) {
         return res.status(404).json({ error: 'workflow_not_found' });
       }
-      if (isSuperAdmin || jwtUserNoCompany) companyId = workflow.company_id ?? undefined;
+      if (lookupByWorkflowIdOnly) companyId = workflow.company_id ?? undefined;
       if (!companyId) {
         return res.status(401).json({ error: 'Missing company authorization' });
       }
@@ -1405,7 +1408,7 @@ export const workflowController = {
           workflow: {
             id: workflow.id,
             is_public: workflow.is_public,
-            visibility_scope: (workflow as any).visibility_scope,
+            visibility_scope: workflow.visibility_scope,
           },
           userId,
           groupIds: visibility.groupIds,
@@ -1426,8 +1429,11 @@ export const workflowController = {
 
       const unknown: string[] = [];
       const resolved: import('../services/workflow.service').ResolvedSearchFilter[] = [];
-      const isPrimitive = (v: unknown) =>
-        v === null || ['string', 'number', 'boolean'].includes(typeof v);
+      // null is excluded: `@ == null` evaluates to unknown (not true) under jsonpath,
+      // so a null filter would silently match nothing. Reject at the boundary so callers
+      // get a clear error instead of empty results.
+      const isFilterValue = (v: unknown) =>
+        v !== null && ['string', 'number', 'boolean'].includes(typeof v);
 
       for (const [name, value] of filterEntries) {
         const field = topLevelByName.get(name);
@@ -1465,22 +1471,22 @@ export const workflowController = {
                 reason: `unknown child field "${childName}"`,
               });
             }
-            if (!isPrimitive(childValue)) {
+            if (!isFilterValue(childValue)) {
               return res.status(400).json({
                 error: 'invalid_field_value',
                 field: name,
-                reason: `child "${childName}" requires a primitive value`,
+                reason: `child "${childName}" requires a non-null primitive (string, number, or boolean)`,
               });
             }
             children.push({ childId: childField.id, value: childValue as any });
           }
           resolved.push({ kind: 'array', fieldId: field.id, children });
         } else {
-          if (!isPrimitive(value)) {
+          if (!isFilterValue(value)) {
             return res.status(400).json({
               error: 'invalid_field_value',
               field: name,
-              reason: 'scalar field requires a primitive value',
+              reason: 'scalar field requires a non-null primitive (string, number, or boolean)',
             });
           }
           resolved.push({ kind: 'scalar', fieldId: field.id, value: value as any });
