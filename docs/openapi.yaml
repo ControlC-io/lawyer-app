@@ -360,9 +360,12 @@ paths:
                   type: object
                   description: |
                     Map of top-level field name → match value. For scalar fields, the value
-                    must be a JSON primitive (string, number, boolean, null). For array
+                    must be a non-null JSON primitive (string, number, or boolean). For array
                     fields, the value must be a non-empty object whose keys are child field
-                    names and whose values are primitives.
+                    names and whose values are non-null primitives. `null` is not a valid
+                    filter value — jsonpath equality with null is unknown, so a null filter
+                    would silently match nothing; the endpoint rejects it with
+                    `invalid_field_value` instead.
                   additionalProperties: true
                   example:
                     event_id: 1234
