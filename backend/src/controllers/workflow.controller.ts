@@ -38,6 +38,38 @@ async function resolveExecutionVisibilityForUser(userId: string, companyId: stri
   return { canAccessCompany: true, isAdmin, groupIds };
 }
 
+/**
+ * Returns true if the user has *workflow*-level visibility — either via workflow scope
+ * (is_public, all_company) or an explicit WorkflowPermission row of type visibility/view.
+ *
+ * This is the same boolean previously computed inline in getExecutionData. It does NOT
+ * include the step-assignment fallback that getExecutionData applies; callers that want
+ * step-scoped fallback handle it themselves.
+ */
+async function hasWorkflowVisibility(params: {
+  workflow: { id: string; is_public?: boolean | null; visibility_scope?: string | null };
+  userId: string;
+  groupIds: string[];
+}): Promise<boolean> {
+  const { workflow, userId, groupIds } = params;
+  const scopeAllowsAll =
+    workflow.visibility_scope === 'all_company' || workflow.is_public === true;
+  if (scopeAllowsAll) return true;
+
+  const permission = await prisma.workflowPermission.findFirst({
+    where: {
+      workflow_id: workflow.id,
+      permission_type: { in: ['visibility', 'view'] },
+      OR: [
+        { user_id: userId },
+        ...(groupIds.length > 0 ? [{ group_id: { in: groupIds } }] : []),
+      ],
+    },
+    select: { id: true },
+  });
+  return !!permission;
+}
+
 function attachStepCompletionMeta(
   rawStepData: unknown,
   params: {
@@ -1219,31 +1251,23 @@ export const workflowController = {
         ));
 
         const hasStepAssignmentAccess = allowedExecutionSteps.length > 0;
-        const workflowVisibilityTypes = ['visibility', 'view'];
-        const workflowScope = (execution.workflow as any).visibility_scope;
-        const hasWorkflowScopeVisibility = workflowScope === 'all_company' || execution.workflow.is_public === true;
-        const hasWorkflowPermissionVisibility = hasWorkflowScopeVisibility
-          ? true
-          : !!(await prisma.workflowPermission.findFirst({
-              where: {
-                workflow_id: execution.workflow_id,
-                permission_type: { in: workflowVisibilityTypes },
-                OR: [
-                  { user_id: userId },
-                  ...(visibility.groupIds.length > 0 ? [{ group_id: { in: visibility.groupIds } }] : []),
-                ],
-              },
-              select: { id: true },
-            }));
-        const hasWorkflowVisibility = hasWorkflowScopeVisibility || hasWorkflowPermissionVisibility;
+        const userHasWorkflowVisibility = await hasWorkflowVisibility({
+          workflow: {
+            id: execution.workflow_id,
+            is_public: execution.workflow.is_public,
+            visibility_scope: (execution.workflow as any).visibility_scope,
+          },
+          userId,
+          groupIds: visibility.groupIds,
+        });
 
-        if (!hasWorkflowVisibility && !hasStepAssignmentAccess) {
+        if (!userHasWorkflowVisibility && !hasStepAssignmentAccess) {
           return res.status(403).json({ error: 'You do not have access to this execution' });
         }
 
         // With workflow visibility, user can inspect full execution history/steps.
         // Without workflow visibility, keep data scoped to assigned steps only.
-        if (!hasWorkflowVisibility) {
+        if (!userHasWorkflowVisibility) {
           const allowedExecutionStepIds = new Set(allowedExecutionSteps.map((step) => step.id));
           execution.execution_steps = allowedExecutionSteps;
           execution.execution_logs = execution.execution_logs.filter((log) => (
