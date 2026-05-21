@@ -12,6 +12,7 @@ jest.mock('../lib/prisma', () => ({
     workflowExecutionData: { findMany: jest.fn(), update: jest.fn(), findFirst: jest.fn() },
     workflowExecutionStep: { update: jest.fn(), findFirst: jest.fn() },
     workflowExecution: { findFirst: jest.fn() },
+    apiConfiguration: { findMany: jest.fn() },
     $queryRaw: jest.fn(),
   },
 }));
@@ -38,15 +39,140 @@ describe('External Endpoints', () => {
     jest.clearAllMocks();
   });
 
+  const activeStepRow = {
+    execution_id: 'exec-123',
+    execution_step_id: 'ex-step-123',
+    workflow_step_id: 'wf-step-123',
+    company_id: 'company-123',
+    started_at: new Date(),
+    status: 'running',
+    external_token_expires_at: null,
+    step_config: {},
+    data_structure: [],
+    workflow_name: 'Test Workflow',
+    workflow_name_i18n: null,
+    portal_default_language: 'en',
+    portal_enabled_languages: ['en'],
+  };
+
+  describe('GET /api/external/steps/:token', () => {
+    it('should return step data for an active external link', async () => {
+      (prisma.$queryRaw as jest.Mock).mockResolvedValue([activeStepRow]);
+      (prisma.workflowExecutionData.findMany as jest.Mock).mockResolvedValue([]);
+
+      const response = await request(app).get('/api/external/steps/test-token');
+
+      expect(response.status).toBe(200);
+      expect(response.body.workflow_name).toBe('Test Workflow');
+      expect(response.body.expires_at).toBeNull();
+      expect(response.body.step_status).toBe('running');
+      expect(response.body.execution_values).toEqual({});
+    });
+
+    it('should return execution_values when execution data exists', async () => {
+      (prisma.$queryRaw as jest.Mock).mockResolvedValue([activeStepRow]);
+      (prisma.workflowExecutionData.findMany as jest.Mock).mockResolvedValue([
+        {
+          id: 'data-1',
+          values: {
+            field_a: { value: 'hello' },
+            field_b: { value: 42 },
+          },
+        },
+      ]);
+
+      const response = await request(app).get('/api/external/steps/test-token');
+
+      expect(response.status).toBe(200);
+      expect(response.body.execution_values).toEqual({
+        field_a: { value: 'hello' },
+        field_b: { value: 42 },
+      });
+    });
+
+    it('should return 410 when external link has expired', async () => {
+      (prisma.$queryRaw as jest.Mock).mockResolvedValue([
+        {
+          ...activeStepRow,
+          external_token_expires_at: new Date(Date.now() - 60_000),
+        },
+      ]);
+
+      const response = await request(app).get('/api/external/steps/test-token');
+
+      expect(response.status).toBe(410);
+      expect(response.body.expired).toBe(true);
+    });
+
+    it('should return 410 when step is no longer running', async () => {
+      (prisma.$queryRaw as jest.Mock).mockResolvedValue([
+        {
+          ...activeStepRow,
+          status: 'completed',
+        },
+      ]);
+
+      const response = await request(app).get('/api/external/steps/test-token');
+
+      expect(response.status).toBe(410);
+      expect(response.body.expired).toBe(true);
+    });
+  });
+
+  describe('GET /api/external/steps/:token/api-configurations', () => {
+    it('should return API configurations referenced by dynamic fields', async () => {
+      (prisma.$queryRaw as jest.Mock).mockResolvedValue([
+        {
+          ...activeStepRow,
+          data_structure: [
+            { id: 'field-1', options_source: 'dynamic', api_configuration_id: 'cfg-1' },
+            { id: 'field-2', options_source: 'static' },
+          ],
+        },
+      ]);
+      (prisma.apiConfiguration.findMany as jest.Mock).mockResolvedValue([
+        {
+          id: 'cfg-1',
+          api_url: 'https://example.com/options',
+          api_method: 'GET',
+          api_headers: [],
+          api_params: [],
+        },
+      ]);
+
+      const response = await request(app).get('/api/external/steps/test-token/api-configurations');
+
+      expect(response.status).toBe(200);
+      expect(response.body).toHaveLength(1);
+      expect(response.body[0].id).toBe('cfg-1');
+      expect(prisma.apiConfiguration.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            company_id: 'company-123',
+            id: { in: ['cfg-1'] },
+          }),
+        })
+      );
+    });
+
+    it('should return 410 when external link has expired', async () => {
+      (prisma.$queryRaw as jest.Mock).mockResolvedValue([
+        {
+          ...activeStepRow,
+          external_token_expires_at: new Date(Date.now() - 60_000),
+        },
+      ]);
+
+      const response = await request(app).get('/api/external/steps/test-token/api-configurations');
+
+      expect(response.status).toBe(410);
+      expect(response.body.expired).toBe(true);
+    });
+  });
+
   describe('POST /api/external/steps/:token/submit', () => {
     it('should submit external step successfully', async () => {
-      (prisma.$queryRaw as jest.Mock).mockResolvedValue([{
-        execution_id: 'exec-123',
-        execution_step_id: 'ex-step-123',
-        workflow_step_id: 'wf-step-123',
-        company_id: 'company-123',
-        step_config: {}
-      }]);
+      (prisma.$queryRaw as jest.Mock).mockResolvedValue([activeStepRow]);
       (prisma.workflowExecutionData.findMany as jest.Mock).mockResolvedValue([{ id: 'data-1', values: {} }]);
 
       const response = await request(app)
@@ -56,7 +182,29 @@ describe('External Endpoints', () => {
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
       expect(prisma.workflowExecutionStep.update).toHaveBeenCalled();
-      expect(workflowService.advanceWorkflow).toHaveBeenCalled();
+      expect(workflowService.advanceWorkflow).toHaveBeenCalledWith(
+        'exec-123',
+        'ex-step-123',
+        'company-123',
+        'Submit'
+      );
+    });
+
+    it('should return 410 when external link has expired on submit', async () => {
+      (prisma.$queryRaw as jest.Mock).mockResolvedValue([
+        {
+          ...activeStepRow,
+          external_token_expires_at: new Date(Date.now() - 60_000),
+        },
+      ]);
+
+      const response = await request(app)
+        .post('/api/external/steps/test-token/submit')
+        .send({ data: {} });
+
+      expect(response.status).toBe(410);
+      expect(response.body.expired).toBe(true);
+      expect(workflowService.advanceWorkflow).not.toHaveBeenCalled();
     });
 
     it('should return 404 for invalid token', async () => {
@@ -78,10 +226,7 @@ describe('External Endpoints', () => {
 
     it('should reject user field value not in company', async () => {
       (prisma.$queryRaw as jest.Mock).mockResolvedValue([{
-        execution_id: 'exec-123',
-        execution_step_id: 'ex-step-123',
-        workflow_step_id: 'wf-step-123',
-        company_id: 'company-123',
+        ...activeStepRow,
         step_config: {},
         data_structure: [
           { id: 'assignee_field', field_type: 'user' },

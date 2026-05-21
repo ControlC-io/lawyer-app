@@ -1569,6 +1569,7 @@ export const companiesController = {
         where: stepWhere,
         select: {
           execution_id: true,
+          status: true,
           assigned_to_user_id: true,
           assigned_to_group_id: true,
           step: { select: { name: true, step_type: true, action_type: true, config: true } },
@@ -1576,6 +1577,7 @@ export const companiesController = {
       });
       return res.json(steps.map((s) => ({
         execution_id: s.execution_id,
+        status: s.status,
         assigned_to_user_id: s.assigned_to_user_id,
         assigned_to_group_id: s.assigned_to_group_id,
         workflow_steps: s.step,

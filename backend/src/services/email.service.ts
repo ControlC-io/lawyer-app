@@ -328,7 +328,7 @@ export const emailService = {
       return;
     }
 
-    const formLink = `${APP_URL}/external/steps/${token}`;
+    const formLink = `${APP_URL}/external/form/${token}`;
     const subject = `Action Required: ${stepName}`;
 
     const msg = {

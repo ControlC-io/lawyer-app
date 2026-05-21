@@ -6,6 +6,7 @@ import { fr, enUS } from "date-fns/locale";
 import { CheckCircle, Clock, PlayCircle, XCircle, Pause, FileText, AlertCircle, ChevronLeft } from "lucide-react";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { getStepExecutionStyles } from "@/lib/stepTypeColors";
+import { formatStepVisitLabel, getStepVisitNumber } from "@/lib/executionSteps";
 
 interface ExecutionTimelineProps {
   execution: any;
@@ -175,6 +176,13 @@ export const ExecutionTimeline = ({
                       const isCurrentlyViewing = viewingHistoricalStep === step.id;
                       const stepType = step.workflow_steps?.step_type ?? "action";
                       const typeStyle = getStepExecutionStyles(stepType);
+                      const stepName = step.workflow_steps?.name ?? "";
+                      const visitNumber = getStepVisitNumber(step, visibleSteps);
+                      const displayStepName = formatStepVisitLabel(
+                        stepName,
+                        visitNumber,
+                        t("executionTimeline.visitLabel")
+                      );
                       const stepContainerShadow = isCurrentlyViewing
                         ? `inset 0 0 0 2px ${typeStyle.ringColor}`
                         : isActiveStep
@@ -215,7 +223,7 @@ export const ExecutionTimeline = ({
                           <div className="space-y-0.5">
                             <div className="flex items-center justify-between gap-2 flex-wrap">
                               <h3 className="font-semibold text-xs break-words flex-1 min-w-0" style={{ color: typeStyle.textColor }}>
-                                {step.workflow_steps?.name}
+                                {displayStepName}
                               </h3>
                               <div className="flex gap-1 flex-shrink-0">
                                 {stepLogs.length > 0 && (

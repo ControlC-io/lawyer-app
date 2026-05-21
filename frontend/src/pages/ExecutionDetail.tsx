@@ -16,6 +16,7 @@ import { useCompanyId } from "@/hooks/useCompanyId";
 import { useCompanyApiKey } from "@/hooks/useCompanyApiKey";
 import { DevModeBanner } from "@/components/execution/DevModeBanner";
 import { WorkflowCanvasDialog } from "@/components/execution/WorkflowCanvasDialog";
+import { getActiveRunningStep, getWorkflowStepDefinitionId } from "@/lib/executionSteps";
 
 const ExecutionDetail = () => {
   const { id } = useParams();
@@ -51,7 +52,7 @@ const ExecutionDetail = () => {
   useEffect(() => {
     if (executionSteps && executionSteps.length > 0 && execution?.status !== "completed") {
       const currentStep = executionSteps.find((s: any) => s.id === viewingHistoricalStep);
-      const firstRunningStep = executionSteps.find((s: any) => s.status === "running");
+      const activeRunningStep = getActiveRunningStep(executionSteps);
 
       // User explicitly chose a step – keep it; never override with running step while this ref is set
       if (userChosenStepIdRef.current != null) {
@@ -64,18 +65,18 @@ const ExecutionDetail = () => {
         userChosenStepIdRef.current = null;
       }
 
-      if (!viewingHistoricalStep && firstRunningStep) {
-        setViewingHistoricalStep(firstRunningStep.id);
-      } else if (viewingHistoricalStep && !currentStep && firstRunningStep) {
-        setViewingHistoricalStep(firstRunningStep.id);
+      if (!viewingHistoricalStep && activeRunningStep) {
+        setViewingHistoricalStep(activeRunningStep.id);
+      } else if (viewingHistoricalStep && !currentStep && activeRunningStep) {
+        setViewingHistoricalStep(activeRunningStep.id);
       } else if (
         viewingHistoricalStep &&
         currentStep?.status === "completed" &&
-        firstRunningStep
+        activeRunningStep
       ) {
         // User just completed a step (we were on it); switch view to the new open step
         userChosenStepIdRef.current = null;
-        setViewingHistoricalStep(firstRunningStep.id);
+        setViewingHistoricalStep(activeRunningStep.id);
       }
     } else if (execution?.status === "completed") {
       if (userChosenStepIdRef.current != null && executionSteps?.some((s: any) => s.id === userChosenStepIdRef.current)) {
@@ -335,13 +336,12 @@ const ExecutionDetail = () => {
     // If viewing a historical step, use that
     if (viewingHistoricalStep) {
       const step = executionSteps.find((s: any) => s.id === viewingHistoricalStep);
-      return step?.workflow_steps?.id || null;
+      return getWorkflowStepDefinitionId(step);
     }
     
-    // Otherwise, find the first running step
-    const runningStep = executionSteps.find((s: any) => s.status === "running");
-    if (runningStep) {
-      return runningStep?.workflow_steps?.id || null;
+    const activeRunningStep = getActiveRunningStep(executionSteps);
+    if (activeRunningStep) {
+      return getWorkflowStepDefinitionId(activeRunningStep);
     }
     
     // If no running step, highlight the last completed step (for completed executions)

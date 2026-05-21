@@ -742,6 +742,9 @@
     "autoProcessingError": "Erreur de traitement automatique",
     "autoProcessingErrorDescription": "Échec du traitement automatique de l'étape fichier",
     "linkCopied": "Lien copié dans le presse-papiers",
+    "externalLink": "Lien externe :",
+    "copyLink": "Copier le lien",
+    "sendLinkByEmail": "Envoyer le lien par e-mail",
     "validationFailed": "Échec de la validation",
     "validationFailedDescription": "Les données soumises n'ont pas passé la validation.",
     "fieldValidationFailed": "Validation des champs échouée",
@@ -791,7 +794,8 @@
     "actionRequired": "Action requise",
     "noStepsFound": "Aucune étape terminée ou en cours",
     "decisionLabel": "Décision :",
-    "decisionCommentLabel": "Commentaire de décision :"
+    "decisionCommentLabel": "Commentaire de décision :",
+    "visitLabel": "Passage"
   },
   "executionStepLogs": {
     "title": "Journaux",

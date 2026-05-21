@@ -15,6 +15,15 @@ router.get(
 );
 
 /**
+ * GET /api/external/steps/:token/api-configurations
+ * List API configs for dynamic option fields (no auth - token validated in controller)
+ */
+router.get(
+  '/steps/:token/api-configurations',
+  asyncHandler(externalController.getApiConfigurationsByToken)
+);
+
+/**
  * POST /api/external/steps/:token/submit
  * Submit external step (no auth - token validated in controller)
  */

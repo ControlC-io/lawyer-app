@@ -759,14 +759,26 @@ export const portalController = {
         relocatedData[fieldId] = normalizedUserId;
       }
 
-      // Find the execution step for the first step
-      const executionStep = await prisma.workflowExecutionStep.findFirst({
+      // Find the execution step for the first step (prefer running, else latest visit)
+      let executionStep = await prisma.workflowExecutionStep.findFirst({
         where: {
           execution_id: executionId,
           step_id: firstStep.id,
+          status: 'running',
         },
         select: { id: true, started_at: true },
       });
+
+      if (!executionStep) {
+        executionStep = await prisma.workflowExecutionStep.findFirst({
+          where: {
+            execution_id: executionId,
+            step_id: firstStep.id,
+          },
+          orderBy: { started_at: 'desc' },
+          select: { id: true, started_at: true },
+        });
+      }
 
       if (!executionStep) {
         return res.status(500).json({ error: 'Failed to find execution step' });
@@ -820,7 +832,7 @@ export const portalController = {
       // Advance workflow to next step(s)
       const triggeredSteps = await workflowService.advanceWorkflow(
         executionId,
-        firstStep.id,
+        executionStep.id,
         company.id
       );
 

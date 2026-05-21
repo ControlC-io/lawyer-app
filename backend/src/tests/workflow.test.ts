@@ -505,8 +505,62 @@ describe('Workflow Endpoints', () => {
       );
       expect(workflowService.advanceWorkflow).toHaveBeenCalledWith(
         'exec-123',
-        'step-email-1',
+        'ex-step-123',
         'company-123'
+      );
+    });
+
+    it('should process email action with spaced field names in subject and html body', async () => {
+      (prisma.workflowExecutionStep.findFirst as jest.Mock).mockResolvedValue({
+        id: 'ex-step-123',
+        execution_id: 'exec-123',
+        status: 'running',
+        started_at: new Date('2026-01-01T00:00:00Z'),
+        step_id: 'step-email-1',
+        company_id: 'company-123',
+        step: {
+          step_type: 'action',
+          action_type: 'email',
+          config: {
+            email_action: {
+              subject_template: 'Invoice for {{Customer Name}}',
+              body_template_html: '<p>Hello {{Customer&nbsp;Name}}</p>',
+              recipient_sources: ['creator'],
+              static_recipients: [],
+              user_field_ids: [],
+              attachment_field_ids: [],
+            },
+          },
+          workflow: {
+            data_structure: [{ id: 'field-1', name: 'Customer Name', field_type: 'text' }],
+          },
+        },
+      });
+      (prisma.workflowExecution.findFirst as jest.Mock)
+        .mockResolvedValueOnce({ company_id: 'company-123' })
+        .mockResolvedValueOnce({ created_by: 'creator-1' });
+      (prisma.workflowExecutionData.findMany as jest.Mock).mockResolvedValue([
+        {
+          values: {
+            'field-1': { value: 'Acme Corp' },
+          },
+        },
+      ]);
+      (prisma.profile.findUnique as jest.Mock).mockResolvedValue({ email: 'creator@example.com' });
+      (prisma.workflowExecution.findUnique as jest.Mock).mockResolvedValue({ status: 'running' });
+      (workflowService.advanceWorkflow as jest.Mock).mockResolvedValue([]);
+
+      const response = await request(app)
+        .post('/api/workflows/executions/exec-123/steps/ex-step-123/process')
+        .set(mockAuthHeaders);
+
+      expect(response.status).toBe(200);
+      expect(response.body.success).toBe(true);
+      expect(emailService.sendWorkflowActionEmail).toHaveBeenCalledWith(
+        'creator@example.com',
+        'Invoice for Acme Corp',
+        '<p>Hello Acme Corp</p>',
+        expect.any(Object)
       );
     });
 
@@ -876,7 +930,7 @@ describe('Workflow Endpoints', () => {
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
       expect(response.body.decision_choice).toBe('Approved');
-      expect(workflowService.advanceWorkflow).toHaveBeenCalledWith('exec-123', 'step-decision', 'company-123', 'Approved');
+      expect(workflowService.advanceWorkflow).toHaveBeenCalledWith('exec-123', 'ex-step-123', 'company-123', 'Approved');
       expect(prisma.workflowExecutionStep.update).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({

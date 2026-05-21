@@ -742,6 +742,9 @@
     "autoProcessingError": "Auto-processing Error",
     "autoProcessingErrorDescription": "Failed to automatically process file step",
     "linkCopied": "Link copied to clipboard",
+    "externalLink": "External Link:",
+    "copyLink": "Copy link",
+    "sendLinkByEmail": "Send link by email",
     "validationFailed": "Validation Failed",
     "validationFailedDescription": "The submitted data did not pass validation.",
     "fieldValidationFailed": "Field validation failed",
@@ -791,7 +794,8 @@
     "actionRequired": "Action required",
     "noStepsFound": "No completed or running steps found",
     "decisionLabel": "Decision:",
-    "decisionCommentLabel": "Decision Comment:"
+    "decisionCommentLabel": "Decision Comment:",
+    "visitLabel": "Visit"
   },
   "executionStepLogs": {
     "title": "Logs",

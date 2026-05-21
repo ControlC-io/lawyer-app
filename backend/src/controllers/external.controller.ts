@@ -13,6 +13,7 @@ import {
   resolveLocalizedText,
 } from '../services/portalTranslation.service';
 import { ensureCompanyUser, getWorkflowFieldById, isUserField, normalizeUserFieldValue } from '../lib/workflowUserField';
+import { isExternalLinkAccessible } from '../lib/externalLinkExpiry';
 
 // prisma is imported from ../lib/prisma
 
@@ -274,6 +275,8 @@ async function getStepInfoByToken(token: string) {
       workflow_step_id: string;
       company_id: string;
       started_at: Date | null;
+      status: string;
+      external_token_expires_at: Date | null;
       data_structure: any;
       step_config: any;
       workflow_name: string;
@@ -288,6 +291,8 @@ async function getStepInfoByToken(token: string) {
       wes.step_id as workflow_step_id,
       wes.company_id,
       wes.started_at,
+      wes.status,
+      wes.external_token_expires_at,
       w.name as workflow_name,
       w.name_i18n as workflow_name_i18n,
       w.data_structure,
@@ -299,10 +304,56 @@ async function getStepInfoByToken(token: string) {
     JOIN public.workflow_executions we ON we.id = wes.execution_id
     JOIN public.workflows w ON w.id = we.workflow_id
     JOIN public.companies c ON c.id = wes.company_id
-    WHERE wes.external_token = ${token}
+    WHERE wes.external_token = ${token}::uuid
     LIMIT 1
   `;
   return stepInfo;
+}
+
+function externalLinkInaccessibleResponse(res: Response) {
+  return res.status(410).json({
+    error: 'Link expired',
+    expired: true,
+    details: 'This external form link is no longer active',
+  });
+}
+
+function mergeExecutionValuesFromRows(
+  rows: Array<{ values?: unknown }>,
+): Record<string, unknown> {
+  const merged: Record<string, unknown> = {};
+  for (const row of rows) {
+    const values =
+      row.values && typeof row.values === 'object' && !Array.isArray(row.values)
+        ? (row.values as Record<string, unknown>)
+        : {};
+    Object.assign(merged, values);
+  }
+  return merged;
+}
+
+function getWorkflowFields(dataStructure: unknown): Array<{ id?: string; options_source?: string; api_configuration_id?: string }> {
+  if (Array.isArray(dataStructure)) {
+    return dataStructure;
+  }
+  if (
+    dataStructure &&
+    typeof dataStructure === 'object' &&
+    Array.isArray((dataStructure as { fields?: unknown }).fields)
+  ) {
+    return (dataStructure as { fields: Array<{ id?: string; options_source?: string; api_configuration_id?: string }> }).fields;
+  }
+  return [];
+}
+
+function collectDynamicApiConfigurationIds(dataStructure: unknown): string[] {
+  const ids = new Set<string>();
+  for (const field of getWorkflowFields(dataStructure)) {
+    if (field.options_source === 'dynamic' && typeof field.api_configuration_id === 'string' && field.api_configuration_id) {
+      ids.add(field.api_configuration_id);
+    }
+  }
+  return Array.from(ids);
 }
 
 export const externalController = {
@@ -326,12 +377,29 @@ export const externalController = {
       }
 
       const step = stepInfo[0];
+      if (
+        !isExternalLinkAccessible({
+          status: step.status,
+          expiresAt: step.external_token_expires_at,
+        })
+      ) {
+        return externalLinkInaccessibleResponse(res);
+      }
+
       const enabledLanguages = normalizePortalLanguages(step.portal_enabled_languages);
       const defaultLanguage = normalizePortalDefaultLanguage(step.portal_default_language, enabledLanguages);
       const requestedLanguage = getRequestedLanguage(req);
 
+      const executionDataRows = await prisma.workflowExecutionData.findMany({
+        where: { execution_id: step.execution_id },
+      });
+      const execution_values = mergeExecutionValuesFromRows(executionDataRows);
+
       return res.json({
         ...step,
+        step_status: step.status,
+        execution_values,
+        expires_at: step.external_token_expires_at?.toISOString() ?? null,
         selected_language: requestedLanguage || defaultLanguage,
         default_language: defaultLanguage,
         enabled_languages: enabledLanguages,
@@ -341,6 +409,63 @@ export const externalController = {
       });
     } catch (error) {
       console.error('getStepByToken error:', error);
+      return res.status(500).json({
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  },
+
+  /**
+   * GET /api/external/steps/:token/api-configurations
+   * List API configurations referenced by dynamic option fields (token-gated, no auth)
+   */
+  async getApiConfigurationsByToken(req: AuthRequest, res: Response) {
+    try {
+      const { token } = req.params;
+      if (!token) {
+        return res.status(400).json({ error: 'Token is required' });
+      }
+
+      const stepInfo = await getStepInfoByToken(token);
+      if (!stepInfo || stepInfo.length === 0) {
+        return res.status(404).json({
+          error: 'Invalid or expired token',
+          details: 'No step found for this link',
+        });
+      }
+
+      const step = stepInfo[0];
+      if (
+        !isExternalLinkAccessible({
+          status: step.status,
+          expiresAt: step.external_token_expires_at,
+        })
+      ) {
+        return externalLinkInaccessibleResponse(res);
+      }
+
+      const configIds = collectDynamicApiConfigurationIds(step.data_structure);
+      if (configIds.length === 0) {
+        return res.json([]);
+      }
+
+      const configs = await prisma.apiConfiguration.findMany({
+        where: {
+          company_id: step.company_id,
+          id: { in: configIds },
+        },
+        select: {
+          id: true,
+          api_url: true,
+          api_method: true,
+          api_headers: true,
+          api_params: true,
+        },
+      });
+
+      return res.json(configs);
+    } catch (error) {
+      console.error('getApiConfigurationsByToken error:', error);
       return res.status(500).json({
         error: error instanceof Error ? error.message : 'Unknown error',
       });
@@ -370,6 +495,15 @@ export const externalController = {
       }
 
       const currentStep = stepInfo[0];
+
+      if (
+        !isExternalLinkAccessible({
+          status: currentStep.status,
+          expiresAt: currentStep.external_token_expires_at,
+        })
+      ) {
+        return externalLinkInaccessibleResponse(res);
+      }
 
       // Field-level validation rules (format, length, range, etc.)
       const fieldValidations = ((currentStep.step_config as any)?.field_validations ?? []) as FieldValidationRule[];
@@ -523,8 +657,9 @@ export const externalController = {
       // Advance workflow
       const triggeredSteps = await workflowService.advanceWorkflow(
         currentStep.execution_id,
-        currentStep.workflow_step_id,
-        currentStep.company_id
+        currentStep.execution_step_id,
+        currentStep.company_id,
+        'Submit'
       );
 
       return res.json({

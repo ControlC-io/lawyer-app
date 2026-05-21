@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
-import { api } from "@/lib/api";
+import { api, getApiBase } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Loader2 } from "lucide-react";
@@ -20,22 +20,81 @@ interface ExecutionData {
     execution_id: string;
     workflow_step_id: string;
     status: string;
+    step_status?: string;
     step_config: any;
     workflow_name: string;
     company_id: string;
     data_structure: any;
+    execution_values?: Record<string, any>;
     selected_language?: PortalLanguageCode;
     default_language?: PortalLanguageCode;
     enabled_languages?: PortalLanguageCode[];
+    expires_at?: string | null;
 }
+
+const getFieldsListFromDataStructure = (dataStructure: any): any[] => {
+    if (!dataStructure) return [];
+    if (Array.isArray(dataStructure)) return dataStructure;
+    return dataStructure.fields || [];
+};
+
+const extractFormValue = (storedValue: any, fieldType: string): any => {
+    if (storedValue === undefined || storedValue === null) return undefined;
+
+    if (fieldType === "file" || fieldType === "signature") {
+        if (typeof storedValue === "object" && storedValue !== null && "original_name" in storedValue) {
+            return storedValue;
+        }
+        if (typeof storedValue === "object" && storedValue !== null && "value" in storedValue) {
+            return storedValue;
+        }
+        return storedValue;
+    }
+
+    if (fieldType === "array") {
+        const arr = typeof storedValue === "object" && storedValue !== null && "value" in storedValue
+            ? storedValue.value
+            : storedValue;
+        if (Array.isArray(arr)) {
+            return arr.map((item: any) => (
+                item && typeof item === "object" && item._id ? item : { ...item, _id: crypto.randomUUID() }
+            ));
+        }
+        return [];
+    }
+
+    if (typeof storedValue === "object" && storedValue !== null && "value" in storedValue) {
+        return storedValue.value;
+    }
+    return storedValue;
+};
+
+const buildFormCurrentValues = (
+    allFields: any[],
+    formData: Record<string, any>,
+    executionValues: Record<string, any>,
+    normalizeRuleValue: (value: any) => any
+): Record<string, any> => {
+    const result: Record<string, any> = {};
+    for (const field of allFields) {
+        const raw = formData[field.id] !== undefined
+            ? formData[field.id]
+            : executionValues[field.id];
+        result[field.id] = normalizeRuleValue(raw);
+    }
+    return result;
+};
 
 export const ExternalForm = () => {
     const { token } = useParams<{ token: string }>();
     const [loading, setLoading] = useState(true);
     const [submitting, setSubmitting] = useState(false);
     const [completed, setCompleted] = useState(false);
+    const [linkExpired, setLinkExpired] = useState(false);
     const [data, setData] = useState<ExecutionData | null>(null);
+    const [executionValues, setExecutionValues] = useState<Record<string, any>>({});
     const [formData, setFormData] = useState<Record<string, any>>({});
+    const formInitializedRef = useRef(false);
     const [errors, setErrors] = useState<Record<string, string>>({});
     const [isPreviewOpen, setIsPreviewOpen] = useState(false);
     const [previewFile, setPreviewFile] = useState<{ url: string; name: string } | null>(null);
@@ -91,11 +150,40 @@ export const ExternalForm = () => {
         const fetchData = async () => {
             try {
                 setLoading(true);
+                setLinkExpired(false);
                 const storageKey = `external-language-${token}`;
                 const storedLanguage = localStorage.getItem(storageKey) as PortalLanguageCode | null;
                 const langQuery = storedLanguage ? `?lang=${encodeURIComponent(storedLanguage)}` : "";
-                const stepData = await api.get<ExecutionData>(`/api/external/steps/${token}${langQuery}`, { skipAuth: true });
+                const res = await fetch(`${getApiBase()}/api/external/steps/${token}${langQuery}`);
+                if (res.status === 410) {
+                    setLinkExpired(true);
+                    setData(null);
+                    return;
+                }
+                if (!res.ok) {
+                    setData(null);
+                    return;
+                }
+                const stepData = (await res.json()) as ExecutionData;
                 setData(stepData);
+                if (stepData.execution_values) {
+                    setExecutionValues(stepData.execution_values);
+                }
+                if (!formInitializedRef.current) {
+                    const fields = getFieldsListFromDataStructure(stepData.data_structure);
+                    const initialFormData: Record<string, any> = {};
+                    if (stepData.execution_values) {
+                        for (const field of fields) {
+                            const fieldType = field.field_type || field.type;
+                            const extracted = extractFormValue(stepData.execution_values[field.id], fieldType);
+                            if (extracted !== undefined) {
+                                initialFormData[field.id] = extracted;
+                            }
+                        }
+                    }
+                    setFormData(initialFormData);
+                    formInitializedRef.current = true;
+                }
                 const responseEnabled = stepData.enabled_languages?.length ? stepData.enabled_languages : ["en"];
                 const responseDefault = stepData.default_language || "en";
                 const nextLanguage = storedLanguage && responseEnabled.includes(storedLanguage)
@@ -123,10 +211,16 @@ export const ExternalForm = () => {
 
         const fetchLocalizedData = async () => {
             try {
-                const stepData = await api.get<ExecutionData>(
-                    `/api/external/steps/${token}?lang=${encodeURIComponent(selectedLanguage)}`,
-                    { skipAuth: true }
+                const res = await fetch(
+                    `${getApiBase()}/api/external/steps/${token}?lang=${encodeURIComponent(selectedLanguage)}`
                 );
+                if (res.status === 410) {
+                    setLinkExpired(true);
+                    setData(null);
+                    return;
+                }
+                if (!res.ok) return;
+                const stepData = (await res.json()) as ExecutionData;
                 setData(stepData);
                 if (stepData.enabled_languages?.length) {
                     setEnabledLanguages(stepData.enabled_languages);
@@ -137,6 +231,76 @@ export const ExternalForm = () => {
         };
         fetchLocalizedData();
     }, [token, selectedLanguage]);
+
+    useEffect(() => {
+        if (!data?.data_structure || Object.keys(executionValues).length === 0) return;
+
+        const fields = getFieldsListFromDataStructure(data.data_structure);
+
+        const generateSignedUrls = async () => {
+            const newSignedUrls: Record<string, string> = {};
+
+            for (const field of fields) {
+                const fieldType = field.field_type || field.type;
+                if (fieldType === "file" || fieldType === "signature") {
+                    const rawValue = executionValues[field.id];
+                    const fileValue =
+                        rawValue && typeof rawValue === "object" && "value" in rawValue
+                            ? rawValue.value
+                            : rawValue;
+                    const originalName =
+                        rawValue && typeof rawValue === "object" && "original_name" in rawValue
+                            ? rawValue.original_name
+                            : undefined;
+                    if (fileValue && typeof fileValue === "string") {
+                        const displayName =
+                            typeof originalName === "string" && originalName.length > 0
+                                ? originalName
+                                : fileValue.split("/").pop()?.replace(/^\d+_/, "") ?? undefined;
+                        const signedUrl = await generateSignedUrl(fileValue);
+                        if (signedUrl) {
+                            newSignedUrls[field.id] = signedUrl;
+                        }
+                    }
+                }
+
+                if (fieldType === "array" && !field.parent_item_id) {
+                    const arrayValue = executionValues[field.id]?.value ?? executionValues[field.id];
+                    if (arrayValue && Array.isArray(arrayValue)) {
+                        const childFileFields = fields.filter(
+                            (f: any) =>
+                                f.parent_item_id === field.id &&
+                                ((f.field_type || f.type) === "file" || (f.field_type || f.type) === "signature")
+                        );
+                        for (const childField of childFileFields) {
+                            for (const item of arrayValue) {
+                                const childVal = item[childField.id];
+                                if (!childVal) continue;
+                                const childFilePath =
+                                    typeof childVal === "string" ? childVal : childVal?.value;
+                                if (childFilePath && typeof childFilePath === "string") {
+                                    const signedUrl = await generateSignedUrl(childFilePath);
+                                    if (signedUrl) {
+                                        newSignedUrls[childFilePath] = signedUrl;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (Object.keys(newSignedUrls).length > 0) {
+                setSignedUrls((prev) => {
+                    const hasNew = Object.keys(newSignedUrls).some((key) => prev[key] !== newSignedUrls[key]);
+                    return hasNew ? { ...prev, ...newSignedUrls } : prev;
+                });
+            }
+        };
+
+        generateSignedUrls();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [data?.execution_step_id, executionValues]);
 
     // Helper function to generate signed URL for a file path (for non-authenticated users)
     const generateSignedUrl = async (filePath: string): Promise<string | null> => {
@@ -219,12 +383,9 @@ export const ExternalForm = () => {
             .filter((item) => item.key.trim().length > 0);
     };
 
-    const buildCurrentValues = (values: Record<string, any>): Record<string, any> => {
-        const normalized: Record<string, any> = {};
-        Object.entries(values).forEach(([fieldId, value]) => {
-            normalized[fieldId] = normalizeRuleValue(value);
-        });
-        return normalized;
+    const buildCurrentValues = (): Record<string, any> => {
+        const fields = getFieldsListFromDataStructure(data?.data_structure);
+        return buildFormCurrentValues(fields, formData, executionValues, normalizeRuleValue);
     };
 
     const hasRequiredValue = (value: any): boolean => {
@@ -245,12 +406,12 @@ export const ExternalForm = () => {
 
         const formFields = data.step_config?.form_fields || {};
         const extFieldRules = (data.step_config?.field_rules as FieldRule[] | undefined) ?? [];
-        const currentValues = buildCurrentValues(formData);
+        const currentValues = buildCurrentValues();
         const newErrors: Record<string, string> = {};
         let isValid = true;
 
         // Get all fields definition
-        const fields = data.data_structure?.fields || [];
+        const fields = getFieldsListFromDataStructure(data.data_structure);
 
         Object.keys(formFields).forEach(fieldId => {
             const config = formFields[fieldId];
@@ -393,13 +554,24 @@ export const ExternalForm = () => {
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                             </svg>
                         </div>
-                        <CardTitle>Invalid Link</CardTitle>
-                        <CardDescription>This link is invalid or has expired.</CardDescription>
+                        <CardTitle>{linkExpired ? "Link Expired" : "Invalid Link"}</CardTitle>
+                        <CardDescription>
+                            {linkExpired
+                                ? "This form link is no longer active. Please contact the sender if you still need to submit a response."
+                                : "This link is invalid or has expired."}
+                        </CardDescription>
                     </CardHeader>
                 </Card>
             </div>
         );
     }
+
+    const formattedExpiry = data.expires_at
+        ? new Date(data.expires_at).toLocaleString(undefined, {
+              dateStyle: "medium",
+              timeStyle: "short",
+          })
+        : null;
 
     // Helper to get fields list safely
     const getFieldsList = () => {
@@ -414,7 +586,9 @@ export const ExternalForm = () => {
     const allFields = getFieldsList();
     const renderFieldRules = (data?.step_config?.field_rules as FieldRule[] | undefined) ?? [];
     const formFields = data.step_config?.form_fields || {};
-    const currentValues = buildCurrentValues(formData);
+    const currentValues = buildCurrentValues();
+    const stepStatus = data.step_status || data.status;
+    const canCompleteStep = stepStatus === "running";
 
     const resolveBoundParamValue = (
         queryParam: { value?: string; mode?: "static" | "bind" },
@@ -481,7 +655,7 @@ export const ExternalForm = () => {
                 api_method?: string;
                 api_headers?: unknown;
                 api_params?: unknown;
-            }[]>(`/api/companies/${data.company_id}/api-configurations`, { skipAuth: true });
+            }[]>(`/api/external/steps/${token}/api-configurations`, { skipAuth: true });
 
             const apiConfig = Array.isArray(configs)
                 ? configs.find((config) => config.id === fieldDef.api_configuration_id)
@@ -494,7 +668,7 @@ export const ExternalForm = () => {
                 apiConfig.api_url,
                 apiConfig.api_params,
                 fieldDef.api_query_params,
-                buildCurrentValues(formData)
+                buildCurrentValues()
             );
 
             const headers: Record<string, string> = {};
@@ -615,6 +789,7 @@ export const ExternalForm = () => {
         };
 
         const signedUrl = signedUrls[fieldId];
+        const isFieldDisabled = submitting || fieldConfig?.readonly === true || !canCompleteStep;
 
         return (
             <div className="space-y-2" key={fieldId}>
@@ -636,7 +811,7 @@ export const ExternalForm = () => {
                     onUpload={handleFileUpload}
                     onViewFile={handleViewFile}
                     signedUrl={signedUrl}
-                    disabled={submitting}
+                    disabled={isFieldDisabled}
                     required={evaluateFieldRules(fieldId, "required", renderFieldRules, currentValues, false)}
                     labelPosition={labelPosition}
                     fieldConfig={fieldConfig}
@@ -649,7 +824,7 @@ export const ExternalForm = () => {
                     renderChild={(childField, childValue, onChildChange, hideLabel, requiredChild, readonly) => {
                         const isRequired =
                             requiredChild !== undefined ? requiredChild : (childField.required || false);
-                        const isDisabled = submitting || !!readonly;
+                        const isDisabled = isFieldDisabled || !!readonly;
                         const childFieldType = childField.field_type || childField.type;
                         const isFileChild = childFieldType === "file";
                         const isSignatureChild = childFieldType === "signature";
@@ -780,6 +955,11 @@ export const ExternalForm = () => {
                     <div className="mb-10 text-center">
                         <h1 className="text-3xl font-semibold tracking-tight text-slate-900 md:text-4xl">{data.workflow_name}</h1>
                         <p className="mx-auto mt-3 max-w-2xl text-slate-600">Please complete the form below</p>
+                        {formattedExpiry && (
+                            <p className="mx-auto mt-2 max-w-2xl text-sm text-slate-500">
+                                This link expires {formattedExpiry}
+                            </p>
+                        )}
                         {renderLanguageTags()}
                     </div>
 
@@ -896,7 +1076,7 @@ export const ExternalForm = () => {
                                         className="external-form-submit w-full"
                                         size="lg"
                                         onClick={handleSubmit}
-                                        disabled={submitting}
+                                        disabled={submitting || !canCompleteStep}
                                         aria-label="Submit"
                                     >
                                         {submitting ? (
@@ -956,6 +1136,11 @@ export const ExternalForm = () => {
                 <div className="mb-10 text-center">
                     <h1 className="text-3xl font-semibold tracking-tight text-slate-900 md:text-4xl">{data.workflow_name}</h1>
                     <p className="mx-auto mt-3 max-w-2xl text-slate-600">Please complete the form below</p>
+                    {formattedExpiry && (
+                        <p className="mx-auto mt-2 max-w-2xl text-sm text-slate-500">
+                            This link expires {formattedExpiry}
+                        </p>
+                    )}
                     {renderLanguageTags()}
                 </div>
 
@@ -968,7 +1153,7 @@ export const ExternalForm = () => {
                                 className="external-form-submit w-full"
                                 size="lg"
                                 onClick={handleSubmit}
-                                disabled={submitting}
+                                disabled={submitting || !canCompleteStep}
                                 aria-label="Submit"
                             >
                                 {submitting ? (

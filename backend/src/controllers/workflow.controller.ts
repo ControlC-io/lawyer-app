@@ -657,7 +657,7 @@ export const workflowController = {
 
         const triggeredSteps = await workflowService.advanceWorkflow(
           executionId,
-          executionStep.step_id,
+          stepId,
           executionStep.company_id!
         );
         const latestExecution = await prisma.workflowExecution.findUnique({
@@ -1021,7 +1021,7 @@ export const workflowController = {
       // Advance workflow
       const triggeredSteps = await workflowService.advanceWorkflow(
         executionId,
-        executionStep.step_id,
+        stepId,
         executionStep.company_id!
       );
 
@@ -1151,7 +1151,7 @@ export const workflowController = {
       // Advance workflow with decision choice
       const triggeredSteps = await workflowService.advanceWorkflow(
         executionId,
-        executionStep.step_id,
+        stepId,
         executionStep.company_id!,
         decision_choice
       );

@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useRef, useEffect, useMemo } from "react";
 import { api } from "@/lib/api";
+import { getActiveRunningStep } from "@/lib/executionSteps";
 
 // Polling interval for auto-refresh (in milliseconds)
 const POLLING_INTERVAL = 2000;
@@ -12,7 +13,7 @@ const POLLING_TIMEOUT = 2 * 60 * 1000;
 const shouldPollForStep = (executionSteps: any[] | undefined): boolean => {
   if (!executionSteps) return false;
 
-  const runningStep = executionSteps.find((s: any) => s.status === "running");
+  const runningStep = getActiveRunningStep(executionSteps);
   if (!runningStep) {
     // Keep polling while waiting for an assigned pending step to turn running.
     return executionSteps.some((s: any) => s.status === "pending");
@@ -25,10 +26,11 @@ const shouldPollForStep = (executionSteps: any[] | undefined): boolean => {
 
   const isAutomaticAction = stepType === "action" && actionType === "automatic";
   const isAgentAction = stepType === "action" && actionType === "agent";
+  const isEmailAction = stepType === "action" && actionType === "email";
   const isAgentDecision = stepType === "decision" && decisionNodeType === "Agent";
   const isAgentPlusHumanDecision = stepType === "decision" && decisionNodeType === "Agent_Human";
 
-  return isAutomaticAction || isAgentAction || isAgentDecision || isAgentPlusHumanDecision;
+  return isAutomaticAction || isAgentAction || isEmailAction || isAgentDecision || isAgentPlusHumanDecision;
 };
 
 type ExecutionDetailResponse = {

@@ -1,5 +1,12 @@
 import { prisma } from '../lib/prisma';
-import { notificationService } from '../services/notification.service';
+import {
+  buildDisplayNameByFieldId,
+  buildFieldValuesByName,
+  normalizeNotificationTemplateVariableTokens,
+  normalizeTemplateTokenKey,
+  notificationService,
+  renderNotificationTemplate,
+} from '../services/notification.service';
 import { emailService } from '../services/email.service';
 
 jest.mock('../lib/prisma', () => ({
@@ -584,6 +591,67 @@ describe('notification.service', () => {
           content: 'You have been assigned to complete a step in Workflow A.\nStep: Review',
         })
       );
+    });
+  });
+
+  describe('template variable substitution', () => {
+    const displayNameByFieldId = buildDisplayNameByFieldId([
+      { id: 'field-1', name: 'Customer Name' },
+      { id: 'field-2', name: 'Owner' },
+      { id: 'field-3', name: 'Owner' },
+    ]);
+    const fieldValuesByName = buildFieldValuesByName(displayNameByFieldId, {
+      'field-1': 'Acme Corp',
+      'field-2': 'Alice',
+      'field-3': 'Bob',
+    });
+    const templateContext = {
+      executionLink: 'http://localhost/workflows/executions/exec-1',
+      fieldValuesByName,
+    };
+
+    it('normalizes template token keys with html entities and unicode spaces', () => {
+      expect(normalizeTemplateTokenKey('Customer&nbsp;Name')).toBe('customer name');
+      expect(normalizeTemplateTokenKey(`Customer\u00A0Name`)).toBe('customer name');
+      expect(normalizeTemplateTokenKey('Customer  Name')).toBe('customer name');
+      expect(normalizeTemplateTokenKey('Customer <strong>Name</strong>')).toBe('customer name');
+    });
+
+    it('renders plain spaced field names', () => {
+      expect(renderNotificationTemplate('Hello {{Customer Name}}', templateContext)).toBe('Hello Acme Corp');
+    });
+
+    it('renders html entity spaces in templates', () => {
+      expect(renderNotificationTemplate('<p>Hello {{Customer&nbsp;Name}}</p>', templateContext)).toBe(
+        '<p>Hello Acme Corp</p>'
+      );
+    });
+
+    it('renders unicode nbsp in templates', () => {
+      expect(renderNotificationTemplate(`Hello {{Customer\u00A0Name}}`, templateContext)).toBe('Hello Acme Corp');
+    });
+
+    it('renders templates with extra internal whitespace', () => {
+      expect(renderNotificationTemplate('Hello {{Customer  Name}}', templateContext)).toBe('Hello Acme Corp');
+    });
+
+    it('renders templates with html tags inside tokens', () => {
+      expect(renderNotificationTemplate('Hello {{Customer <strong>Name</strong>}}', templateContext)).toBe(
+        'Hello Acme Corp'
+      );
+    });
+
+    it('returns empty replacement for ambiguous duplicate field names', () => {
+      expect(renderNotificationTemplate('For {{Owner}}', templateContext)).toBe('For ');
+    });
+
+    it('normalizes variable tokens when saving templates', () => {
+      expect(normalizeNotificationTemplateVariableTokens('<p>{{Customer&nbsp;Name}}</p>')).toBe(
+        '<p>{{Customer Name}}</p>'
+      );
+      expect(
+        normalizeNotificationTemplateVariableTokens('Hello {{Customer <strong>Name</strong>}}')
+      ).toBe('Hello {{Customer Name}}');
     });
   });
 });

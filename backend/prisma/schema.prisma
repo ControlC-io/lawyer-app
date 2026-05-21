@@ -771,7 +771,8 @@ model WorkflowExecutionStep {
   created_at           DateTime          @default(now()) @db.Timestamptz(6)
   updated_at           DateTime          @default(now()) @db.Timestamptz(6)
   company_id           String?           @db.Uuid
-  external_token       String?           @db.Uuid
+  external_token            String?           @db.Uuid
+  external_token_expires_at DateTime?         @db.Timestamptz(6)
   execution            WorkflowExecution @relation(fields: [execution_id], references: [id])
   step                 WorkflowStep      @relation(fields: [step_id], references: [id])
   assigned_user        Profile?          @relation(fields: [assigned_to_user_id], references: [id])
@@ -780,6 +781,7 @@ model WorkflowExecutionStep {
   execution_logs       WorkflowExecutionLog[]
   reminder_jobs        StepReminderJob[]
 
+  @@index([execution_id, step_id, status])
   @@map("workflow_execution_steps")
   @@schema("public")
 }

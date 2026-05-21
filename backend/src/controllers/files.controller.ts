@@ -7,6 +7,7 @@ import { canUserAccessFolder, getUserFolderPermissionLevel, getUserGroupIdsInCom
 import { canUserAccessFileByMetadata } from '../lib/documentAccess';
 import { appendFileHistoryEvent, FILE_HISTORY_EVENT_TYPE, normalizeFileHistoryActorId } from '../lib/fileHistory';
 import { getDocumentProxyUrl } from '../lib/documentUrl';
+import { isExternalLinkAccessible } from '../lib/externalLinkExpiry';
 import { storageService } from '../services/storage.service';
 import { workflowService } from '../services/workflow.service';
 import multer from 'multer';
@@ -375,10 +376,16 @@ export const filesController = {
       }
 
       // Validate token via database
-      const stepInfo = await prisma.$queryRaw<Array<{ execution_id: string }>>`
-        SELECT execution_id 
+      const stepInfo = await prisma.$queryRaw<
+        Array<{
+          execution_id: string;
+          status: string;
+          external_token_expires_at: Date | null;
+        }>
+      >`
+        SELECT execution_id, status, external_token_expires_at
         FROM public.workflow_execution_steps 
-        WHERE external_token = ${token}
+        WHERE external_token = ${token}::uuid
         LIMIT 1
       `;
 
@@ -388,7 +395,21 @@ export const filesController = {
         });
       }
 
-      const { execution_id } = stepInfo[0];
+      const step = stepInfo[0];
+      if (
+        !isExternalLinkAccessible({
+          status: step.status,
+          expiresAt: step.external_token_expires_at,
+        })
+      ) {
+        return res.status(410).json({
+          error: 'Link expired',
+          expired: true,
+          details: 'This external form link is no longer active',
+        });
+      }
+
+      const { execution_id } = step;
 
       // Sanitize filename
       const sanitizedFileName = sanitizeFileName(file.originalname);
@@ -970,7 +991,7 @@ export const filesController = {
       if (executionStepFull) {
         await workflowService.advanceWorkflow(
           executionId,
-          executionStepFull.step_id,
+          stepId,
           executionStepFull.company_id!
         );
       }

@@ -148,11 +148,15 @@ const WorkflowExecutions = () => {
       const stepsData = await api.get<any[]>(
         `/api/companies/${companyId}/execution-steps?status=running`
       );
-      const running = (stepsData || []).filter((s) => executionIds.includes(s.execution_id));
+      const running = (stepsData || [])
+        .filter((s) => executionIds.includes(s.execution_id))
+        .map((s) => ({ ...s, status: "running" }));
       const pending = await api.get<any[]>(
         `/api/companies/${companyId}/execution-steps?status=pending`
       );
-      const pendingForWorkflow = (pending || []).filter((s) => executionIds.includes(s.execution_id));
+      const pendingForWorkflow = (pending || [])
+        .filter((s) => executionIds.includes(s.execution_id))
+        .map((s) => ({ ...s, status: "pending" }));
       const usersMap = new Map();
       const groupsMap = new Map();
       const allSteps = [...running, ...pendingForWorkflow];
@@ -172,8 +176,14 @@ const WorkflowExecutions = () => {
         assigned_to_group: step.assigned_to_group_id ? groupsMap.get(step.assigned_to_group_id) : null,
       }));
     },
-    enabled: !!selectedWorkflowId && !!companyId,
+    enabled: !!selectedWorkflowId && !!companyId && (workflowStatuses?.length ?? 0) > 0,
   });
+
+  const showKanban =
+    !!selectedWorkflowId &&
+    workflowStatuses !== undefined &&
+    workflowStatuses.length > 0 &&
+    executionStepsForKanban !== undefined;
 
   // Process data
   const processedData = useMemo(() => {
@@ -434,10 +444,10 @@ const WorkflowExecutions = () => {
 
           <ResizablePanel defaultSize={80}>
             <div className="h-full flex flex-col overflow-hidden">
-              {selectedWorkflowId && workflowStatuses && executionStepsForKanban ? (
+              {showKanban ? (
                 <KanbanView
                   executions={processedData.filtered}
-                  workflowStatuses={workflowStatuses}
+                  workflowStatuses={workflowStatuses!}
                   executionSteps={filteredExecutionSteps}
                 />
               ) : (

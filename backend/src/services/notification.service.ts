@@ -27,6 +27,32 @@ function stringifyTemplateValue(value: unknown): string {
   }
 }
 
+function decodeHtmlEntitiesForTemplateToken(input: string): string {
+  return input
+    .replace(/&nbsp;|&#160;|&#xA0;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'");
+}
+
+export function normalizeTemplateTokenKey(token: string): string {
+  const withoutTags = token.replace(/<[^>]*>/g, ' ');
+  const decoded = decodeHtmlEntitiesForTemplateToken(withoutTags).replace(/\u00A0/g, ' ');
+  return decoded.replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+export function normalizeNotificationTemplateVariableTokens(template: string): string {
+  return template.replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (_match, rawToken: string) => {
+    const withoutTags = rawToken.replace(/<[^>]*>/g, ' ');
+    const decoded = decodeHtmlEntitiesForTemplateToken(withoutTags).replace(/\u00A0/g, ' ');
+    const cleaned = decoded.replace(/\s+/g, ' ').trim();
+    if (!cleaned) return '';
+    return `{{${cleaned}}}`;
+  });
+}
+
 export function buildDisplayNameByFieldId(rawDataStructure: unknown): Record<string, string> {
   const fields = Array.isArray(rawDataStructure) ? rawDataStructure : [];
   const displayNameByFieldId: Record<string, string> = {};
@@ -60,7 +86,7 @@ export function buildFieldValuesByName(
 ): Map<string, { value: string; ambiguous: boolean }> {
   const fieldValuesByName = new Map<string, { value: string; ambiguous: boolean }>();
   for (const [fieldId, displayName] of Object.entries(displayNameByFieldId)) {
-    const tokenKey = displayName.trim().toLowerCase();
+    const tokenKey = normalizeTemplateTokenKey(displayName);
     if (!tokenKey) continue;
     const existing = fieldValuesByName.get(tokenKey);
     const value = stringifyTemplateValue(executionDataSnapshot[fieldId]);
@@ -75,12 +101,12 @@ export function buildFieldValuesByName(
 
 export function renderNotificationTemplate(template: string, context: NotificationTemplateContext): string {
   return template.replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (_match, rawToken: string) => {
-    const token = rawToken.trim();
-    if (!token) return '';
-    if (token.toLowerCase() === 'execution_link') {
+    const tokenKey = normalizeTemplateTokenKey(rawToken);
+    if (!tokenKey) return '';
+    if (tokenKey === 'execution_link') {
       return context.executionLink;
     }
-    const entry = context.fieldValuesByName.get(token.toLowerCase());
+    const entry = context.fieldValuesByName.get(tokenKey);
     if (!entry || entry.ambiguous) return '';
     return entry.value;
   });

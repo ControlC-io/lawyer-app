@@ -3,7 +3,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
-import { Loader2, ArrowRight, Lock, Eye, AlertCircle, UserCog, Bot, Mail, Save, ChevronLeft, ChevronRight, ChevronDown, Lightbulb } from "lucide-react";
+import { Loader2, ArrowRight, Lock, Eye, AlertCircle, UserCog, Bot, Save, ChevronLeft, ChevronRight, ChevronDown, Lightbulb } from "lucide-react";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
@@ -13,6 +13,7 @@ import { useExecutionForm } from "@/hooks/useExecutionForm";
 import { useExecutionNavigation } from "@/hooks/useExecutionNavigation";
 import { FieldRenderer } from "@/components/execution/form/FieldRenderer";
 import { SendExternalLinkDialog } from "./SendExternalLinkDialog";
+import { ExternalFormLinkBar } from "./ExternalFormLinkBar";
 import { format } from "date-fns";
 import { fr, enUS } from "date-fns/locale";
 import { Label } from "@/components/ui/label";
@@ -26,6 +27,7 @@ import { resolvePromptTemplate, type PromptValues } from "@/lib/promptTemplate";
 import { FormPageStepper } from "@/components/execution/FormPageStepper";
 import { getStepExecutionStyles } from "@/lib/stepTypeColors";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { getActiveRunningStep } from "@/lib/executionSteps";
 const FIXED_FORM_PRIMARY_COLOR = "#2A5CE5";
 
 interface ExecutionDataPanelProps {
@@ -218,7 +220,7 @@ export const ExecutionDataPanel = ({
       if (!executionSteps || isAutoProcessing) return;
 
       // Find the current running step
-      const runningStep = executionSteps.find((s: any) => s.status === "running");
+      const runningStep = getActiveRunningStep(executionSteps, selectedStepId);
       if (!runningStep) return;
 
       // Check if it's an automatic file step
@@ -835,7 +837,7 @@ export const ExecutionDataPanel = ({
     const step =
       selectedStepId
         ? (executionSteps || []).find((s: any) => s.id === selectedStepId)
-        : (executionSteps || []).find((s: any) => s.status === "running");
+        : getActiveRunningStep(executionSteps || [], selectedStepId);
 
     const cfg = (step?.workflow_steps?.config || {}) as any;
     const aiEnabled = step?.workflow_steps?.step_type === "edit_form" && !!cfg.ai_form_validation_enabled;
@@ -867,7 +869,7 @@ export const ExecutionDataPanel = ({
     const step =
       selectedStepId
         ? (executionSteps || []).find((s: any) => s.id === selectedStepId)
-        : (executionSteps || []).find((s: any) => s.status === "running");
+        : getActiveRunningStep(executionSteps || [], selectedStepId);
 
     const cfg = (step?.workflow_steps?.config || {}) as any;
     const aiEnabled = step?.workflow_steps?.step_type === "edit_form" && !!cfg.ai_form_validation_enabled;
@@ -903,8 +905,16 @@ export const ExecutionDataPanel = ({
   // Otherwise, find the first running step
   const selectedStep = selectedStepId
     ? (executionSteps || []).find((s: any) => s.id === selectedStepId)
-    : (executionSteps || []).find((s: any) => s.status === "running");
+    : getActiveRunningStep(executionSteps || []);
   const runningStep = selectedStep;
+  const externalToken =
+    runningStep?.status === "running" && typeof runningStep.external_token === "string"
+      ? runningStep.external_token
+      : undefined;
+  const externalTokenExpiresAt =
+    externalToken && typeof runningStep?.external_token_expires_at === "string"
+      ? runningStep.external_token_expires_at
+      : null;
 
   // Reset form page index when step changes (e.g. different edit_form step)
   useEffect(() => {
@@ -1182,50 +1192,12 @@ export const ExecutionDataPanel = ({
                 <CardDescription className="text-xs sm:text-sm break-words min-w-0 max-w-full">Fill required fields to continue</CardDescription>
               </div>
 
-          {(runningStep as any).external_token && (
-            <div className="flex items-center gap-2 p-2 bg-muted/50 rounded-md border text-xs">
-              <span className="font-medium shrink-0">External Link:</span>
-              <code className="bg-background px-1 py-0.5 rounded border border-border flex-1 truncate select-all">
-                {window.location.origin}/external/form/{(runningStep as any).external_token}
-              </code>
-              <div className="flex gap-1 shrink-0">
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-6 w-6"
-                  onClick={() => {
-                    navigator.clipboard.writeText(`${window.location.origin}/external/form/${(runningStep as any).external_token}`);
-                    toast({ title: t("executionDataPanel.linkCopied") });
-                  }}
-                  title="Copy link"
-                >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    width="24"
-                    height="24"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    className="h-3 w-3"
-                  >
-                    <rect width="14" height="14" x="8" y="8" rx="2" ry="2" />
-                    <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
-                  </svg>
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-6 w-6"
-                  onClick={() => setIsSendLinkDialogOpen(true)}
-                  title="Send link by email"
-                >
-                  <Mail className="h-3 w-3" />
-                </Button>
-              </div>
-            </div>
+          {externalToken && (
+            <ExternalFormLinkBar
+              token={externalToken}
+              expiresAt={externalTokenExpiresAt}
+              onSendEmail={() => setIsSendLinkDialogOpen(true)}
+            />
           )}
             </div>
           </CardHeader>
@@ -1342,50 +1314,12 @@ export const ExecutionDataPanel = ({
             <CardDescription className="text-xs sm:text-sm break-words min-w-0 max-w-full">Fill required fields to continue</CardDescription>
           </div>
 
-          {(runningStep as any).external_token && (
-            <div className="flex items-center gap-2 p-2 bg-muted/50 rounded-md border text-xs">
-              <span className="font-medium shrink-0">External Link:</span>
-              <code className="bg-background px-1 py-0.5 rounded border border-border flex-1 truncate select-all">
-                {window.location.origin}/external/form/{(runningStep as any).external_token}
-              </code>
-              <div className="flex gap-1 shrink-0">
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-6 w-6"
-                  onClick={() => {
-                    navigator.clipboard.writeText(`${window.location.origin}/external/form/${(runningStep as any).external_token}`);
-                    toast({ title: t("executionDataPanel.linkCopied") });
-                  }}
-                  title="Copy link"
-                >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    width="24"
-                    height="24"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    className="h-3 w-3"
-                  >
-                    <rect width="14" height="14" x="8" y="8" rx="2" ry="2" />
-                    <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
-                  </svg>
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-6 w-6"
-                  onClick={() => setIsSendLinkDialogOpen(true)}
-                  title="Send link by email"
-                >
-                  <Mail className="h-3 w-3" />
-                </Button>
-              </div>
-            </div>
+          {externalToken && (
+            <ExternalFormLinkBar
+              token={externalToken}
+              expiresAt={externalTokenExpiresAt}
+              onSendEmail={() => setIsSendLinkDialogOpen(true)}
+            />
           )}
         </div>
       </CardHeader>
@@ -2263,11 +2197,11 @@ export const ExecutionDataPanel = ({
     {runningStep.workflow_steps?.step_type === "edit_form" && renderForm()}
 
     {/* Send External Link Dialog */}
-    {(runningStep as any).external_token && (
+    {externalToken && (
       <SendExternalLinkDialog
         isOpen={isSendLinkDialogOpen}
         onClose={() => setIsSendLinkDialogOpen(false)}
-        token={(runningStep as any).external_token}
+        token={externalToken}
         executionId={executionId}
         companyId={companyId!}
         stepName={runningStep.workflow_steps?.name || ""}

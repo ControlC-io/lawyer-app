@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { X, Plus, Trash2, Link2, Settings, ChevronDown, ChevronRight, MessageSquare } from "lucide-react";
 import { WorkflowStep } from "@/pages/WorkflowEditor";
 import { Button } from "@/components/ui/button";
@@ -309,6 +309,20 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
   const reminderScheduleDurations = (stepNotificationConfig.reminder.schedule_minutes || [24 * 60]).map((minutes) =>
     minutesToDuration(minutes)
   );
+  const externalLinkDurationMinutes =
+    typeof step.config.external_link_duration_minutes === "number" &&
+    step.config.external_link_duration_minutes > 0
+      ? step.config.external_link_duration_minutes
+      : null;
+  const externalLinkDuration = externalLinkDurationMinutes
+    ? minutesToDuration(externalLinkDurationMinutes)
+    : { value: 7, unit: "days" as ReminderDurationUnit };
+  const formOutputs =
+    step.step_type === "edit_form"
+      ? outputs.length > 0
+        ? outputs
+        : ["Submit", "Cancel"]
+      : [];
   const [decisionSourceMode, setDecisionSourceMode] = useState<"none" | "integration" | "agent">(
     step.config.agent_id ? "agent" : step.config.api_configuration_id ? "integration" : "none"
   );
@@ -349,6 +363,46 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
         ...step.config,
         email_action: next,
       },
+    });
+  };
+
+  const emailBodyQuillRef = useRef<ReactQuill>(null);
+  const emailSubjectInputRef = useRef<HTMLInputElement>(null);
+  const emailSubjectSelectionRef = useRef({ start: 0, end: 0 });
+
+  const saveEmailSubjectSelection = (target: HTMLInputElement) => {
+    emailSubjectSelectionRef.current = {
+      start: target.selectionStart ?? 0,
+      end: target.selectionEnd ?? 0,
+    };
+  };
+
+  const insertEmailBodyVariable = (token: string): boolean => {
+    const quill = emailBodyQuillRef.current?.getEditor();
+    if (!quill) return false;
+    const range = quill.getSelection(true);
+    const index = range?.index ?? Math.max(0, quill.getLength() - 1);
+    quill.insertText(index, token);
+    quill.setSelection(index + token.length, 0);
+    return true;
+  };
+
+  const insertEmailSubjectVariable = (token: string) => {
+    const { start, end } = emailSubjectSelectionRef.current;
+    const current = emailActionConfig.subject_template;
+    const newValue = current.slice(0, start) + token + current.slice(end);
+    const nextPos = start + token.length;
+    emailSubjectSelectionRef.current = { start: nextPos, end: nextPos };
+    updateEmailActionConfig((config) => ({
+      ...config,
+      subject_template: newValue,
+    }));
+    requestAnimationFrame(() => {
+      const input = emailSubjectInputRef.current;
+      if (input) {
+        input.focus();
+        input.setSelectionRange(nextPos, nextPos);
+      }
     });
   };
 
@@ -1126,10 +1180,120 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
                       config: {
                         ...step.config,
                         allow_external_assignment: checked,
+                        ...(checked
+                          ? {}
+                          : {
+                              external_link_duration_minutes: undefined,
+                              external_link_expired_output: undefined,
+                            }),
                       },
                     });
                   }}
                 />
+              </div>
+            )}
+
+            {step.step_type === "edit_form" && step.config.allow_external_assignment && (
+              <div className="space-y-4 rounded-md border p-3">
+                <div className="space-y-2">
+                  <Label>Link active for</Label>
+                  <p className="text-xs text-muted-foreground">
+                    After this period the public link is deactivated and the step is closed automatically.
+                    Leave empty for no time limit.
+                  </p>
+                  <div className="grid grid-cols-[1fr_140px] gap-2">
+                    <Input
+                      type="number"
+                      min={1}
+                      placeholder="No limit"
+                      value={externalLinkDurationMinutes ? externalLinkDuration.value : ""}
+                      onChange={(event) => {
+                        const raw = event.target.value.trim();
+                        if (!raw) {
+                          onUpdateStep({
+                            ...step,
+                            config: {
+                              ...step.config,
+                              external_link_duration_minutes: undefined,
+                              external_link_expired_output: undefined,
+                            },
+                          });
+                          return;
+                        }
+                        const unit = externalLinkDuration.unit;
+                        onUpdateStep({
+                          ...step,
+                          config: {
+                            ...step.config,
+                            external_link_duration_minutes: durationToMinutes(raw, unit),
+                          },
+                        });
+                      }}
+                    />
+                    <Select
+                      value={externalLinkDuration.unit}
+                      onValueChange={(value) => {
+                        if (value !== "hours" && value !== "days") return;
+                        if (!externalLinkDurationMinutes) return;
+                        onUpdateStep({
+                          ...step,
+                          config: {
+                            ...step.config,
+                            external_link_duration_minutes: durationToMinutes(
+                              externalLinkDuration.value,
+                              value
+                            ),
+                          },
+                        });
+                      }}
+                      disabled={!externalLinkDurationMinutes}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="hours">{t("workflowEditorStepNotifications.hours")}</SelectItem>
+                        <SelectItem value="days">{t("workflowEditorStepNotifications.days")}</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                {externalLinkDurationMinutes && formOutputs.length > 1 && (
+                  <div className="space-y-2">
+                    <Label>On expiry, follow output</Label>
+                    <Select
+                      value={
+                        typeof step.config.external_link_expired_output === "string" &&
+                        formOutputs.includes(step.config.external_link_expired_output)
+                          ? step.config.external_link_expired_output
+                          : formOutputs.includes("Cancel")
+                            ? "Cancel"
+                            : formOutputs[1] || formOutputs[0]
+                      }
+                      onValueChange={(value) => {
+                        onUpdateStep({
+                          ...step,
+                          config: {
+                            ...step.config,
+                            external_link_expired_output: value,
+                          },
+                        });
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {formOutputs.map((output) => (
+                          <SelectItem key={output} value={output}>
+                            {output}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
               </div>
             )}
 
@@ -2374,12 +2538,7 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
                                 type="button"
                                 variant="ghost"
                                 className="w-full justify-start text-left h-auto py-2"
-                                onClick={() => {
-                                  updateEmailActionConfig((current) => ({
-                                    ...current,
-                                    subject_template: `${current.subject_template}{{execution_link}}`,
-                                  }));
-                                }}
+                                onClick={() => insertEmailSubjectVariable("{{execution_link}}")}
                               >
                                 <div className="space-y-0.5">
                                   <p className="text-sm font-medium">Execution link</p>
@@ -2392,12 +2551,7 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
                                   type="button"
                                   variant="ghost"
                                   className="w-full justify-start text-left h-auto py-2"
-                                  onClick={() => {
-                                    updateEmailActionConfig((current) => ({
-                                      ...current,
-                                      subject_template: `${current.subject_template}{{${fieldName}}}`,
-                                    }));
-                                  }}
+                                  onClick={() => insertEmailSubjectVariable(`{{${fieldName}}}`)}
                                 >
                                   <div className="space-y-0.5">
                                     <p className="text-sm font-medium">{fieldName}</p>
@@ -2410,14 +2564,19 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
                         </Popover>
                       </div>
                       <Input
+                        ref={emailSubjectInputRef}
                         id="email-action-subject"
                         value={emailActionConfig.subject_template}
                         onChange={(event) => {
+                          saveEmailSubjectSelection(event.target);
                           updateEmailActionConfig((current) => ({
                             ...current,
                             subject_template: event.target.value,
                           }));
                         }}
+                        onSelect={(event) => saveEmailSubjectSelection(event.currentTarget)}
+                        onKeyUp={(event) => saveEmailSubjectSelection(event.currentTarget)}
+                        onClick={(event) => saveEmailSubjectSelection(event.currentTarget)}
                         placeholder="Example: Request update for {{request_name}}"
                       />
                     </div>
@@ -2439,10 +2598,12 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
                                 variant="ghost"
                                 className="w-full justify-start text-left h-auto py-2"
                                 onClick={() => {
-                                  updateEmailActionConfig((current) => ({
-                                    ...current,
-                                    body_template_html: `${current.body_template_html}{{execution_link}}`,
-                                  }));
+                                  if (!insertEmailBodyVariable("{{execution_link}}")) {
+                                    updateEmailActionConfig((current) => ({
+                                      ...current,
+                                      body_template_html: `${current.body_template_html}{{execution_link}}`,
+                                    }));
+                                  }
                                 }}
                               >
                                 <div className="space-y-0.5">
@@ -2457,10 +2618,13 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
                                   variant="ghost"
                                   className="w-full justify-start text-left h-auto py-2"
                                   onClick={() => {
-                                    updateEmailActionConfig((current) => ({
-                                      ...current,
-                                      body_template_html: `${current.body_template_html}{{${fieldName}}}`,
-                                    }));
+                                    const token = `{{${fieldName}}}`;
+                                    if (!insertEmailBodyVariable(token)) {
+                                      updateEmailActionConfig((current) => ({
+                                        ...current,
+                                        body_template_html: `${current.body_template_html}${token}`,
+                                      }));
+                                    }
                                   }}
                                 >
                                   <div className="space-y-0.5">
@@ -2475,6 +2639,7 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
                       </div>
                       <div className="bg-background rounded-md">
                         <ReactQuill
+                          ref={emailBodyQuillRef}
                           theme="snow"
                           value={emailActionConfig.body_template_html}
                           onChange={(value) => {

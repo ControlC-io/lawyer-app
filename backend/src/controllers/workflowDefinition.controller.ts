@@ -2,6 +2,7 @@ import { Response } from 'express';
 import { AuthRequest, ALL_COMPANIES, companyFilter } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 import { workflowService } from '../services/workflow.service';
+import { normalizeNotificationTemplateVariableTokens } from '../services/notification.service';
 import { ExecutionStatus } from '@prisma/client';
 
 async function ensureCompanyAccess(req: AuthRequest, companyId: string, requireAdmin = false) {
@@ -313,10 +314,12 @@ function normalizeEmailActionConfig(
   }
 
   const source = (input ?? {}) as Record<string, unknown>;
-  const subjectTemplate =
-    typeof source.subject_template === 'string' ? source.subject_template.trim() : '';
-  const bodyTemplateHtml =
-    typeof source.body_template_html === 'string' ? source.body_template_html.trim() : '';
+  const subjectTemplate = normalizeNotificationTemplateVariableTokens(
+    typeof source.subject_template === 'string' ? source.subject_template.trim() : ''
+  );
+  const bodyTemplateHtml = normalizeNotificationTemplateVariableTokens(
+    typeof source.body_template_html === 'string' ? source.body_template_html.trim() : ''
+  );
 
   const rawRecipientSources = normalizeStringArray(source.recipient_sources);
   const recipientSources = Array.from(
@@ -859,6 +862,42 @@ export const workflowDefinitionController = {
             error: 'Invalid step assignment',
             details: `Step "${step.name || 'Unnamed step'}" requires a user or group assignment`,
           });
+        }
+
+        if (isExternalForm) {
+          const durationRaw = config.external_link_duration_minutes;
+          if (durationRaw !== undefined && durationRaw !== null && durationRaw !== '') {
+            const durationMinutes = Number(durationRaw);
+            if (!Number.isFinite(durationMinutes) || durationMinutes <= 0 || !Number.isInteger(durationMinutes)) {
+              return res.status(400).json({
+                error: 'Invalid external link configuration',
+                details: `Step "${step.name || 'Unnamed step'}" external link duration must be a positive integer (minutes)`,
+              });
+            }
+            config.external_link_duration_minutes = durationMinutes;
+          } else if ('external_link_duration_minutes' in config) {
+            delete config.external_link_duration_minutes;
+          }
+
+          const expiredOutput =
+            typeof config.external_link_expired_output === 'string'
+              ? config.external_link_expired_output.trim()
+              : '';
+          const stepOutputs = Array.isArray(config.outputs) ? config.outputs : ['Submit', 'Cancel'];
+          if (expiredOutput) {
+            if (!stepOutputs.includes(expiredOutput)) {
+              return res.status(400).json({
+                error: 'Invalid external link configuration',
+                details: `Step "${step.name || 'Unnamed step'}" expired output must be one of: ${stepOutputs.join(', ')}`,
+              });
+            }
+            config.external_link_expired_output = expiredOutput;
+          } else if ('external_link_expired_output' in config) {
+            delete config.external_link_expired_output;
+          }
+        } else {
+          if ('external_link_duration_minutes' in config) delete config.external_link_duration_minutes;
+          if ('external_link_expired_output' in config) delete config.external_link_expired_output;
         }
 
         if (assignmentSource === 'field') {
