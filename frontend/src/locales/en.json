@@ -779,7 +779,11 @@
     "startedByMe": "Started by me",
     "assignedToMe": "Assigned to me",
     "showCompleted": "Show completed executions",
+    "showCompletedShort": "Show completed",
     "searchPlaceholder": "Search by workflow or execution name..."
+  },
+  "workflowMobilePicker": {
+    "uncategorized": "Uncategorized"
   },
   "executionTimeline": {
     "timeline": "Timeline",

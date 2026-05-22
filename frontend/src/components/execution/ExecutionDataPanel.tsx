@@ -1428,10 +1428,10 @@ export const ExecutionDataPanel = ({
       >
         {/* Same horizontal inset as form CardContent so explanation + header align with fields */}
         <div className="px-2 sm:px-3 md:px-4 lg:px-6 pt-2 sm:pt-3 pb-2 sm:pb-3 space-y-2 sm:space-y-3">
-          <div className="flex items-center justify-between gap-3 flex-wrap">
-            <div className="flex-1 min-w-0">
+          <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2">
+            <div className="min-w-0 max-w-full">
               <div className="flex items-center gap-2 flex-wrap min-w-0">
-                <h3 className="text-base sm:text-lg font-semibold truncate" style={{ color: runningStepStyle.textColor }}>
+                <h3 className="text-base sm:text-lg font-semibold break-words min-w-0" style={{ color: runningStepStyle.textColor }}>
                   {runningStep.workflow_steps?.name}
                 </h3>
                 {isApiProcessedAction && (
@@ -1479,7 +1479,7 @@ export const ExecutionDataPanel = ({
               </div>
             </div>
 
-            <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end self-start">
+            <div className="flex items-center gap-2 flex-wrap justify-end max-w-full">
             {aiValidationEnabled && !isApiProcessedAction && (
               <Button
                 size="sm"

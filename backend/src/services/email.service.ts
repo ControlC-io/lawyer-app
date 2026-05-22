@@ -191,7 +191,7 @@ export const emailService = {
       return;
     }
 
-    const executionLink = `${APP_URL}/workflows/executions/${executionId}`;
+    const executionLink = `${APP_URL}/executions/${executionId}`;
     const subject = options?.subject?.trim() || `New task assigned: ${stepName}`;
     const defaultContent = `You have been assigned to complete a step in ${workflowName}.\nStep: ${stepName}`;
     const content = options?.content?.trim() || defaultContent;

@@ -394,7 +394,7 @@ describe('notification.service', () => {
           data: [
             expect.objectContaining({
               title: 'Task for Acme Corp',
-              message: 'Execution: http://localhost/workflows/executions/exec-1',
+              message: 'Execution: http://localhost/executions/exec-1',
             }),
           ],
         })
@@ -406,7 +406,7 @@ describe('notification.service', () => {
         'exec-1',
         expect.objectContaining({
           subject: 'Task for Acme Corp',
-          content: 'Execution: http://localhost/workflows/executions/exec-1',
+          content: 'Execution: http://localhost/executions/exec-1',
         })
       );
     });
@@ -606,7 +606,7 @@ describe('notification.service', () => {
       'field-3': 'Bob',
     });
     const templateContext = {
-      executionLink: 'http://localhost/workflows/executions/exec-1',
+      executionLink: 'http://localhost/executions/exec-1',
       fieldValuesByName,
     };
 

@@ -57,8 +57,8 @@ export const ExecutionFilters = ({
     ];
 
     return (
-        <div className="space-y-4">
-            <div className="grid gap-4 md:grid-cols-3">
+        <div className="space-y-2 sm:space-y-4">
+            <div className="grid grid-cols-3 gap-1.5 sm:gap-4">
                 {filters.map((filter) => (
                     <Card
                         key={filter.id}
@@ -68,45 +68,58 @@ export const ExecutionFilters = ({
                         )}
                         onClick={() => onFilterChange(filter.id)}
                     >
-                        <CardContent className="p-4 flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                                <div className={cn(
-                                    "p-2 rounded-full",
-                                    activeFilter === filter.id ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"
-                                )}>
-                                    <filter.icon className="h-5 w-5" />
+                        <CardContent className="p-2 sm:p-4 flex flex-col items-center gap-1 sm:flex-row sm:items-center sm:justify-between sm:gap-0">
+                            <div className="flex flex-col items-center gap-1 sm:flex-row sm:items-center sm:gap-3 min-w-0 w-full sm:w-auto">
+                                <div
+                                    className={cn(
+                                        "p-1.5 sm:p-2 rounded-full shrink-0",
+                                        activeFilter === filter.id
+                                            ? "bg-primary/10 text-primary"
+                                            : "bg-muted text-muted-foreground"
+                                    )}
+                                >
+                                    <filter.icon className="h-3.5 w-3.5 sm:h-5 sm:w-5" />
                                 </div>
-                                <div>
-                                    <p className="font-medium text-sm">{filter.label}</p>
-                                    <p className="text-xs text-muted-foreground">{filter.description}</p>
+                                <div className="min-w-0 text-center sm:text-left">
+                                    <p className="font-medium text-[10px] leading-tight sm:text-sm line-clamp-2 sm:line-clamp-none">
+                                        {filter.label}
+                                    </p>
+                                    <p className="hidden sm:block text-xs text-muted-foreground">
+                                        {filter.description}
+                                    </p>
                                 </div>
                             </div>
-                            <div className="text-2xl font-bold">{filter.count}</div>
+                            <div className="text-sm font-bold tabular-nums sm:text-2xl">{filter.count}</div>
                         </CardContent>
                     </Card>
                 ))}
             </div>
 
-            <div className="flex items-center justify-between gap-4">
-                <div className="flex items-center space-x-2">
-                    <Switch
-                        id="show-completed"
-                        checked={showCompleted}
-                        onCheckedChange={onShowCompletedChange}
-                    />
-                    <Label htmlFor="show-completed" className="cursor-pointer">
-                        {t("executionFilters.showCompleted")}
-                    </Label>
-                </div>
-
-                <div className="relative flex-1 max-w-md">
-                    <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+                <div className="relative w-full order-1 sm:order-2 sm:flex-1 sm:max-w-md">
+                    <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 sm:h-4 sm:w-4 text-muted-foreground" />
                     <Input
                         placeholder={t("executionFilters.searchPlaceholder")}
                         value={searchQuery}
                         onChange={(e) => onSearchChange(e.target.value)}
-                        className="pl-8"
+                        className="h-8 pl-7 text-sm sm:h-10 sm:pl-8"
                     />
+                </div>
+
+                <div className="flex items-center gap-2 order-2 sm:order-1 shrink-0">
+                    <Switch
+                        id="show-completed"
+                        checked={showCompleted}
+                        onCheckedChange={onShowCompletedChange}
+                        className="scale-[0.85] sm:scale-100"
+                    />
+                    <Label
+                        htmlFor="show-completed"
+                        className="cursor-pointer text-xs leading-tight sm:text-sm"
+                    >
+                        <span className="sm:hidden">{t("executionFilters.showCompletedShort")}</span>
+                        <span className="hidden sm:inline">{t("executionFilters.showCompleted")}</span>
+                    </Label>
                 </div>
             </div>
         </div>

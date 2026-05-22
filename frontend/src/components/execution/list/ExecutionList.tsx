@@ -152,7 +152,71 @@ export const ExecutionList = ({ executions }: ExecutionListProps) => {
 
     return (
         <div className="h-full flex flex-col overflow-hidden bg-card rounded-md">
-            <div className="flex-1 overflow-auto relative">
+            {/* Mobile card layout */}
+            <div className="flex-1 overflow-auto md:hidden p-2 space-y-2">
+                {executions.map((execution) => (
+                    <div
+                        key={execution.id}
+                        className="cursor-pointer rounded-lg border border-border bg-background p-3 active:bg-muted/40 transition-colors"
+                        onClick={() => navigate(`/executions/${execution.id}`)}
+                    >
+                        <div className="flex items-start justify-between gap-2 mb-2">
+                            <div className="min-w-0 flex-1">
+                                <p className="font-semibold text-sm truncate">
+                                    {execution.workflows?.name || t("executionList.untitledWorkflow")}
+                                </p>
+                                {execution.name && (
+                                    <p className="text-xs text-muted-foreground truncate">{execution.name}</p>
+                                )}
+                            </div>
+                            <Badge
+                                variant="outline"
+                                className={cn(
+                                    "flex-shrink-0 flex items-center gap-1 text-[10px] font-medium border px-1.5 py-0",
+                                    getStatusBadgeClass(execution.status)
+                                )}
+                            >
+                                {getStatusIcon(execution.status)}
+                                <span className="capitalize">{execution.status}</span>
+                            </Badge>
+                        </div>
+
+                        <div className="flex flex-wrap gap-1 mb-2">
+                            {(execution.current_step_names && execution.current_step_names.length > 0) ? (
+                                execution.current_step_names.map((stepName, idx) => (
+                                    <Badge
+                                        key={idx}
+                                        variant="outline"
+                                        className="text-[10px] font-medium px-1.5 py-0 h-5"
+                                        style={getStepBadgeStyle(execution.current_step_types?.[idx])}
+                                    >
+                                        {stepName}
+                                    </Badge>
+                                ))
+                            ) : execution.current_step_name ? (
+                                <Badge
+                                    variant="outline"
+                                    className="text-[10px] font-medium px-1.5 py-0 h-5"
+                                    style={getStepBadgeStyle(execution.current_step_types?.[0])}
+                                >
+                                    {execution.current_step_name}
+                                </Badge>
+                            ) : null}
+                        </div>
+
+                        <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                            <div className="flex items-center gap-1 min-w-0">
+                                <Calendar className="h-3 w-3 flex-shrink-0" />
+                                <span className="truncate">{formatExecutionDate(execution.started_at)}</span>
+                            </div>
+                            <ChevronRight className="h-4 w-4 flex-shrink-0 text-primary" />
+                        </div>
+                    </div>
+                ))}
+            </div>
+
+            {/* Desktop table layout */}
+            <div className="hidden md:flex flex-1 overflow-auto relative flex-col">
                 <table className="w-full caption-bottom text-sm">
                     <TableHeader className="sticky top-0 bg-background z-10 border-b-2 border-border shadow-sm">
                         <TableRow className="hover:bg-transparent border-none">

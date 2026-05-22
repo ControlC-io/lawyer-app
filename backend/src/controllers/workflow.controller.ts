@@ -535,7 +535,7 @@ export const workflowController = {
         const userFieldIds = normalizeStringArray(emailActionConfig.user_field_ids);
         const attachmentFieldIds = normalizeStringArray(emailActionConfig.attachment_field_ids);
 
-        const executionLink = `${process.env.APP_URL || 'http://localhost'}/workflows/executions/${executionId}`;
+        const executionLink = `${process.env.APP_URL || 'http://localhost'}/executions/${executionId}`;
         const displayNameByFieldId = buildDisplayNameByFieldId((executionStep.step as any)?.workflow?.data_structure);
         const templateContext: NotificationTemplateContext = {
           executionLink,

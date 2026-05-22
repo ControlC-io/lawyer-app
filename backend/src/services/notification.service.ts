@@ -293,7 +293,7 @@ export const notificationService = {
     const stepName = stepInstance.step.name || 'Next Step';
     const executionId = stepInstance.execution_id;
     const companyId = stepInstance.company_id!;
-    const executionLink = `${process.env.APP_URL || 'http://localhost'}/workflows/executions/${executionId}`;
+    const executionLink = `${process.env.APP_URL || 'http://localhost'}/executions/${executionId}`;
 
     const executionDataRows = await prisma.workflowExecutionData.findMany({
       where: { execution_id: executionId },

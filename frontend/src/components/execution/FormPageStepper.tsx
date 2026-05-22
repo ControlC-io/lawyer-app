@@ -30,34 +30,41 @@ export function FormPageStepper({
   const wrapperStyle = useCustomColor && primaryColor
     ? ({ "--portal-primary": primaryColor } as React.CSSProperties)
     : undefined;
+  const stepWidthPercent = 100 / pages.length;
+  const trackInset = `${stepWidthPercent / 2}%`;
+  const trackSpan = `${100 - stepWidthPercent}%`;
 
   return (
     <div
-      className={cn("w-full", className)}
+      className={cn("w-full min-w-0", className)}
       role="tablist"
       aria-label="Form pages"
       style={wrapperStyle}
     >
       {/* Track line in a fixed-height strip (h-7) so it's vertically centered; -mb-7 overlaps bullets on top.
-          Track runs from first bullet center to last bullet center (inset by half bullet + padding ≈ 1.5rem). */}
-      <div className="relative h-7 flex items-center px-2 -mb-7">
-        <div className="absolute left-6 right-6 top-1/2 h-0.5 -translate-y-1/2 rounded-full bg-muted" />
+          Track runs from first bullet center to last bullet center. */}
+      <div className="relative h-7 flex items-center -mb-7">
+        <div
+          className="absolute top-1/2 h-0.5 -translate-y-1/2 rounded-full bg-muted"
+          style={{ left: trackInset, right: trackInset }}
+        />
         <div
           className={cn(
-            "absolute left-6 top-1/2 h-0.5 -translate-y-1/2 rounded-full transition-all duration-200",
+            "absolute top-1/2 h-0.5 -translate-y-1/2 rounded-full transition-all duration-200",
             !useCustomColor && "bg-primary"
           )}
           style={{
+            left: trackInset,
             width:
               pages.length <= 1
                 ? "0"
-                : `calc(${safeIndex / (pages.length - 1)} * (100% - 3rem))`,
+                : `calc(${safeIndex / (pages.length - 1)} * ${trackSpan})`,
             ...(useCustomColor && primaryColor ? { backgroundColor: primaryColor } : {}),
           }}
         />
       </div>
-      {/* Bullets + labels; bullets sit in the same vertical space as the line strip */}
-      <div className="relative flex w-full justify-between">
+      {/* Equal-width columns so long titles share space and wrap instead of truncating. */}
+      <div className="relative flex w-full min-w-0">
         {pages.map((page, idx) => {
           const isActive = idx === safeIndex;
           const isPast = idx < safeIndex;
@@ -71,7 +78,7 @@ export function FormPageStepper({
                 }
               : undefined;
           return (
-            <div key={page.id} className="flex flex-col items-center -translate-x-1">
+            <div key={page.id} className="flex min-w-0 flex-1 flex-col items-center px-0.5 sm:px-1">
               <button
                 type="button"
                 role="tab"
@@ -103,7 +110,7 @@ export function FormPageStepper({
               </button>
               <span
                 className={cn(
-                  "mt-1.5 text-center text-xs font-medium max-w-[72px] sm:max-w-[90px] truncate block",
+                  "mt-1.5 w-full min-w-0 text-center text-[10px] leading-tight font-medium sm:text-xs sm:leading-snug line-clamp-2 break-words [overflow-wrap:anywhere]",
                   isActive && !useCustomColor && "text-foreground",
                   !isActive && "text-muted-foreground"
                 )}

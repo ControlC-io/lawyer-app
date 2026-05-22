@@ -1,6 +1,6 @@
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Workflow } from "lucide-react";
+import { ArrowLeft, Workflow, History } from "lucide-react";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable";
 import * as ResizablePrimitive from "react-resizable-panels";
@@ -17,6 +17,17 @@ import { useCompanyApiKey } from "@/hooks/useCompanyApiKey";
 import { DevModeBanner } from "@/components/execution/DevModeBanner";
 import { WorkflowCanvasDialog } from "@/components/execution/WorkflowCanvasDialog";
 import { getActiveRunningStep, getWorkflowStepDefinitionId } from "@/lib/executionSteps";
+import { useIsMobile } from "@/hooks/use-mobile";
+import {
+  Drawer,
+  DrawerContent,
+  DrawerHeader,
+  DrawerTitle,
+} from "@/components/ui/drawer";
+import {
+  Sheet,
+  SheetContent,
+} from "@/components/ui/sheet";
 
 const ExecutionDetail = () => {
   const { id } = useParams();
@@ -25,6 +36,7 @@ const ExecutionDetail = () => {
   const { t } = useLanguage();
   const companyId = useCompanyId();
   const apiKey = useCompanyApiKey(companyId);
+  const isMobile = useIsMobile();
 
   // Dev mode detection via URL parameter
   const isDevMode = searchParams.get('dev_mode') === 'true';
@@ -43,6 +55,7 @@ const ExecutionDetail = () => {
   const [isFileViewerOpen, setIsFileViewerOpen] = useState(false);
   const [isTimelineCollapsed, setIsTimelineCollapsed] = useState(false);
   const [isCanvasDialogOpen, setIsCanvasDialogOpen] = useState(false);
+  const [isMobileTimelineOpen, setIsMobileTimelineOpen] = useState(false);
 
   // When set, user has explicitly chosen this step – effect must never override with running step until they click "Return to active"
   const userChosenStepIdRef = useRef<string | null>(null);
@@ -209,8 +222,10 @@ const ExecutionDetail = () => {
     }
   }, [viewingHistoricalStep]);
 
-  // Effect to handle panel resizing when state changes
+  // Effect to handle panel resizing when state changes (desktop only)
   useEffect(() => {
+    if (isMobile) return;
+
     // Clear persisted sizes for all possible autoSaveId combinations to prevent conflicts
     if (typeof window !== 'undefined' && window.localStorage) {
       try {
@@ -302,7 +317,7 @@ const ExecutionDetail = () => {
     return () => {
       timeoutIds.forEach(id => clearTimeout(id));
     };
-  }, [isTimelineCollapsed, isFileViewerOpen]);
+  }, [isTimelineCollapsed, isFileViewerOpen, isMobile]);
 
   if (!companyId) {
     return (
@@ -358,175 +373,234 @@ const ExecutionDetail = () => {
     return null;
   };
 
+  const handleStepClick = (stepId: string | null) => {
+    userChosenStepIdRef.current = stepId;
+    setViewingHistoricalStep(stepId);
+    if (isMobile) {
+      setIsMobileTimelineOpen(false);
+    }
+  };
+
+  const renderMainContent = () => (
+    <div className="h-full overflow-hidden flex flex-col bg-muted/20 min-w-0 w-full max-w-full">
+      {isDevMode && (() => {
+        const currentStep = viewingHistoricalStep
+          ? visibleSteps.find(s => s.id === viewingHistoricalStep)
+          : visibleSteps.find(s => s.status === "running");
+
+        if (currentStep?.workflow_steps) {
+          return (
+            <DevModeBanner
+              executionId={id!}
+              executionStepId={currentStep.id}
+              stepConfig={currentStep.workflow_steps.config || {}}
+              stepType={currentStep.workflow_steps.step_type || ''}
+              actionType={currentStep.workflow_steps.action_type || ''}
+              decisionNodeType={currentStep.workflow_steps.decision_node_type || ''}
+              workflowStepId={currentStep.workflow_steps.id}
+              companyId={companyId}
+            />
+          );
+        }
+        return null;
+      })()}
+      <ScrollArea ref={mainScrollAreaRef} className="flex-1 min-w-0 w-full max-w-full overflow-x-hidden">
+        <div className="p-2 sm:p-3 md:p-4 lg:p-6 min-w-0 w-full max-w-full">
+          <div className="w-full min-w-0 max-w-full box-border">
+            {viewingHistoricalStep ? (() => {
+              const step = visibleSteps.find(s => s.id === viewingHistoricalStep);
+              if (step?.status === "completed") {
+                return (
+                  <HistoricalStepView
+                    step={step}
+                    executionData={executionData}
+                    onReturnToActive={() => {
+                      userChosenStepIdRef.current = null;
+                      setViewingHistoricalStep(null);
+                    }}
+                    onFileView={handleFileView}
+                    isExecutionCompleted={execution?.status === "completed"}
+                  />
+                );
+              }
+              return (
+                <ExecutionDataPanel
+                  executionId={id!}
+                  onFileView={handleFileView}
+                  selectedStepId={viewingHistoricalStep}
+                  apiKey={apiKey}
+                  executionSteps={executionSteps}
+                  connections={connections}
+                  executionDataStructures={executionData}
+                />
+              );
+            })() : (
+              <ExecutionDataPanel
+                executionId={id!}
+                onFileView={handleFileView}
+                selectedStepId={null}
+                apiKey={apiKey}
+                executionSteps={executionSteps}
+                connections={connections}
+                executionDataStructures={executionData}
+              />
+            )}
+          </div>
+        </div>
+      </ScrollArea>
+    </div>
+  );
+
   return (
     <div className="h-full flex flex-col overflow-hidden w-full max-w-full">
-      <div className="flex-shrink-0 p-4 border-b border-border flex items-center justify-between">
+      <div className="flex-shrink-0 p-3 sm:p-4 border-b border-border flex flex-wrap items-center justify-between gap-2">
         <Button variant="ghost" onClick={() => navigate("/executions")} size="sm">
           <ArrowLeft className="h-4 w-4 mr-2" />
           {t("executionDetail.backToExecutions")}
         </Button>
-        {execution?.workflow_id && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setIsCanvasDialogOpen(true)}
-            title={t("executionDetail.viewWorkflowTitle")}
-          >
-            <Workflow className="h-4 w-4 mr-2" />
-            {t("executionDetail.viewWorkflow")}
-          </Button>
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          {isMobile && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setIsMobileTimelineOpen(true)}
+            >
+              <History className="h-4 w-4 mr-2" />
+              {t("executionTimeline.timeline")}
+            </Button>
+          )}
+          {execution?.workflow_id && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setIsCanvasDialogOpen(true)}
+              title={t("executionDetail.viewWorkflowTitle")}
+            >
+              <Workflow className="h-4 w-4 mr-2" />
+              {t("executionDetail.viewWorkflow")}
+            </Button>
+          )}
+        </div>
       </div>
 
-      <ResizablePanelGroup
-        direction="horizontal"
-        className="flex-1 min-h-0 w-full max-w-full overflow-hidden"
-        autoSaveId={`execution-detail-panels-${isTimelineCollapsed ? 'collapsed' : 'expanded'}-${isFileViewerOpen ? 'file-open' : 'file-closed'}`}
-      >
-        <ResizablePanel
-          ref={timelinePanelRef}
-          defaultSize={isTimelineCollapsed ? 3 : Math.min(getTimelinePanelSize() || 25, 40)}
-          minSize={3}
-          maxSize={isTimelineCollapsed ? 3 : 40}
-          collapsible={true}
-          collapsedSize={3}
-          className="min-w-0"
-          style={{ overflow: 'visible' }}
-        >
-          <ExecutionTimeline
-            execution={execution}
-            visibleSteps={visibleSteps}
-            logs={executionLogs}
-            viewingHistoricalStep={viewingHistoricalStep}
-            onStepClick={(stepId) => {
-              userChosenStepIdRef.current = stepId;
-              setViewingHistoricalStep(stepId);
-            }}
-            onLogsClick={setSelectedStepForLogs}
-            isCollapsed={isTimelineCollapsed}
-            onToggleCollapse={toggleTimeline}
-          />
-        </ResizablePanel>
+      <StepLogsDialog
+        isOpen={!!selectedStepForLogs}
+        onClose={() => setSelectedStepForLogs(null)}
+        stepId={selectedStepForLogs}
+        steps={visibleSteps}
+        logs={executionLogs}
+      />
 
-        <ResizableHandle withHandle />
-
-        <StepLogsDialog
-          isOpen={!!selectedStepForLogs}
-          onClose={() => setSelectedStepForLogs(null)}
-          stepId={selectedStepForLogs}
-          steps={visibleSteps}
-          logs={executionLogs}
-        />
-
-        <ResizablePanel
-          ref={middlePanelRef}
-          defaultSize={getMiddlePanelSize()}
-          minSize={isFileViewerOpen ? 30 : 35}
-          maxSize={isFileViewerOpen ? (isTimelineCollapsed ? 65 : 70) : (isTimelineCollapsed ? 97 : 85)}
-          className="min-w-0"
-        >
-          <div className="h-full overflow-hidden flex flex-col bg-muted/20 min-w-0 w-full max-w-full">
-            {/* Dev Mode Banner */}
-            {isDevMode && (() => {
-              const currentStep = viewingHistoricalStep
-                ? visibleSteps.find(s => s.id === viewingHistoricalStep)
-                : visibleSteps.find(s => s.status === "running");
-
-              if (currentStep?.workflow_steps) {
-                return (
-                  <DevModeBanner
-                    executionId={id!}
-                    executionStepId={currentStep.id}
-                    stepConfig={currentStep.workflow_steps.config || {}}
-                    stepType={currentStep.workflow_steps.step_type || ''}
-                    actionType={currentStep.workflow_steps.action_type || ''}
-                    decisionNodeType={currentStep.workflow_steps.decision_node_type || ''}
-                    workflowStepId={currentStep.workflow_steps.id}
-                    companyId={companyId}
-                  />
-                );
-              }
-              return null;
-            })()}
-            <ScrollArea ref={mainScrollAreaRef} className="flex-1 min-w-0 w-full max-w-full overflow-x-hidden">
-              <div className="p-2 sm:p-3 md:p-4 lg:p-6 min-w-0 w-full max-w-full">
-                <div className="w-full min-w-0 max-w-full box-border">
-                  {viewingHistoricalStep ? (() => {
-                    const step = visibleSteps.find(s => s.id === viewingHistoricalStep);
-                    // Only show HistoricalStepView for completed steps
-                    // For running steps, use ExecutionDataPanel to show the interactive form
-                    if (step?.status === "completed") {
-                      return (
-                        <HistoricalStepView
-                          step={step}
-                          executionData={executionData}
-                          onReturnToActive={() => {
-                            userChosenStepIdRef.current = null;
-                            setViewingHistoricalStep(null);
-                          }}
-                          onFileView={handleFileView}
-                          isExecutionCompleted={execution?.status === "completed"}
-                        />
-                      );
-                    }
-                    // For running steps, show ExecutionDataPanel with selectedStepId
-                    return (
-                      <ExecutionDataPanel
-                        executionId={id!}
-                        onFileView={handleFileView}
-                        selectedStepId={viewingHistoricalStep}
-                        apiKey={apiKey}
-                        executionSteps={executionSteps}
-                        connections={connections}
-                        executionDataStructures={executionData}
-                      />
-                    );
-                  })() : (
-                    <ExecutionDataPanel
-                      executionId={id!}
-                      onFileView={handleFileView}
-                      selectedStepId={null}
-                      apiKey={apiKey}
-                      executionSteps={executionSteps}
-                      connections={connections}
-                      executionDataStructures={executionData}
-                    />
-                  )}
-                </div>
-              </div>
-            </ScrollArea>
+      {isMobile ? (
+        <>
+          <div className="flex-1 min-h-0 w-full overflow-hidden">
+            {renderMainContent()}
           </div>
-        </ResizablePanel>
 
-        {isFileViewerOpen && (
-          <>
-            <ResizableHandle withHandle />
-            <ResizablePanel
-              key="file-viewer-panel"
-              ref={fileViewerPanelRef}
-              defaultSize={Math.min(getFileViewerSize(), isTimelineCollapsed ? 65 : 50)}
-              minSize={25}
-              maxSize={isTimelineCollapsed ? 65 : 50}
-              collapsible={false}
-              className="min-w-0"
-            >
+          <Drawer open={isMobileTimelineOpen} onOpenChange={setIsMobileTimelineOpen}>
+            <DrawerContent className="max-h-[85vh]">
+              <DrawerHeader>
+                <DrawerTitle>{t("executionTimeline.timeline")}</DrawerTitle>
+              </DrawerHeader>
+              <div className="h-[calc(85vh-4rem)] overflow-hidden">
+                <ExecutionTimeline
+                  execution={execution}
+                  visibleSteps={visibleSteps}
+                  logs={executionLogs}
+                  viewingHistoricalStep={viewingHistoricalStep}
+                  onStepClick={handleStepClick}
+                  onLogsClick={setSelectedStepForLogs}
+                  isCollapsed={false}
+                  onToggleCollapse={() => setIsMobileTimelineOpen(false)}
+                  layout="drawer"
+                />
+              </div>
+            </DrawerContent>
+          </Drawer>
+
+          <Sheet open={isFileViewerOpen} onOpenChange={(open) => !open && handleCloseFileViewer()}>
+            <SheetContent side="bottom" className="h-[95vh] p-0">
               {viewedFile && (
-                <div className="h-full p-2 sm:p-4 bg-background overflow-hidden flex flex-col min-h-0 w-full max-w-full">
-                  <div className="flex-1 min-h-0 w-full max-w-full min-w-0">
-                    <FileViewer
-                      fileUrl={viewedFile.url}
-                      fileName={viewedFile.name}
-                      onClose={handleCloseFileViewer}
-                    />
-                  </div>
+                <div className="h-full p-2 bg-background overflow-hidden flex flex-col min-h-0 w-full">
+                  <FileViewer
+                    fileUrl={viewedFile.url}
+                    fileName={viewedFile.name}
+                    onClose={handleCloseFileViewer}
+                  />
                 </div>
               )}
-            </ResizablePanel>
-          </>
-        )}
-      </ResizablePanelGroup>
+            </SheetContent>
+          </Sheet>
+        </>
+      ) : (
+        <ResizablePanelGroup
+          direction="horizontal"
+          className="flex-1 min-h-0 w-full max-w-full overflow-hidden"
+          autoSaveId={`execution-detail-panels-${isTimelineCollapsed ? 'collapsed' : 'expanded'}-${isFileViewerOpen ? 'file-open' : 'file-closed'}`}
+        >
+          <ResizablePanel
+            ref={timelinePanelRef}
+            defaultSize={isTimelineCollapsed ? 3 : Math.min(getTimelinePanelSize() || 25, 40)}
+            minSize={3}
+            maxSize={isTimelineCollapsed ? 3 : 40}
+            collapsible={true}
+            collapsedSize={3}
+            className="min-w-0"
+            style={{ overflow: 'visible' }}
+          >
+            <ExecutionTimeline
+              execution={execution}
+              visibleSteps={visibleSteps}
+              logs={executionLogs}
+              viewingHistoricalStep={viewingHistoricalStep}
+              onStepClick={handleStepClick}
+              onLogsClick={setSelectedStepForLogs}
+              isCollapsed={isTimelineCollapsed}
+              onToggleCollapse={toggleTimeline}
+            />
+          </ResizablePanel>
 
-      {/* Workflow Canvas Dialog */}
+          <ResizableHandle withHandle />
+
+          <ResizablePanel
+            ref={middlePanelRef}
+            defaultSize={getMiddlePanelSize()}
+            minSize={isFileViewerOpen ? 30 : 35}
+            maxSize={isFileViewerOpen ? (isTimelineCollapsed ? 65 : 70) : (isTimelineCollapsed ? 97 : 85)}
+            className="min-w-0"
+          >
+            {renderMainContent()}
+          </ResizablePanel>
+
+          {isFileViewerOpen && (
+            <>
+              <ResizableHandle withHandle />
+              <ResizablePanel
+                key="file-viewer-panel"
+                ref={fileViewerPanelRef}
+                defaultSize={Math.min(getFileViewerSize(), isTimelineCollapsed ? 65 : 50)}
+                minSize={25}
+                maxSize={isTimelineCollapsed ? 65 : 50}
+                collapsible={false}
+                className="min-w-0"
+              >
+                {viewedFile && (
+                  <div className="h-full p-2 sm:p-4 bg-background overflow-hidden flex flex-col min-h-0 w-full max-w-full">
+                    <div className="flex-1 min-h-0 w-full max-w-full min-w-0">
+                      <FileViewer
+                        fileUrl={viewedFile.url}
+                        fileName={viewedFile.name}
+                        onClose={handleCloseFileViewer}
+                      />
+                    </div>
+                  </div>
+                )}
+              </ResizablePanel>
+            </>
+          )}
+        </ResizablePanelGroup>
+      )}
+
       {execution?.workflow_id && (
         <WorkflowCanvasDialog
           open={isCanvasDialogOpen}

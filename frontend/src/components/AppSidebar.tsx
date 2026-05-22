@@ -67,7 +67,8 @@ const menuSections: { groupLabelKey: string; items: MenuItem[] }[] = [
 ];
 
 export function AppSidebar() {
-  const { open } = useSidebar();
+  const { open, isMobile } = useSidebar();
+  const showLabels = open || isMobile;
   const {
     signOut,
     profile,
@@ -102,11 +103,9 @@ export function AppSidebar() {
   };
   const customLogoUrl = companyBranding?.internal_logo_url ?? "";
   const shouldUseFallbackLogo = logoLoadFailed || !customLogoUrl;
-  const sidebarLogoSrc = shouldUseFallbackLogo
-    ? (open ? "/logo.png" : "/favicon.png")
-    : customLogoUrl;
-  const sidebarLogoAlt = open ? "Company logo" : "Company icon";
-  const showSidebarLogo = open || shouldUseFallbackLogo;
+  const sidebarLogoSrc = (open || isMobile) ? (shouldUseFallbackLogo ? "/logo.png" : customLogoUrl) : (shouldUseFallbackLogo ? "/favicon.png" : customLogoUrl);
+  const sidebarLogoAlt = (open || isMobile) ? "Company logo" : "Company icon";
+  const showSidebarLogo = open || isMobile || shouldUseFallbackLogo;
 
   const handleLogoError = () => {
     if (!logoLoadFailed) {
@@ -138,7 +137,7 @@ export function AppSidebar() {
           <SidebarGroup>
             <SidebarGroupContent>
               <div className="mb-4 pb-4 border-b border-sidebar-border">
-                {open ? (
+                {(open || isMobile) ? (
                   <Button
                     onClick={() => setStartWorkflowDialogOpen(true)}
                     className="w-full bg-brand-gradient text-white hover:opacity-90 shadow-md transition-all"
@@ -187,7 +186,7 @@ export function AppSidebar() {
                           >
                             <Link to={item.url}>
                               <item.icon className="h-4 w-4" />
-                              {open && <span>{t(item.titleKey)}</span>}
+                              {showLabels && <span>{t(item.titleKey)}</span>}
                             </Link>
                           </SidebarMenuButton>
                         </SidebarMenuItem>
@@ -198,7 +197,7 @@ export function AppSidebar() {
                         <SidebarMenuButton asChild isActive={location.pathname === "/agent-usage"}>
                           <Link to="/agent-usage">
                             <BarChart2 className="h-4 w-4" />
-                            {open && <span>{t("sidebar.agentUsage")}</span>}
+                            {showLabels && <span>{t("sidebar.agentUsage")}</span>}
                           </Link>
                         </SidebarMenuButton>
                       </SidebarMenuItem>
@@ -218,7 +217,7 @@ export function AppSidebar() {
                     <SidebarMenuButton asChild isActive={location.pathname === "/agent-configurations"}>
                       <Link to="/agent-configurations">
                         <Bot className="h-4 w-4" />
-                        {open && <span>{t("sidebar.agentConfigurations")}</span>}
+                        {showLabels && <span>{t("sidebar.agentConfigurations")}</span>}
                       </Link>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
@@ -226,7 +225,7 @@ export function AppSidebar() {
                     <SidebarMenuButton asChild isActive={location.pathname === "/companies"}>
                       <Link to="/companies">
                         <Building2 className="h-4 w-4" />
-                        {open && <span>{t("sidebar.companies")}</span>}
+                        {showLabels && <span>{t("sidebar.companies")}</span>}
                       </Link>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
@@ -234,7 +233,7 @@ export function AppSidebar() {
                     <SidebarMenuButton asChild isActive={location.pathname === "/archived-records"}>
                       <Link to="/archived-records">
                         <Archive className="h-4 w-4" />
-                        {open && <span>{t("sidebar.archivedRecords")}</span>}
+                        {showLabels && <span>{t("sidebar.archivedRecords")}</span>}
                       </Link>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
@@ -295,7 +294,7 @@ export function AppSidebar() {
               <LogOut className="h-4 w-4" />
             </Button>
           </div>
-          {open && profile && (
+          {showLabels && profile && (
             <div
               className="mt-1.5 px-1 text-center text-xs text-muted-foreground truncate flex flex-col items-center gap-0.5"
               title={[

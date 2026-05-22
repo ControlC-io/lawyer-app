@@ -1,3 +1,4 @@
+import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -17,6 +18,7 @@ interface ExecutionTimelineProps {
   onLogsClick: (stepId: string) => void;
   isCollapsed: boolean;
   onToggleCollapse: () => void;
+  layout?: "panel" | "drawer";
 }
 
 export const ExecutionTimeline = ({
@@ -27,7 +29,8 @@ export const ExecutionTimeline = ({
   onStepClick,
   onLogsClick,
   isCollapsed,
-  onToggleCollapse
+  onToggleCollapse,
+  layout = "panel",
 }: ExecutionTimelineProps) => {
   const { t, language } = useLanguage();
   const dateLocale = language === "fr" ? fr : enUS;
@@ -80,7 +83,7 @@ export const ExecutionTimeline = ({
     return null;
   };
 
-  if (isCollapsed) {
+  if (layout === "panel" && isCollapsed) {
     return (
       <div className="h-full overflow-hidden flex flex-col border-r bg-muted/30 w-full min-w-0">
         <Button
@@ -97,7 +100,11 @@ export const ExecutionTimeline = ({
   }
 
   return (
-    <div className="h-full flex flex-col w-full min-w-0 relative" style={{ overflow: 'visible' }}>
+    <div className={cn(
+      "h-full flex flex-col w-full min-w-0 relative",
+      layout === "panel" ? "" : "border-0"
+    )} style={{ overflow: layout === "panel" ? "visible" : "hidden" }}>
+      {layout === "panel" && (
       <div className="absolute top-2 -right-3 z-20" style={{ pointerEvents: 'auto' }}>
         <Button
           variant="ghost"
@@ -109,7 +116,11 @@ export const ExecutionTimeline = ({
           <ChevronLeft className="h-3.5 w-3.5" />
         </Button>
       </div>
-      <div className="h-full overflow-hidden flex flex-col border-r">
+      )}
+      <div className={cn(
+        "h-full overflow-hidden flex flex-col",
+        layout === "panel" ? "border-r" : ""
+      )}>
         <ScrollArea className="flex-1 min-w-0">
           <div className="p-3 sm:p-4 min-w-0 w-full max-w-full">
             {/* Execution Overview */}

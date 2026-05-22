@@ -5,10 +5,12 @@ import { useCompanyId } from "@/hooks/useCompanyId";
 import { useAuth } from "@/contexts/AuthContext";
 import { ExecutionFilters, FilterType } from "@/components/execution/list/ExecutionFilters";
 import { CategorySidebar, CategoryNode } from "@/components/execution/list/CategorySidebar";
+import { WorkflowMobilePicker } from "@/components/execution/list/WorkflowMobilePicker";
 import { ExecutionList } from "@/components/execution/list/ExecutionList";
 import { KanbanView } from "@/components/execution/list/KanbanView";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { useIsMobile } from "@/hooks/use-mobile";
 
 // Define types for our data
 interface Category {
@@ -397,16 +399,17 @@ const WorkflowExecutions = () => {
   }, [executionStepsForKanban, activeFilter, profile?.id, userGroups]);
 
   const { t } = useLanguage();
+  const isMobile = useIsMobile();
 
   if (isLoading) {
     return <div className="p-6">{t("workflowExecutions.loadingExecutions")}</div>;
   }
 
   return (
-    <div className="h-full flex flex-col p-4 gap-4 overflow-hidden">
+    <div className="h-full flex flex-col p-3 md:p-4 gap-4 overflow-hidden">
       <div className="flex-shrink-0">
-        <h1 className="text-3xl font-bold mb-1">{t("workflowExecutions.title")}</h1>
-        <p className="text-muted-foreground mb-4">{t("workflowExecutions.subtitle")}</p>
+        <h1 className="text-xl sm:text-2xl md:text-3xl font-bold mb-0.5 sm:mb-1">{t("workflowExecutions.title")}</h1>
+        <p className="text-muted-foreground text-sm mb-2 sm:text-base sm:mb-4">{t("workflowExecutions.subtitle")}</p>
 
         <ExecutionFilters
           activeFilter={activeFilter}
@@ -420,6 +423,37 @@ const WorkflowExecutions = () => {
       </div>
 
       <div className="flex-1 min-h-0 border rounded-lg overflow-hidden bg-background shadow-sm">
+        {isMobile ? (
+          <div className="h-full flex flex-col overflow-hidden">
+            <WorkflowMobilePicker
+              categories={processedData.categories}
+              uncategorizedWorkflows={processedData.uncategorizedWorkflows}
+              uncategorizedCount={processedData.uncategorizedCount}
+              uncategorizedCategoryId={UNCATEGORIZED_CATEGORY_ID}
+              selectedCategoryId={selectedCategoryId}
+              selectedWorkflowId={selectedWorkflowId}
+              onSelectCategory={(id) => {
+                setSelectedCategoryId(id);
+                if (id !== selectedCategoryId) {
+                  setSelectedWorkflowId(null);
+                }
+              }}
+              onSelectWorkflow={setSelectedWorkflowId}
+              totalCount={processedData.counts[activeFilter]}
+            />
+            <div className="flex-1 min-h-0 overflow-hidden">
+              {showKanban ? (
+                <KanbanView
+                  executions={processedData.filtered}
+                  workflowStatuses={workflowStatuses!}
+                  executionSteps={filteredExecutionSteps}
+                />
+              ) : (
+                <ExecutionList executions={processedData.filtered} />
+              )}
+            </div>
+          </div>
+        ) : (
         <ResizablePanelGroup direction="horizontal">
           <ResizablePanel defaultSize={20} minSize={15} maxSize={30}>
             <CategorySidebar
@@ -456,6 +490,7 @@ const WorkflowExecutions = () => {
             </div>
           </ResizablePanel>
         </ResizablePanelGroup>
+        )}
       </div>
     </div>
   );

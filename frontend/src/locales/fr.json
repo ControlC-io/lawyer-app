@@ -779,7 +779,11 @@
     "startedByMe": "Démarrées par moi",
     "assignedToMe": "Qui me sont assignées",
     "showCompleted": "Afficher les exécutions terminées",
+    "showCompletedShort": "Afficher terminées",
     "searchPlaceholder": "Rechercher par workflow ou nom d'exécution..."
+  },
+  "workflowMobilePicker": {
+    "uncategorized": "Sans catégorie"
   },
   "executionTimeline": {
     "timeline": "Chronologie",

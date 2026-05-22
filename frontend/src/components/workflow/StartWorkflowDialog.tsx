@@ -19,6 +19,7 @@ import { CategoryCard } from "@/components/workflow/CategoryCard";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Folder, Search, Workflow as WorkflowIcon } from "lucide-react";
 import { renderIcon } from "@/lib/iconUtils";
+import { useSidebar } from "@/components/ui/sidebar";
 
 interface StartWorkflowDialogProps {
   open: boolean;
@@ -46,6 +47,7 @@ export function StartWorkflowDialog({ open, onOpenChange }: StartWorkflowDialogP
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const companyId = useCompanyId();
+  const { setOpenMobile } = useSidebar();
   const [searchQuery, setSearchQuery] = useState("");
   const [currentCategoryId, setCurrentCategoryId] = useState<string | null>(null);
   const [categoryBreadcrumb, setCategoryBreadcrumb] = useState<WorkflowCategory[]>([]);
@@ -122,6 +124,7 @@ export function StartWorkflowDialog({ open, onOpenChange }: StartWorkflowDialogP
         description: "The workflow execution has been created successfully",
       });
       onOpenChange(false);
+      setOpenMobile(false);
       navigate(`/executions/${execution.id}`);
     },
     onError: (error: any) => {
