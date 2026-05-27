@@ -973,6 +973,10 @@ export const ExecutionDataPanel = ({
   const stepExplanation = normalizeStepExplanation(runningStep.workflow_steps?.config?.explanation);
   const agentDecisionChoice = stepData.agent_decision_choice;
   const agentDecisionReason = stepData.agent_decision_reason;
+  const agentSuggestedOutput =
+    agentDecisionChoice && agentDecisionChoice !== 'awaiting_validation'
+      ? agentDecisionChoice
+      : null;
   // For Agent_Human, wait for agent decision before allowing human interaction
   const isWaitingForAgentDecision = isAgentPlusHumanDecision && !agentDecisionChoice;
   const isApiProcessedAction = isAutomaticAction || isAgentAction || isEmailAction || isAutomaticFileStep || isAgentDecision || isWaitingForAgentDecision;
@@ -1948,7 +1952,7 @@ export const ExecutionDataPanel = ({
                           const buttonStyle = runningStep.workflow_steps?.config?.output_styles?.[outputName] || (connIndex === 0 ? "primary" : "secondary");
                           const buttonVariant = buttonStyle === "primary" ? "default" : "outline";
                           const isSecondaryOutput = buttonStyle === "secondary";
-                          const isAgentSuggestedChoice = isAgentPlusHumanDecision && !!agentDecisionChoice && agentDecisionChoice === outputName;
+                          const isAgentSuggestedChoice = isAgentPlusHumanDecision && !!agentSuggestedOutput && agentSuggestedOutput === outputName;
                           return <Button key={`group-${outputName}`} size="sm" variant={buttonVariant} onClick={async () => {
                             if (!canCompleteStep) {
                               toast({
@@ -2107,7 +2111,7 @@ export const ExecutionDataPanel = ({
               <div className="bg-blue-50 border border-blue-200 dark:bg-blue-950/20 dark:border-blue-800 rounded-md p-2 sm:p-3">
                 <div className="flex items-center gap-2 mb-1">
                   <Badge variant="secondary" className="text-xs">
-                    {agentDecisionChoice}
+                    {agentSuggestedOutput ?? 'Review required'}
                   </Badge>
                   {stepData.agent_decision_at && (
                     <span className="text-xs text-muted-foreground">

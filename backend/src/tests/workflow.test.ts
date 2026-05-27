@@ -16,7 +16,7 @@ jest.mock('../lib/prisma', () => ({
     workflow: { findFirst: jest.fn(), findUnique: jest.fn(), create: jest.fn() },
     workflowExecution: { create: jest.fn(), findUnique: jest.fn(), findFirst: jest.fn(), update: jest.fn(), updateMany: jest.fn() },
     workflowExecutionData: { create: jest.fn(), findFirst: jest.fn(), findMany: jest.fn(), update: jest.fn() },
-    workflowStep: { findFirst: jest.fn(), findMany: jest.fn(), update: jest.fn(), create: jest.fn() },
+    workflowStep: { findFirst: jest.fn(), findMany: jest.fn(), findUnique: jest.fn(), update: jest.fn(), create: jest.fn() },
     workflowExecutionStep: { create: jest.fn(), createMany: jest.fn(), findFirst: jest.fn(), update: jest.fn(), updateMany: jest.fn() },
     workflowConnection: { findMany: jest.fn() },
     agentConfiguration: { findUnique: jest.fn() },
@@ -910,6 +910,17 @@ describe('Workflow Endpoints', () => {
   });
 
   describe('POST /api/workflows/executions/:executionId/steps/:stepId/decision', () => {
+    const mockDecisionConnections = (outputs: string[] = ['Approved']) => {
+      (prisma.workflowStep.findUnique as jest.Mock).mockResolvedValue({ workflow_id: 'wf-123' });
+      (prisma.workflowConnection.findMany as jest.Mock).mockResolvedValue(
+        outputs.map((output_name, index) => ({
+          source_step_id: 'step-decision',
+          target_step_id: `step-next-${index}`,
+          output_name,
+        }))
+      );
+    };
+
     it('should make a decision and advance workflow', async () => {
       (prisma.workflowExecutionStep.findFirst as jest.Mock).mockResolvedValue({
         id: 'ex-step-123',
@@ -917,10 +928,13 @@ describe('Workflow Endpoints', () => {
         step_id: 'step-decision',
         status: 'running',
         company_id: 'company-123',
-        step: { step_type: 'decision' }
+        started_at: new Date(),
+        step: { id: 'step-decision', step_type: 'decision' },
       });
+      mockDecisionConnections(['Approved']);
       (workflowService.getExecutionDataSnapshot as jest.Mock).mockResolvedValue({});
       (workflowService.advanceWorkflow as jest.Mock).mockResolvedValue(['step-next']);
+      (prisma.workflowExecution.findUnique as jest.Mock).mockResolvedValue({ status: 'running' });
 
       const response = await request(app)
         .post('/api/workflows/executions/exec-123/steps/ex-step-123/decision')
@@ -934,6 +948,8 @@ describe('Workflow Endpoints', () => {
       expect(prisma.workflowExecutionStep.update).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
+            decision_choice: 'Approved',
+            status: 'completed',
             step_data: expect.objectContaining({
               _step_meta: expect.objectContaining({
                 closed_by_source: 'company_api_key',
@@ -943,6 +959,30 @@ describe('Workflow Endpoints', () => {
           }),
         })
       );
+    });
+
+    it('should return 400 for invalid decision_choice and not complete the step', async () => {
+      (prisma.workflowExecutionStep.findFirst as jest.Mock).mockResolvedValue({
+        id: 'ex-step-123',
+        execution_id: 'exec-123',
+        step_id: 'step-decision',
+        status: 'running',
+        company_id: 'company-123',
+        started_at: new Date(),
+        step: { id: 'step-decision', step_type: 'decision' },
+      });
+      mockDecisionConnections(['Yes', 'No']);
+      (workflowService.getExecutionDataSnapshot as jest.Mock).mockResolvedValue({});
+
+      const response = await request(app)
+        .post('/api/workflows/executions/exec-123/steps/ex-step-123/decision')
+        .set(mockAuthHeaders)
+        .send({ decision_choice: 'Maybe' });
+
+      expect(response.status).toBe(400);
+      expect(response.body.valid_choices).toEqual(['Yes', 'No']);
+      expect(workflowService.advanceWorkflow).not.toHaveBeenCalled();
+      expect(prisma.workflowExecutionStep.update).not.toHaveBeenCalled();
     });
 
     it('should return 404 when step is not found', async () => {
@@ -1009,8 +1049,10 @@ describe('Workflow Endpoints', () => {
         step_id: 'step-decision',
         status: 'running',
         company_id: 'company-123',
-        step: { step_type: 'decision', decision_node_type: 'Agent_Human' },
+        step: { id: 'step-decision', step_type: 'decision', decision_node_type: 'Agent_Human' },
       });
+      (prisma.workflowStep.findUnique as jest.Mock).mockResolvedValue({ workflow_id: 'wf-123' });
+      (prisma.workflowConnection.findMany as jest.Mock).mockResolvedValue([]);
       (workflowService.getExecutionDataSnapshot as jest.Mock).mockResolvedValue({});
       const response = await request(app)
         .post('/api/workflows/executions/exec-123/steps/ex-step-123/decision')
@@ -1019,9 +1061,83 @@ describe('Workflow Endpoints', () => {
       expect(response.status).toBe(200);
       expect(response.body.requires_human_validation).toBe(true);
       expect(response.body.agent_decision).toBe('awaiting_validation');
+      expect(workflowService.advanceWorkflow).not.toHaveBeenCalled();
       expect(prisma.workflowExecutionStep.update).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({ step_data: expect.objectContaining({ agent_decision_choice: 'awaiting_validation' }) }),
+        })
+      );
+    });
+
+    it('should store Agent+Human agent suggestion via API key without advancing', async () => {
+      (prisma.workflowExecutionStep.findFirst as jest.Mock).mockResolvedValue({
+        id: 'ex-step-123',
+        execution_id: 'exec-123',
+        step_id: 'step-decision',
+        status: 'running',
+        company_id: 'company-123',
+        step: { id: 'step-decision', step_type: 'decision', decision_node_type: 'Agent_Human' },
+      });
+      mockDecisionConnections(['Yes', 'No']);
+      (workflowService.getExecutionDataSnapshot as jest.Mock).mockResolvedValue({});
+
+      const response = await request(app)
+        .post('/api/workflows/executions/exec-123/steps/ex-step-123/decision')
+        .set(mockAuthHeaders)
+        .send({ decision_choice: 'Yes', decision_reason: 'Looks good' });
+
+      expect(response.status).toBe(200);
+      expect(response.body.requires_human_validation).toBe(true);
+      expect(response.body.agent_decision).toBe('Yes');
+      expect(workflowService.advanceWorkflow).not.toHaveBeenCalled();
+      expect(prisma.workflowExecutionStep.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            step_data: expect.objectContaining({
+              agent_decision_choice: 'Yes',
+              agent_decision_reason: 'Looks good',
+            }),
+          }),
+        })
+      );
+    });
+
+    it('should complete Agent+Human decision and advance when confirmed by user JWT', async () => {
+      const jwt = require('jsonwebtoken');
+      (jwt.verify as jest.Mock).mockReturnValue({ userId: 'user-1' });
+      (prisma.user.findUnique as jest.Mock).mockResolvedValue({
+        id: 'user-1',
+        email: 'user@example.com',
+        profile: { admin_role: { super_admin: false } },
+      });
+      (prisma.workflowExecutionStep.findFirst as jest.Mock).mockResolvedValue({
+        id: 'ex-step-123',
+        execution_id: 'exec-123',
+        step_id: 'step-decision',
+        status: 'running',
+        company_id: 'company-123',
+        started_at: new Date(),
+        step: { id: 'step-decision', step_type: 'decision', decision_node_type: 'Agent_Human' },
+      });
+      mockDecisionConnections(['Yes', 'No']);
+      (workflowService.getExecutionDataSnapshot as jest.Mock).mockResolvedValue({});
+      (workflowService.advanceWorkflow as jest.Mock).mockResolvedValue(['step-next']);
+      (prisma.workflowExecution.findUnique as jest.Mock).mockResolvedValue({ status: 'running' });
+
+      const response = await request(app)
+        .post('/api/workflows/executions/exec-123/steps/ex-step-123/decision')
+        .set('Authorization', 'Bearer token')
+        .send({ decision_choice: 'Yes' });
+
+      expect(response.status).toBe(200);
+      expect(response.body.decision_choice).toBe('Yes');
+      expect(workflowService.advanceWorkflow).toHaveBeenCalledWith('exec-123', 'ex-step-123', 'company-123', 'Yes');
+      expect(prisma.workflowExecutionStep.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            decision_choice: 'Yes',
+            status: 'completed',
+          }),
         })
       );
     });

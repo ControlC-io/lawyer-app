@@ -104,6 +104,49 @@ function attachStepCompletionMeta(
   };
 }
 
+function normalizeDecisionOutputName(outputName: string | null | undefined): string {
+  return (outputName ?? 'default').trim();
+}
+
+async function getWiredDecisionChoices(workflowStepId: string): Promise<string[]> {
+  const step = await prisma.workflowStep.findUnique({
+    where: { id: workflowStepId },
+    select: { workflow_id: true },
+  });
+  if (!step) return [];
+
+  const connections = await prisma.workflowConnection.findMany({
+    where: {
+      workflow_id: step.workflow_id,
+      source_step_id: workflowStepId,
+    },
+    select: { output_name: true },
+  });
+
+  const seen = new Set<string>();
+  const choices: string[] = [];
+  for (const connection of connections) {
+    const name = normalizeDecisionOutputName(connection.output_name);
+    const key = name.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      choices.push(name);
+    }
+  }
+  return choices;
+}
+
+function isValidDecisionChoice(choice: string, validChoices: string[]): boolean {
+  const choiceLower = choice.trim().toLowerCase();
+  return validChoices.some((validChoice) => validChoice.trim().toLowerCase() === choiceLower);
+}
+
+function resolveCanonicalDecisionChoice(choice: string, validChoices: string[]): string {
+  const choiceLower = choice.trim().toLowerCase();
+  const match = validChoices.find((validChoice) => validChoice.trim().toLowerCase() === choiceLower);
+  return match ?? choice.trim();
+}
+
 function getStepClosedByLabel(stepData: unknown): string | null {
   if (!stepData || typeof stepData !== 'object' || Array.isArray(stepData)) return null;
 
@@ -854,7 +897,13 @@ export const workflowController = {
 
         if (isAgentDecision) {
           requestBody.condition = config.condition || '';
-          requestBody.outputs = Array.isArray(config.outputs) ? config.outputs : [];
+          const wiredOutputs = await getWiredDecisionChoices(workflowStep.id);
+          requestBody.outputs =
+            wiredOutputs.length > 0
+              ? wiredOutputs
+              : Array.isArray(config.outputs)
+                ? config.outputs
+                : [];
         }
       }
 
@@ -1093,14 +1142,14 @@ export const workflowController = {
       // Get current data snapshot
       const dataSnapshot = await workflowService.getExecutionDataSnapshot(executionId);
 
-      // Check if this is "Agent_Human" decision
-      const isAgentDecisionNode = workflowStep.decision_node_type === 'Agent_Human';
+      const validChoices = await getWiredDecisionChoices(workflowStep.id);
+      const isAgentHumanDecision = workflowStep.decision_node_type === 'Agent_Human';
+      const isAgentCallback = !!req.company?.id && !req.user?.id;
 
-      if (isAgentDecisionNode && decision_choice === 'awaiting_validation') {
-        // Store agent decision but keep step running
+      const storeAgentSuggestion = async (suggestedChoice: string) => {
         const stepDataWithAgentDecision = {
           ...dataSnapshot,
-          agent_decision_choice: decision_choice,
+          agent_decision_choice: suggestedChoice,
           agent_decision_at: new Date().toISOString(),
           agent_decision_reason: decision_reason || null,
         };
@@ -1115,13 +1164,63 @@ export const workflowController = {
         return res.json({
           success: true,
           message: 'Agent decision recorded. Awaiting human validation.',
-          agent_decision: decision_choice,
+          agent_decision: suggestedChoice,
           execution_status: 'running',
           requires_human_validation: true,
         });
+      };
+
+      if (isAgentHumanDecision && isAgentCallback) {
+        if (decision_choice === 'awaiting_validation') {
+          return storeAgentSuggestion(decision_choice);
+        }
+
+        if (validChoices.length === 0) {
+          return res.status(400).json({
+            error: 'Invalid decision choice',
+            details: 'This decision step has no wired outgoing connections',
+            valid_choices: [],
+          });
+        }
+
+        if (!isValidDecisionChoice(decision_choice, validChoices)) {
+          return res.status(400).json({
+            error: 'Invalid decision choice',
+            details: `decision_choice must match a wired output name. Received: ${decision_choice}`,
+            valid_choices: validChoices,
+          });
+        }
+
+        const suggestedChoice = resolveCanonicalDecisionChoice(decision_choice, validChoices);
+        return storeAgentSuggestion(suggestedChoice);
       }
 
-      // Regular agent decision - complete immediately
+      if (decision_choice === 'awaiting_validation') {
+        return res.status(400).json({
+          error: 'Invalid decision choice',
+          details: 'awaiting_validation is only valid for Agent+Human agent callbacks',
+          valid_choices: validChoices,
+        });
+      }
+
+      if (validChoices.length === 0) {
+        return res.status(400).json({
+          error: 'Invalid decision choice',
+          details: 'This decision step has no wired outgoing connections',
+          valid_choices: [],
+        });
+      }
+
+      if (!isValidDecisionChoice(decision_choice, validChoices)) {
+        return res.status(400).json({
+          error: 'Invalid decision choice',
+          details: `decision_choice must match a wired output name. Received: ${decision_choice}`,
+          valid_choices: validChoices,
+        });
+      }
+
+      const canonicalChoice = resolveCanonicalDecisionChoice(decision_choice, validChoices);
+
       const stepDataWithComment = {
         ...dataSnapshot,
         decision_comment: decision_comment?.trim() || null,
@@ -1141,19 +1240,18 @@ export const workflowController = {
       await prisma.workflowExecutionStep.update({
         where: { id: stepId },
         data: {
-          decision_choice,
+          decision_choice: canonicalChoice,
           status: 'completed',
           completed_at: completedAt,
           step_data: stepDataWithMeta,
         },
       });
 
-      // Advance workflow with decision choice
       const triggeredSteps = await workflowService.advanceWorkflow(
         executionId,
         stepId,
         executionStep.company_id!,
-        decision_choice
+        canonicalChoice
       );
 
       const execution = await prisma.workflowExecution.findUnique({
@@ -1161,12 +1259,19 @@ export const workflowController = {
         select: { status: true },
       });
 
+      const executionStatus = execution?.status ?? 'running';
+      const warning =
+        triggeredSteps.length === 0 && executionStatus === 'completed'
+          ? 'No matching outgoing connection; execution completed'
+          : undefined;
+
       return res.json({
         success: true,
         message: 'Decision recorded and workflow advanced',
-        decision_choice,
+        decision_choice: canonicalChoice,
         triggered_steps: triggeredSteps,
-        execution_status: execution?.status ?? 'running',
+        execution_status: executionStatus,
+        ...(warning ? { warning } : {}),
       });
     } catch (error) {
       console.error('Error making decision:', error);

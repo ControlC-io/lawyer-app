@@ -110,14 +110,14 @@ export function registerExecutionTools(server: McpServer) {
       api_key: apiKeySchema,
       execution_id: z.string().describe('Execution ID'),
       step_id: z.string().describe('Execution step ID (decision step)'),
-      choice: z.string().describe('The decision choice value'),
+      decision_choice: z.string().describe('The decision choice value (must match a wired output name)'),
     },
-    async ({ api_key, execution_id, step_id, choice }) => {
+    async ({ api_key, execution_id, step_id, decision_choice }) => {
       try {
         const api = createApiClient(api_key);
         const res = await api.post(
           `/workflows/executions/${execution_id}/steps/${step_id}/decision`,
-          { choice },
+          { decision_choice },
         );
         return jsonResult(res.data);
       } catch (err) {
