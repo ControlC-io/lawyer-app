@@ -36,10 +36,13 @@ function backEdgeKey(sourceStepId: string, targetStepId: string): string {
 }
 
 // Classify connections as forward or back-edges via DFS from start nodes.
-// A back-edge points to a node currently on the recursion stack — i.e., it
-// closes a cycle in the discovered DAG. Without this, joins on a node that
-// also has a loop-back incoming connection can never be satisfied on the
-// first visit, since the loop source has not yet executed.
+// A back-edge points to a node currently on the DFS recursion stack — i.e.,
+// it closes a cycle to an ancestor on the current traversal path. Without
+// this, joins on a node that also has a loop-back incoming connection can
+// never be satisfied on the first visit, since the loop source has not yet
+// executed. Callers should pass `steps` and `connections` in a deterministic
+// order (e.g. by created_at) so classification is stable across runs when a
+// cycle could plausibly be opened from either side.
 function computeBackEdges(
   steps: { id: string; step_type: string | null }[],
   connections: { source_step_id: string; target_step_id: string }[]
@@ -460,14 +463,19 @@ export const workflowService = {
         throw new Error('Workflow step not found');
       }
 
-      // Get all connections for this workflow
+      // Get all connections for this workflow. Order matters: computeBackEdges
+      // traverses children in the order they appear here, so for cycles that
+      // could be opened from either side (e.g. a diamond+loop), classification
+      // is deterministic and aligns with the order edges were authored.
       const connections = await prisma.workflowConnection.findMany({
         where: { workflow_id: step.workflow_id },
+        orderBy: [{ created_at: 'asc' }, { id: 'asc' }],
       });
 
       const workflowSteps = (await prisma.workflowStep.findMany({
         where: { workflow_id: step.workflow_id },
         select: { id: true, step_type: true },
+        orderBy: [{ created_at: 'asc' }, { id: 'asc' }],
       })) ?? [];
       const startStepIds = new Set(
         workflowSteps
