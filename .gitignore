@@ -65,6 +65,7 @@ dumps/
 CLAUDE.md
 
 docs/plans/*
+docs/superpowers/*
 
 # Git worktrees
 .worktrees/

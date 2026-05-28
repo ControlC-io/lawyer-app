@@ -2162,6 +2162,7 @@ export const ExecutionDataPanel = ({
             const formFields = (cfg?.form_fields || {}) as Record<string, any>;
             return <div key={eds.id} className="space-y-4 min-w-0 overflow-hidden">
               <h3 className="text-lg font-semibold">{ds?.name}</h3>
+              <div className="grid grid-cols-1 gap-4 min-w-0">
               {fields.filter((f: any) => !f.parent_item_id).filter((field: any) => {
                 const fieldValue = values[field.id]?.value;
                 return hasValue(fieldValue);
@@ -2191,6 +2192,7 @@ export const ExecutionDataPanel = ({
                     signedUrl={isFileChild && cfFilePath ? form.signedUrls[cfFilePath] : form.signedUrls[`${eds.id}-${cf.id}`]} />;
                   }} />;
               })}
+              </div>
             </div>;
           })}
         </div>
