@@ -484,6 +484,55 @@ export const workflowService = {
       );
       const backEdges = computeBackEdges(workflowSteps, connections);
 
+      // Whether every forward incoming edge into `targetStepId` has been
+      // satisfied since the target's last visit. Start-node and back-edge
+      // sources are excluded — starts have no execution-step rows, and
+      // back-edges are loop-iteration triggers rather than forward gates.
+      const areForwardPrerequisitesMet = async (targetStepId: string): Promise<boolean> => {
+        const incomingConnections = connections.filter(
+          (c: WorkflowConnectionRow) => c.target_step_id === targetStepId
+        );
+        const requiredSourceIds = incomingConnections.map(
+          (c: WorkflowConnectionRow) => c.source_step_id
+        );
+
+        const lastTargetVisit = await prisma.workflowExecutionStep.findFirst({
+          where: {
+            execution_id: executionId,
+            step_id: targetStepId,
+            status: 'completed',
+          },
+          orderBy: { completed_at: 'desc' },
+          select: { started_at: true },
+        });
+        const prerequisiteCutoff = lastTargetVisit?.started_at ?? new Date(0);
+
+        const completedSourceSteps = await prisma.workflowExecutionStep.findMany({
+          where: {
+            execution_id: executionId,
+            step_id: { in: requiredSourceIds },
+            status: 'completed',
+            completed_at: { gt: prerequisiteCutoff },
+          },
+          select: { step_id: true },
+        });
+
+        const satisfiedSourceIds = new Set(
+          completedSourceSteps.map((s: { step_id: string }) => s.step_id)
+        );
+        // The just-completed step's row may not yet satisfy `completed_at > cutoff`
+        // due to timestamp edge cases; treat it as satisfied explicitly.
+        satisfiedSourceIds.add(currentStepId);
+
+        const joinRequiredSourceIds = requiredSourceIds.filter(
+          (sourceStepId: string) =>
+            !startStepIds.has(sourceStepId) &&
+            !backEdges.has(backEdgeKey(sourceStepId, targetStepId))
+        );
+
+        return joinRequiredSourceIds.every((id: string) => satisfiedSourceIds.has(id));
+      };
+
       // Find outgoing connections from current step
       let outgoingConnections = connections.filter(
         (c: WorkflowConnectionRow) => c.source_step_id === currentStepId
@@ -553,54 +602,8 @@ export const workflowService = {
         // entry already fired in earlier iterations.
         const arrivingViaBackEdge = backEdges.has(backEdgeKey(currentStepId, targetStepId));
 
-        if (!arrivingViaBackEdge) {
-          // Check prerequisites - all incoming forward connections must be completed
-          const incomingConnections = connections.filter(
-            (c: WorkflowConnectionRow) => c.target_step_id === targetStepId
-          );
-          const requiredSourceIds = incomingConnections.map((c: WorkflowConnectionRow) => c.source_step_id);
-
-          const lastTargetVisit = await prisma.workflowExecutionStep.findFirst({
-            where: {
-              execution_id: executionId,
-              step_id: targetStepId,
-              status: 'completed',
-            },
-            orderBy: { completed_at: 'desc' },
-            select: { started_at: true },
-          });
-          const prerequisiteCutoff = lastTargetVisit?.started_at ?? new Date(0);
-
-          const completedSourceSteps = await prisma.workflowExecutionStep.findMany({
-            where: {
-              execution_id: executionId,
-              step_id: { in: requiredSourceIds },
-              status: 'completed',
-              completed_at: { gt: prerequisiteCutoff },
-            },
-            select: { step_id: true },
-          });
-
-          const satisfiedSourceIds = new Set(
-            completedSourceSteps.map((s: { step_id: string }) => s.step_id)
-          );
-          satisfiedSourceIds.add(currentStepId);
-
-          // Exclude start nodes (no execution-step rows) and back-edges
-          // (loop-back triggers, not forward prerequisites) from the join check.
-          const joinRequiredSourceIds = requiredSourceIds.filter(
-            (sourceStepId: string) =>
-              !startStepIds.has(sourceStepId) &&
-              !backEdges.has(backEdgeKey(sourceStepId, targetStepId))
-          );
-
-          const allPrerequisitesMet = joinRequiredSourceIds.every((id: string) =>
-            satisfiedSourceIds.has(id)
-          );
-
-          if (!allPrerequisitesMet) {
-            continue; // Skip this step, prerequisites not met
-          }
+        if (!arrivingViaBackEdge && !(await areForwardPrerequisitesMet(targetStepId))) {
+          continue;
         }
 
         // Get execution details for assignment
