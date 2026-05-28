@@ -863,6 +863,114 @@ describe('workflow.service', () => {
         })
       );
     });
+
+    it('should open target step on forward edge when target also has back-edge from downstream loop', async () => {
+      // Topology: start -> A -> B -> C -> B (C loops back to B).
+      // B has two incoming connections: A->B (forward) and C->B (back-edge).
+      // When A completes, B must open even though C has never completed.
+      setupExecutionStepFindFirst({ completingWorkflowStepId: 'step-a' });
+      (prisma.workflowStep.findUnique as jest.Mock)
+        .mockResolvedValueOnce({ workflow_id: 'wf-1' })
+        .mockResolvedValueOnce({
+          step_type: 'edit_form',
+          action_type: null,
+          assigned_to_user_id: null,
+          assigned_to_group_id: null,
+          config: {},
+        });
+      (prisma.workflowStep.findMany as jest.Mock).mockResolvedValue([
+        { id: 'start-step', step_type: 'start' },
+        { id: 'step-a', step_type: 'edit_form' },
+        { id: 'step-b', step_type: 'edit_form' },
+        { id: 'step-c', step_type: 'decision' },
+      ]);
+      (prisma.workflowConnection.findMany as jest.Mock).mockResolvedValue([
+        { source_step_id: 'start-step', target_step_id: 'step-a' },
+        { source_step_id: 'step-a', target_step_id: 'step-b' },
+        { source_step_id: 'step-b', target_step_id: 'step-c' },
+        { source_step_id: 'step-c', target_step_id: 'step-b' },
+      ]);
+      (prisma.workflowExecutionStep.findMany as jest.Mock).mockResolvedValue([
+        { step_id: 'step-a' },
+      ]);
+      (prisma.workflowExecution.findUnique as jest.Mock).mockResolvedValue({
+        created_by: 'user-1',
+        company_id: 'company-1',
+      });
+      (prisma.workflowExecutionStep.create as jest.Mock).mockResolvedValue({
+        id: 'ex-step-b',
+      });
+
+      const result = await workflowService.advanceWorkflow(
+        'exec-1',
+        COMPLETING_EX_STEP,
+        'company-1'
+      );
+
+      expect(result).toEqual(['step-b']);
+      expect(prisma.workflowExecutionStep.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          execution_id: 'exec-1',
+          step_id: 'step-b',
+          status: 'running',
+        }),
+      });
+    });
+
+    it('should reopen loop target when arriving via back-edge regardless of forward branch staleness', async () => {
+      // Same topology as above. B was visited once. Now C completes and loops
+      // back to B. A's completion is older than B's last visit, but the
+      // back-edge arrival should bypass the join check and reopen B.
+      setupExecutionStepFindFirst({
+        completingWorkflowStepId: 'step-c',
+        hasPriorFinishedVisit: true,
+        lastTargetVisitStartedAt: new Date('2026-01-01T10:00:00Z'),
+      });
+      (prisma.workflowStep.findUnique as jest.Mock)
+        .mockResolvedValueOnce({ workflow_id: 'wf-1' })
+        .mockResolvedValueOnce({
+          step_type: 'edit_form',
+          action_type: null,
+          assigned_to_user_id: null,
+          assigned_to_group_id: null,
+          config: {},
+        });
+      (prisma.workflowStep.findMany as jest.Mock).mockResolvedValue([
+        { id: 'start-step', step_type: 'start' },
+        { id: 'step-a', step_type: 'edit_form' },
+        { id: 'step-b', step_type: 'edit_form' },
+        { id: 'step-c', step_type: 'decision' },
+      ]);
+      (prisma.workflowConnection.findMany as jest.Mock).mockResolvedValue([
+        { source_step_id: 'start-step', target_step_id: 'step-a' },
+        { source_step_id: 'step-a', target_step_id: 'step-b' },
+        { source_step_id: 'step-b', target_step_id: 'step-c' },
+        { source_step_id: 'step-c', target_step_id: 'step-b' },
+      ]);
+      (prisma.workflowExecutionStep.findMany as jest.Mock).mockResolvedValue([]);
+      (prisma.workflowExecution.findUnique as jest.Mock).mockResolvedValue({
+        created_by: 'user-1',
+        company_id: 'company-1',
+      });
+      (prisma.workflowExecutionStep.create as jest.Mock).mockResolvedValue({
+        id: 'ex-step-b-visit-2',
+      });
+
+      const result = await workflowService.advanceWorkflow(
+        'exec-1',
+        COMPLETING_EX_STEP,
+        'company-1'
+      );
+
+      expect(result).toEqual(['step-b']);
+      expect(prisma.workflowExecutionStep.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          execution_id: 'exec-1',
+          step_id: 'step-b',
+          status: 'running',
+        }),
+      });
+    });
   });
 
   describe('handleStepActivation', () => {

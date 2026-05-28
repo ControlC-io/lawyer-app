@@ -31,6 +31,64 @@ export type SearchExecutionsResult = {
 type WorkflowStepRow = Awaited<ReturnType<typeof prisma.workflowStep.findMany>>[number];
 type WorkflowConnectionRow = Awaited<ReturnType<typeof prisma.workflowConnection.findMany>>[number];
 
+function backEdgeKey(sourceStepId: string, targetStepId: string): string {
+  return `${sourceStepId}->${targetStepId}`;
+}
+
+// Classify connections as forward or back-edges via DFS from start nodes.
+// A back-edge points to a node currently on the recursion stack — i.e., it
+// closes a cycle in the discovered DAG. Without this, joins on a node that
+// also has a loop-back incoming connection can never be satisfied on the
+// first visit, since the loop source has not yet executed.
+function computeBackEdges(
+  steps: { id: string; step_type: string | null }[],
+  connections: { source_step_id: string; target_step_id: string }[]
+): Set<string> {
+  const outgoing = new Map<string, string[]>();
+  for (const conn of connections) {
+    const list = outgoing.get(conn.source_step_id);
+    if (list) list.push(conn.target_step_id);
+    else outgoing.set(conn.source_step_id, [conn.target_step_id]);
+  }
+
+  const backEdges = new Set<string>();
+  const visited = new Set<string>();
+  const onStack = new Set<string>();
+
+  function visit(root: string): void {
+    if (visited.has(root)) return;
+    const stack: { node: string; nextIdx: number }[] = [{ node: root, nextIdx: 0 }];
+    visited.add(root);
+    onStack.add(root);
+    while (stack.length > 0) {
+      const frame = stack[stack.length - 1];
+      const children = outgoing.get(frame.node) ?? [];
+      if (frame.nextIdx >= children.length) {
+        onStack.delete(frame.node);
+        stack.pop();
+        continue;
+      }
+      const child = children[frame.nextIdx++];
+      if (onStack.has(child)) {
+        backEdges.add(backEdgeKey(frame.node, child));
+      } else if (!visited.has(child)) {
+        visited.add(child);
+        onStack.add(child);
+        stack.push({ node: child, nextIdx: 0 });
+      }
+    }
+  }
+
+  for (const step of steps) {
+    if (step.step_type === 'start') visit(step.id);
+  }
+  // Fallback: visit any nodes unreachable from a start step so we still
+  // classify their back-edges if such an orphan subgraph exists.
+  for (const step of steps) visit(step.id);
+
+  return backEdges;
+}
+
 function extractUserIdFromFieldValue(value: unknown): string | null {
   if (typeof value === 'string' && value.trim()) return value.trim();
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
@@ -416,6 +474,7 @@ export const workflowService = {
           .filter((workflowStep) => workflowStep.step_type === 'start')
           .map((workflowStep) => workflowStep.id)
       );
+      const backEdges = computeBackEdges(workflowSteps, connections);
 
       // Find outgoing connections from current step
       let outgoingConnections = connections.filter(
@@ -481,49 +540,59 @@ export const workflowService = {
           continue;
         }
 
-        // Check prerequisites - all incoming connections must be completed
-        const incomingConnections = connections.filter(
-          (c: WorkflowConnectionRow) => c.target_step_id === targetStepId
-        );
-        const requiredSourceIds = incomingConnections.map((c: WorkflowConnectionRow) => c.source_step_id);
+        // Arriving via a back-edge is a loop-iteration trigger; the join
+        // check does not apply because the forward predecessors of the loop
+        // entry already fired in earlier iterations.
+        const arrivingViaBackEdge = backEdges.has(backEdgeKey(currentStepId, targetStepId));
 
-        const lastTargetVisit = await prisma.workflowExecutionStep.findFirst({
-          where: {
-            execution_id: executionId,
-            step_id: targetStepId,
-            status: 'completed',
-          },
-          orderBy: { completed_at: 'desc' },
-          select: { started_at: true },
-        });
-        const prerequisiteCutoff = lastTargetVisit?.started_at ?? new Date(0);
+        if (!arrivingViaBackEdge) {
+          // Check prerequisites - all incoming forward connections must be completed
+          const incomingConnections = connections.filter(
+            (c: WorkflowConnectionRow) => c.target_step_id === targetStepId
+          );
+          const requiredSourceIds = incomingConnections.map((c: WorkflowConnectionRow) => c.source_step_id);
 
-        const completedSourceSteps = await prisma.workflowExecutionStep.findMany({
-          where: {
-            execution_id: executionId,
-            step_id: { in: requiredSourceIds },
-            status: 'completed',
-            completed_at: { gt: prerequisiteCutoff },
-          },
-          select: { step_id: true },
-        });
+          const lastTargetVisit = await prisma.workflowExecutionStep.findFirst({
+            where: {
+              execution_id: executionId,
+              step_id: targetStepId,
+              status: 'completed',
+            },
+            orderBy: { completed_at: 'desc' },
+            select: { started_at: true },
+          });
+          const prerequisiteCutoff = lastTargetVisit?.started_at ?? new Date(0);
 
-        const satisfiedSourceIds = new Set(
-          completedSourceSteps.map((s: { step_id: string }) => s.step_id)
-        );
-        satisfiedSourceIds.add(currentStepId);
+          const completedSourceSteps = await prisma.workflowExecutionStep.findMany({
+            where: {
+              execution_id: executionId,
+              step_id: { in: requiredSourceIds },
+              status: 'completed',
+              completed_at: { gt: prerequisiteCutoff },
+            },
+            select: { step_id: true },
+          });
 
-        // Start nodes never get execution-step rows; exclude them from join checks.
-        const joinRequiredSourceIds = requiredSourceIds.filter(
-          (sourceStepId: string) => !startStepIds.has(sourceStepId)
-        );
+          const satisfiedSourceIds = new Set(
+            completedSourceSteps.map((s: { step_id: string }) => s.step_id)
+          );
+          satisfiedSourceIds.add(currentStepId);
 
-        const allPrerequisitesMet = joinRequiredSourceIds.every((id: string) =>
-          satisfiedSourceIds.has(id)
-        );
+          // Exclude start nodes (no execution-step rows) and back-edges
+          // (loop-back triggers, not forward prerequisites) from the join check.
+          const joinRequiredSourceIds = requiredSourceIds.filter(
+            (sourceStepId: string) =>
+              !startStepIds.has(sourceStepId) &&
+              !backEdges.has(backEdgeKey(sourceStepId, targetStepId))
+          );
 
-        if (!allPrerequisitesMet) {
-          continue; // Skip this step, prerequisites not met
+          const allPrerequisitesMet = joinRequiredSourceIds.every((id: string) =>
+            satisfiedSourceIds.has(id)
+          );
+
+          if (!allPrerequisitesMet) {
+            continue; // Skip this step, prerequisites not met
+          }
         }
 
         // Get execution details for assignment
