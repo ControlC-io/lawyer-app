@@ -363,7 +363,7 @@ export const HistoricalStepView = ({
                     )}
                   </div>
 
-                  <div className="space-y-4 min-w-0 overflow-hidden">
+                  <div className="grid grid-cols-1 gap-4 min-w-0">
                     {rootFields.map((field: any) => {
                       const fieldType = field.field_type || field.type;
                       const rawValue = stepData[field.id];
