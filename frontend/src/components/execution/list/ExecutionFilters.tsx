@@ -1,10 +1,18 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
-import { LayoutList, User, CheckSquare, Search } from "lucide-react";
+import { LayoutList, User, CheckSquare, Search, ArrowDownUp } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { useLanguage } from "@/contexts/LanguageContext";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { SortOption } from "@/lib/sortExecutions";
 
 export type FilterType = "all" | "my_workflows" | "my_tasks";
 
@@ -20,6 +28,8 @@ interface ExecutionFiltersProps {
     };
     searchQuery: string;
     onSearchChange: (query: string) => void;
+    sortBy: SortOption;
+    onSortChange: (sort: SortOption) => void;
 }
 
 export const ExecutionFilters = ({
@@ -30,6 +40,8 @@ export const ExecutionFilters = ({
     counts,
     searchQuery,
     onSearchChange,
+    sortBy,
+    onSortChange,
 }: ExecutionFiltersProps) => {
     const { t } = useLanguage();
     const filters = [
@@ -106,20 +118,41 @@ export const ExecutionFilters = ({
                     />
                 </div>
 
-                <div className="flex items-center gap-2 order-2 sm:order-1 shrink-0">
-                    <Switch
-                        id="show-completed"
-                        checked={showCompleted}
-                        onCheckedChange={onShowCompletedChange}
-                        className="scale-[0.85] sm:scale-100"
-                    />
-                    <Label
-                        htmlFor="show-completed"
-                        className="cursor-pointer text-xs leading-tight sm:text-sm"
-                    >
-                        <span className="sm:hidden">{t("executionFilters.showCompletedShort")}</span>
-                        <span className="hidden sm:inline">{t("executionFilters.showCompleted")}</span>
-                    </Label>
+                <div className="flex items-center gap-3 order-2 sm:order-1 shrink-0">
+                    <div className="flex items-center gap-1.5">
+                        <ArrowDownUp className="h-3.5 w-3.5 text-muted-foreground" />
+                        <Select
+                            value={sortBy}
+                            onValueChange={(value) => onSortChange(value as SortOption)}
+                        >
+                            <SelectTrigger
+                                aria-label={t("executionFilters.sortBy") as string}
+                                className="h-8 w-[150px] text-xs sm:h-10 sm:text-sm"
+                            >
+                                <SelectValue placeholder={t("executionFilters.sortBy")} />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="newest">{t("executionFilters.sortNewest")}</SelectItem>
+                                <SelectItem value="name_asc">{t("executionFilters.sortNameAsc")}</SelectItem>
+                                <SelectItem value="name_desc">{t("executionFilters.sortNameDesc")}</SelectItem>
+                            </SelectContent>
+                        </Select>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <Switch
+                            id="show-completed"
+                            checked={showCompleted}
+                            onCheckedChange={onShowCompletedChange}
+                            className="scale-[0.85] sm:scale-100"
+                        />
+                        <Label
+                            htmlFor="show-completed"
+                            className="cursor-pointer text-xs leading-tight sm:text-sm"
+                        >
+                            <span className="sm:hidden">{t("executionFilters.showCompletedShort")}</span>
+                            <span className="hidden sm:inline">{t("executionFilters.showCompleted")}</span>
+                        </Label>
+                    </div>
                 </div>
             </div>
         </div>
