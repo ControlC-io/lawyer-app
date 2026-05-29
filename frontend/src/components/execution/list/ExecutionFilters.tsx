@@ -125,7 +125,10 @@ export const ExecutionFilters = ({
                             value={sortBy}
                             onValueChange={(value) => onSortChange(value as SortOption)}
                         >
-                            <SelectTrigger className="h-8 w-[150px] text-xs sm:h-10 sm:text-sm">
+                            <SelectTrigger
+                                aria-label={t("executionFilters.sortBy") as string}
+                                className="h-8 w-[150px] text-xs sm:h-10 sm:text-sm"
+                            >
                                 <SelectValue placeholder={t("executionFilters.sortBy")} />
                             </SelectTrigger>
                             <SelectContent>
