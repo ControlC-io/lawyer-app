@@ -1,6 +1,6 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
-import { LayoutList, User, CheckSquare, Search } from "lucide-react";
+import { LayoutList, User, CheckSquare, Search, ArrowDownUp } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
@@ -12,7 +12,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ArrowDownUp } from "lucide-react";
 import { SortOption } from "@/lib/sortExecutions";
 
 export type FilterType = "all" | "my_workflows" | "my_tasks";
@@ -126,7 +125,7 @@ export const ExecutionFilters = ({
                             value={sortBy}
                             onValueChange={(value) => onSortChange(value as SortOption)}
                         >
-                            <SelectTrigger className="h-8 w-[150px] text-xs sm:h-9 sm:text-sm">
+                            <SelectTrigger className="h-8 w-[150px] text-xs sm:h-10 sm:text-sm">
                                 <SelectValue placeholder={t("executionFilters.sortBy")} />
                             </SelectTrigger>
                             <SelectContent>
