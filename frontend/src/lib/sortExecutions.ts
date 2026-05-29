@@ -18,7 +18,7 @@ export function sortExecutions<T extends SortableExecution>(
   executions: T[],
   sortBy: SortOption
 ): T[] {
-  if (sortBy === "newest") return executions;
+  if (sortBy === "newest") return [...executions];
 
   const hasName = (e: T) => !!e.name && e.name.trim().length > 0;
   const direction = sortBy === "name_asc" ? 1 : -1;
