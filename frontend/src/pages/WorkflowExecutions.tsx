@@ -11,6 +11,7 @@ import { KanbanView } from "@/components/execution/list/KanbanView";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { sortExecutions, SortOption } from "@/lib/sortExecutions";
 
 // Define types for our data
 interface Category {
@@ -55,6 +56,7 @@ const WorkflowExecutions = () => {
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>("");
+  const [sortBy, setSortBy] = useState<SortOption>("newest");
 
   // Special identifier for uncategorized category
   const UNCATEGORIZED_CATEGORY_ID = "__uncategorized__";
@@ -312,6 +314,9 @@ const WorkflowExecutions = () => {
       };
     });
 
+    // Apply user-selected sort (client-side; "newest" keeps backend order).
+    filtered = sortExecutions(filtered, sortBy);
+
     // Build Category Hierarchy with counts
     const executionsForCounts = executions.filter(e => {
       if (activeFilter === "my_workflows" && e.created_by !== myUserId) return false;
@@ -381,7 +386,7 @@ const WorkflowExecutions = () => {
       }));
 
     return { filtered, counts, categories: categoryTree, uncategorizedWorkflows, uncategorizedCount };
-  }, [executions, categories, workflows, runningSteps, userGroups, activeFilter, showCompleted, selectedCategoryId, selectedWorkflowId, profile?.id, searchQuery]);
+  }, [executions, categories, workflows, runningSteps, userGroups, activeFilter, showCompleted, selectedCategoryId, selectedWorkflowId, profile?.id, searchQuery, sortBy]);
 
   // Filter execution steps based on active filter (specifically for My Tasks)
   const filteredExecutionSteps = useMemo(() => {
@@ -419,6 +424,8 @@ const WorkflowExecutions = () => {
           counts={processedData.counts}
           searchQuery={searchQuery}
           onSearchChange={setSearchQuery}
+          sortBy={sortBy}
+          onSortChange={setSortBy}
         />
       </div>
 
