@@ -14,6 +14,8 @@ interface SortableExecution {
  *   always sink to the bottom regardless of direction. Ties keep their original
  *   incoming order (stable).
  */
+const collator = new Intl.Collator(undefined, { sensitivity: "base" });
+
 export function sortExecutions<T extends SortableExecution>(
   executions: T[],
   sortBy: SortOption
@@ -23,24 +25,16 @@ export function sortExecutions<T extends SortableExecution>(
   const hasName = (e: T) => !!e.name && e.name.trim().length > 0;
   const direction = sortBy === "name_asc" ? 1 : -1;
 
-  // Decorate with original index so we can keep ties stable across direction.
-  return executions
-    .map((execution, index) => ({ execution, index }))
-    .sort((a, b) => {
-      const aHasName = hasName(a.execution);
-      const bHasName = hasName(b.execution);
+  // Array.prototype.sort is stable (ES2019+), so equal elements keep their
+  // incoming order without manual index bookkeeping.
+  return [...executions].sort((a, b) => {
+    const aHasName = hasName(a);
+    const bHasName = hasName(b);
 
-      // Unnamed always sinks to the bottom, regardless of direction.
-      if (aHasName !== bHasName) return aHasName ? -1 : 1;
-      if (!aHasName && !bHasName) return a.index - b.index;
+    // Unnamed always sinks to the bottom, regardless of direction.
+    if (aHasName !== bHasName) return aHasName ? -1 : 1;
+    if (!aHasName) return 0;
 
-      const cmp = a.execution.name!.localeCompare(b.execution.name!, undefined, {
-        sensitivity: "base",
-      });
-      if (cmp !== 0) return cmp * direction;
-
-      // Stable tie-break: preserve incoming order.
-      return a.index - b.index;
-    })
-    .map((entry) => entry.execution);
+    return collator.compare(a.name!, b.name!) * direction;
+  });
 }
