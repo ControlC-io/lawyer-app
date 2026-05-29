@@ -780,7 +780,11 @@
     "assignedToMe": "Assigned to me",
     "showCompleted": "Show completed executions",
     "showCompletedShort": "Show completed",
-    "searchPlaceholder": "Search by workflow or execution name..."
+    "searchPlaceholder": "Search by workflow or execution name...",
+    "sortBy": "Sort by",
+    "sortNewest": "Newest first",
+    "sortNameAsc": "Name (A→Z)",
+    "sortNameDesc": "Name (Z→A)"
   },
   "workflowMobilePicker": {
     "uncategorized": "Uncategorized"
