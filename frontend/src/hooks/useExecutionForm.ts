@@ -260,37 +260,42 @@ export const useExecutionForm = (
     }
   };
 
-  // Initialize array items from execution data when it loads
+  // Seed array items from execution data the first time each array field is
+  // seen. This effect re-runs on every refetch (e.g. after a signature/file
+  // upload calls invalidateQueries), so it must only initialize fields that
+  // aren't already in local state — otherwise it would overwrite the user's
+  // unsaved array edits with stale DB values.
   useEffect(() => {
     if (!executionDataStructures) return;
 
-    const newArrayItems: Record<string, any[]> = {};
-    for (const eds of executionDataStructures) {
-      const values = (eds.values as Record<string, any>) || {};
-      const ds: any = eds.data_structures;
-      const fields: any[] = (ds?.fields ?? []) as any[];
+    setArrayItems((prev) => {
+      const next = { ...prev };
+      let changed = false;
 
-      for (const field of fields) {
-        const fieldType = field.field_type || field.type;
-        if (fieldType === "array" && !field.parent_item_id) {
+      for (const eds of executionDataStructures) {
+        const values = (eds.values as Record<string, any>) || {};
+        const ds: any = eds.data_structures;
+        const fields: any[] = (ds?.fields ?? []) as any[];
+
+        for (const field of fields) {
+          const fieldType = field.field_type || field.type;
+          if (fieldType !== "array" || field.parent_item_id) continue;
+          // Already seeded (and possibly edited locally) — never clobber it.
+          if (next[field.id] !== undefined) continue;
+
           const currentValue = values[field.id]?.value;
           if (currentValue && Array.isArray(currentValue)) {
             // Ensure all items have unique IDs (for backward compatibility)
-            const itemsWithIds = currentValue.map((item: any) => {
-              if (!item._id) {
-                return { ...item, _id: crypto.randomUUID() };
-              }
-              return item;
-            });
-            newArrayItems[field.id] = itemsWithIds;
+            next[field.id] = currentValue.map((item: any) =>
+              item._id ? item : { ...item, _id: crypto.randomUUID() }
+            );
+            changed = true;
           }
         }
       }
-    }
 
-    if (Object.keys(newArrayItems).length > 0) {
-      setArrayItems((prev) => ({ ...prev, ...newArrayItems }));
-    }
+      return changed ? next : prev;
+    });
   }, [executionDataStructures]);
 
   // Generate signed URLs for file fields
