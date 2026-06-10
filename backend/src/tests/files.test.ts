@@ -370,6 +370,139 @@ describe('Files Endpoints', () => {
         }),
       }));
     });
+
+    it('writes the new file id into the configured output field', async () => {
+      (prisma.workflowStep.findUnique as jest.Mock).mockResolvedValue({
+        config: { source_file_id: 'f1', output_file_id_field: 'out1' },
+      });
+      (prisma.workflow.findFirst as jest.Mock).mockResolvedValue({
+        data_structure: [
+          { id: 'f1', field_type: 'file', parent_item_id: null },
+          { id: 'out1', field_type: 'string', parent_item_id: null },
+        ],
+      });
+      (prisma.workflowExecutionData.findFirst as jest.Mock).mockResolvedValue({
+        id: 'data-1',
+        values: { f1: { value: 'old/path.png' } },
+      });
+      (prisma.workflowExecution.findUnique as jest.Mock).mockResolvedValue({ company_id: 'company-123' });
+      (prisma.workflowExecutionStep.findFirst as jest.Mock).mockResolvedValue({ assigned_to_user_id: 'user-1' });
+      (prisma.workflowExecutionStep.findUnique as jest.Mock).mockResolvedValue({ step_id: 'step-1', company_id: 'company-123' });
+      const mockStream = { [Symbol.asyncIterator]: async function* () { yield Buffer.from('test data'); } };
+      mockDownloadFile.mockResolvedValue(mockStream);
+      (prisma.file.create as jest.Mock).mockResolvedValue({ id: 'new-file-789' });
+
+      const response = await request(app)
+        .post('/api/files/workflows/executions/exec-123/steps/step-123/process-file')
+        .set(mockAuthHeaders)
+        .send({ workflow_step_id: 'wf-step-1' });
+
+      expect(response.status).toBe(200);
+      expect(prisma.workflowExecutionData.update).toHaveBeenCalledWith({
+        where: { id: 'data-1' },
+        data: { values: { f1: { value: 'old/path.png' }, out1: { value: 'new-file-789' } } },
+      });
+    });
+
+    it('writes an array of new file ids for array source fields', async () => {
+      (prisma.workflowStep.findUnique as jest.Mock).mockResolvedValue({
+        config: { source_file_id: 'child1', output_file_id_field: 'out1' },
+      });
+      (prisma.workflow.findFirst as jest.Mock).mockResolvedValue({
+        data_structure: [
+          { id: 'arr', field_type: 'array', parent_item_id: null },
+          { id: 'child1', field_type: 'file', parent_item_id: 'arr' },
+          { id: 'out1', field_type: 'string', parent_item_id: null },
+        ],
+      });
+      (prisma.workflowExecutionData.findFirst as jest.Mock).mockResolvedValue({
+        id: 'data-1',
+        values: {
+          arr: { value: [
+            { _id: 'a', child1: { value: 'p1.png' } },
+            { _id: 'b', child1: { value: 'p2.png' } },
+          ] },
+        },
+      });
+      (prisma.workflowExecution.findUnique as jest.Mock).mockResolvedValue({ company_id: 'company-123' });
+      (prisma.workflowExecutionStep.findFirst as jest.Mock).mockResolvedValue({ assigned_to_user_id: 'user-1' });
+      (prisma.workflowExecutionStep.findUnique as jest.Mock).mockResolvedValue({ step_id: 'step-1', company_id: 'company-123' });
+      const mockStream = { [Symbol.asyncIterator]: async function* () { yield Buffer.from('test data'); } };
+      mockDownloadFile.mockResolvedValue(mockStream);
+      (prisma.file.create as jest.Mock)
+        .mockResolvedValueOnce({ id: 'nf1' })
+        .mockResolvedValueOnce({ id: 'nf2' });
+
+      const response = await request(app)
+        .post('/api/files/workflows/executions/exec-123/steps/step-123/process-file')
+        .set(mockAuthHeaders)
+        .send({ workflow_step_id: 'wf-step-1' });
+
+      expect(response.status).toBe(200);
+      expect(prisma.workflowExecutionData.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'data-1' },
+          data: expect.objectContaining({
+            values: expect.objectContaining({ out1: { value: ['nf1', 'nf2'] } }),
+          }),
+        })
+      );
+      expect(prisma.workflowExecutionData.update).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not write back when no output field is configured', async () => {
+      (prisma.workflowStep.findUnique as jest.Mock).mockResolvedValue({
+        config: { source_file_id: 'f1' },
+      });
+      (prisma.workflow.findFirst as jest.Mock).mockResolvedValue({
+        data_structure: [{ id: 'f1', field_type: 'file', parent_item_id: null }],
+      });
+      (prisma.workflowExecutionData.findFirst as jest.Mock).mockResolvedValue({
+        id: 'data-1',
+        values: { f1: { value: 'old/path.png' } },
+      });
+      (prisma.workflowExecution.findUnique as jest.Mock).mockResolvedValue({ company_id: 'company-123' });
+      (prisma.workflowExecutionStep.findFirst as jest.Mock).mockResolvedValue({ assigned_to_user_id: 'user-1' });
+      (prisma.workflowExecutionStep.findUnique as jest.Mock).mockResolvedValue({ step_id: 'step-1', company_id: 'company-123' });
+      const mockStream = { [Symbol.asyncIterator]: async function* () { yield Buffer.from('test data'); } };
+      mockDownloadFile.mockResolvedValue(mockStream);
+      (prisma.file.create as jest.Mock).mockResolvedValue({ id: 'new-file-789' });
+
+      const response = await request(app)
+        .post('/api/files/workflows/executions/exec-123/steps/step-123/process-file')
+        .set(mockAuthHeaders)
+        .send({ workflow_step_id: 'wf-step-1' });
+
+      expect(response.status).toBe(200);
+      expect(prisma.workflowExecutionData.update).not.toHaveBeenCalled();
+    });
+
+    it('skips write-back when the configured output field does not exist', async () => {
+      (prisma.workflowStep.findUnique as jest.Mock).mockResolvedValue({
+        config: { source_file_id: 'f1', output_file_id_field: 'missing' },
+      });
+      (prisma.workflow.findFirst as jest.Mock).mockResolvedValue({
+        data_structure: [{ id: 'f1', field_type: 'file', parent_item_id: null }],
+      });
+      (prisma.workflowExecutionData.findFirst as jest.Mock).mockResolvedValue({
+        id: 'data-1',
+        values: { f1: { value: 'old/path.png' } },
+      });
+      (prisma.workflowExecution.findUnique as jest.Mock).mockResolvedValue({ company_id: 'company-123' });
+      (prisma.workflowExecutionStep.findFirst as jest.Mock).mockResolvedValue({ assigned_to_user_id: 'user-1' });
+      (prisma.workflowExecutionStep.findUnique as jest.Mock).mockResolvedValue({ step_id: 'step-1', company_id: 'company-123' });
+      const mockStream = { [Symbol.asyncIterator]: async function* () { yield Buffer.from('test data'); } };
+      mockDownloadFile.mockResolvedValue(mockStream);
+      (prisma.file.create as jest.Mock).mockResolvedValue({ id: 'new-file-789' });
+
+      const response = await request(app)
+        .post('/api/files/workflows/executions/exec-123/steps/step-123/process-file')
+        .set(mockAuthHeaders)
+        .send({ workflow_step_id: 'wf-step-1' });
+
+      expect(response.status).toBe(200);
+      expect(prisma.workflowExecutionData.update).not.toHaveBeenCalled();
+    });
   });
 
   describe('POST /api/companies/:companyId/documents/bulk-metadata', () => {
