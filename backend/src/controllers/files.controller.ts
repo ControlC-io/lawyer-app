@@ -972,13 +972,12 @@ export const filesController = {
         } else if (outputField.parent_item_id) {
           console.warn(`[processFileStep] output_file_id_field ${outputFieldId} is not a top-level field; skipping write-back`);
         } else {
-          const idValue = isArrayChild && parentArrayId
+          const idValue = isArrayChild
             ? (stepData.files || []).map((f: any) => f.new_file_id)
             : stepData.new_file_id;
-          const currentValues = (executionData.values || {}) as Record<string, any>;
           await prisma.workflowExecutionData.update({
             where: { id: executionData.id },
-            data: { values: { ...currentValues, [outputFieldId]: { value: idValue } } },
+            data: { values: { ...allValues, [outputFieldId]: { value: idValue } } },
           });
         }
       }
