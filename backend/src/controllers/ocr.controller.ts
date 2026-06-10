@@ -7,8 +7,8 @@ import { processDocumentOcr } from '../services/ocr.service';
 /**
  * Authorize the caller for a file across every auth mode authMiddleware accepts:
  *   - super admin (JWT or key)  -> any file
- *   - company API key           -> only files in that company
- *   - JWT user                  -> must belong to the file's company
+ *   - company API key           -> only files in that company (company-less files are denied)
+ *   - JWT user                  -> must belong to the file's company; company-less files are allowed
  * Returns null when allowed, otherwise an { status, error } to send back.
  */
 async function authorizeFileAccess(

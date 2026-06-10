@@ -239,6 +239,21 @@ describe('OCR Endpoints', () => {
       expect(response.status).toBe(403);
     });
 
+    it('rejects company API key for a company-less file', async () => {
+      (prisma.company.findUnique as jest.Mock).mockResolvedValue({ id: 'company-1', name: 'Co', is_active: true });
+      (prisma.file.findFirst as jest.Mock).mockResolvedValue({
+        ...mockFile,
+        company_id: null,
+        ocr_status: 'completed',
+      });
+
+      const response = await request(app)
+        .get('/api/files/file-1/ocr')
+        .set('x-api-key', 'company-key');
+
+      expect(response.status).toBe(403);
+    });
+
     it('allows super admin via x-super-admin-api-key', async () => {
       const prev = process.env.SUPER_ADMIN_API_KEY;
       process.env.SUPER_ADMIN_API_KEY = 'super-secret';
