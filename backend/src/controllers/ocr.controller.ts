@@ -4,12 +4,41 @@ import { prisma } from '../lib/prisma';
 import { appendFileHistoryEvent, FILE_HISTORY_EVENT_TYPE, normalizeFileHistoryActorId } from '../lib/fileHistory';
 import { processDocumentOcr } from '../services/ocr.service';
 
+/**
+ * Authorize the caller for a file across every auth mode authMiddleware accepts:
+ *   - super admin (JWT or key)  -> any file
+ *   - company API key           -> only files in that company
+ *   - JWT user                  -> must belong to the file's company
+ * Returns null when allowed, otherwise an { status, error } to send back.
+ */
+async function authorizeFileAccess(
+  req: AuthRequest,
+  file: { company_id: string | null }
+): Promise<{ status: number; error: string } | null> {
+  if (req.user?.super_admin) return null;
+
+  if (req.company?.id) {
+    return file.company_id === req.company.id
+      ? null
+      : { status: 403, error: 'Access denied' };
+  }
+
+  if (req.user?.id) {
+    // A file with no company is not company-scoped, so any authenticated user may read it.
+    if (!file.company_id) return null;
+    const membership = await prisma.userCompany.findFirst({
+      where: { user_id: req.user.id, company_id: file.company_id },
+    });
+    return membership ? null : { status: 403, error: 'Access denied' };
+  }
+
+  return { status: 401, error: 'Unauthorized' };
+}
+
 export const ocrController = {
   async triggerOcr(req: AuthRequest, res: Response) {
     try {
       const { fileId } = req.params;
-      const userId = req.user?.id;
-      if (!userId) return res.status(401).json({ error: 'Unauthorized' });
 
       const file = await prisma.file.findFirst({
         where: { id: fileId },
@@ -17,21 +46,15 @@ export const ocrController = {
       });
       if (!file) return res.status(404).json({ error: 'File not found' });
 
-      if (file.company_id) {
-        const membership = await prisma.userCompany.findFirst({
-          where: { user_id: userId, company_id: file.company_id },
-        });
-        if (!membership && !req.user?.super_admin) {
-          return res.status(403).json({ error: 'Access denied' });
-        }
-      }
+      const denied = await authorizeFileAccess(req, file);
+      if (denied) return res.status(denied.status).json({ error: denied.error });
 
       if (file.company_id) {
         await appendFileHistoryEvent({
           companyId: file.company_id,
           fileId,
           eventType: FILE_HISTORY_EVENT_TYPE.OCR_REQUESTED,
-          actorId: normalizeFileHistoryActorId(userId),
+          actorId: normalizeFileHistoryActorId(req.user?.id ?? null),
           details: { source: 'manual_trigger' },
         });
       }
@@ -59,8 +82,6 @@ export const ocrController = {
   async getOcr(req: AuthRequest, res: Response) {
     try {
       const { fileId } = req.params;
-      const userId = req.user?.id;
-      if (!userId) return res.status(401).json({ error: 'Unauthorized' });
 
       const file = await prisma.file.findFirst({
         where: { id: fileId },
@@ -80,14 +101,8 @@ export const ocrController = {
       });
       if (!file) return res.status(404).json({ error: 'File not found' });
 
-      if (file.company_id) {
-        const membership = await prisma.userCompany.findFirst({
-          where: { user_id: userId, company_id: file.company_id },
-        });
-        if (!membership && !req.user?.super_admin) {
-          return res.status(403).json({ error: 'Access denied' });
-        }
-      }
+      const denied = await authorizeFileAccess(req, file);
+      if (denied) return res.status(denied.status).json({ error: denied.error });
 
       if (!file.ocr_status) {
         return res.status(404).json({ error: 'OCR has not been run on this document' });

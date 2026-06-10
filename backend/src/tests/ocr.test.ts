@@ -103,6 +103,48 @@ describe('OCR Endpoints', () => {
 
       expect(response.status).toBe(404);
     });
+
+    it('allows company API key for a file in the same company', async () => {
+      (prisma.company.findUnique as jest.Mock).mockResolvedValue({ id: 'company-1', name: 'Co', is_active: true });
+      (prisma.file.findFirst as jest.Mock).mockResolvedValue({ ...mockFile, company_id: 'company-1' });
+      (prisma.file.update as jest.Mock).mockResolvedValue({ ...mockFile, company_id: 'company-1', ocr_status: 'pending' });
+
+      const response = await request(app)
+        .post('/api/files/file-1/ocr')
+        .set('x-api-key', 'company-key');
+
+      expect(response.status).toBe(202);
+      expect(response.body.ocrStatus).toBe('pending');
+    });
+
+    it('rejects company API key for a file in a different company', async () => {
+      (prisma.company.findUnique as jest.Mock).mockResolvedValue({ id: 'company-2', name: 'Other', is_active: true });
+      (prisma.file.findFirst as jest.Mock).mockResolvedValue({ ...mockFile, company_id: 'company-1' });
+
+      const response = await request(app)
+        .post('/api/files/file-1/ocr')
+        .set('x-api-key', 'company-key');
+
+      expect(response.status).toBe(403);
+      expect(prisma.file.update).not.toHaveBeenCalled();
+    });
+
+    it('allows super admin via x-super-admin-api-key', async () => {
+      const prev = process.env.SUPER_ADMIN_API_KEY;
+      process.env.SUPER_ADMIN_API_KEY = 'super-secret';
+      try {
+        (prisma.file.findFirst as jest.Mock).mockResolvedValue({ ...mockFile, company_id: 'some-other-company' });
+        (prisma.file.update as jest.Mock).mockResolvedValue({ ...mockFile, ocr_status: 'pending' });
+
+        const response = await request(app)
+          .post('/api/files/file-1/ocr')
+          .set('x-super-admin-api-key', 'super-secret');
+
+        expect(response.status).toBe(202);
+      } finally {
+        process.env.SUPER_ADMIN_API_KEY = prev;
+      }
+    });
   });
 
   describe('Upload with OCR flag', () => {
@@ -148,6 +190,75 @@ describe('OCR Endpoints', () => {
         .get('/api/files/file-1/ocr');
 
       expect(response.status).toBe(401);
+    });
+
+    it('allows company API key for a file in the same company', async () => {
+      (prisma.company.findUnique as jest.Mock).mockResolvedValue({ id: 'company-1', name: 'Co', is_active: true });
+      (prisma.file.findFirst as jest.Mock).mockResolvedValue({
+        ...mockFile,
+        company_id: 'company-1',
+        ocr_status: 'completed',
+        ocr_markdown: '# api key text',
+      });
+
+      const response = await request(app)
+        .get('/api/files/file-1/ocr')
+        .set('x-api-key', 'company-key');
+
+      expect(response.status).toBe(200);
+      expect(response.body.ocrMarkdown).toBe('# api key text');
+    });
+
+    it('rejects company API key for a file in a different company', async () => {
+      (prisma.company.findUnique as jest.Mock).mockResolvedValue({ id: 'company-2', name: 'Other', is_active: true });
+      (prisma.file.findFirst as jest.Mock).mockResolvedValue({
+        ...mockFile,
+        company_id: 'company-1',
+        ocr_status: 'completed',
+      });
+
+      const response = await request(app)
+        .get('/api/files/file-1/ocr')
+        .set('x-api-key', 'company-key');
+
+      expect(response.status).toBe(403);
+    });
+
+    it('rejects a JWT user who is not a member of the file company', async () => {
+      (prisma.userCompany.findFirst as jest.Mock).mockResolvedValue(null);
+      (prisma.file.findFirst as jest.Mock).mockResolvedValue({
+        ...mockFile,
+        company_id: 'company-1',
+        ocr_status: 'completed',
+      });
+
+      const response = await request(app)
+        .get('/api/files/file-1/ocr')
+        .set('Authorization', `Bearer ${authToken}`);
+
+      expect(response.status).toBe(403);
+    });
+
+    it('allows super admin via x-super-admin-api-key', async () => {
+      const prev = process.env.SUPER_ADMIN_API_KEY;
+      process.env.SUPER_ADMIN_API_KEY = 'super-secret';
+      try {
+        (prisma.file.findFirst as jest.Mock).mockResolvedValue({
+          ...mockFile,
+          company_id: 'some-other-company',
+          ocr_status: 'completed',
+          ocr_markdown: '# super admin text',
+        });
+
+        const response = await request(app)
+          .get('/api/files/file-1/ocr')
+          .set('x-super-admin-api-key', 'super-secret');
+
+        expect(response.status).toBe(200);
+        expect(response.body.ocrMarkdown).toBe('# super admin text');
+      } finally {
+        process.env.SUPER_ADMIN_API_KEY = prev;
+      }
     });
   });
 
