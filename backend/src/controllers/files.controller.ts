@@ -961,6 +961,27 @@ export const filesController = {
         };
       }
 
+      // Write the resulting File ID(s) back into execution data so later
+      // action nodes can reference them (e.g. to fetch OCR via the file ID).
+      const outputFieldId = config.output_file_id_field;
+      // 'none' is the UI dropdown placeholder meaning "not configured".
+      if (outputFieldId && outputFieldId !== 'none') {
+        const outputField = dataStructure.find((f: any) => f.id === outputFieldId);
+        if (!outputField) {
+          console.warn(`[processFileStep] output_file_id_field ${outputFieldId} not found in data structure; skipping write-back`);
+        } else if (outputField.parent_item_id) {
+          console.warn(`[processFileStep] output_file_id_field ${outputFieldId} is not a top-level field; skipping write-back`);
+        } else {
+          const idValue = isArrayChild
+            ? (stepData.files || []).map((f: any) => f.new_file_id)
+            : stepData.new_file_id;
+          await prisma.workflowExecutionData.update({
+            where: { id: executionData.id },
+            data: { values: { ...allValues, [outputFieldId]: { value: idValue } } },
+          });
+        }
+      }
+
       // Mark step as completed
       const completedAt = new Date();
       const closedBySource = req.user?.id ? 'user' : req.company?.id ? 'company_api_key' : undefined;

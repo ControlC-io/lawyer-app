@@ -3682,6 +3682,31 @@ export function PropertiesPanel({ step, workflowId, dataStructure, onUpdateStep,
                     </div>
                   )}
                 </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="output-file-id">Store resulting file ID in field</Label>
+                  <Select
+                    value={step.config.output_file_id_field || "none"}
+                    onValueChange={(value) => handleConfigChange("output_file_id_field", value === "none" ? "" : value)}
+                  >
+                    <SelectTrigger id="output-file-id">
+                      <SelectValue placeholder="Select a field" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">None</SelectItem>
+                      {dataStructureItems
+                        .filter((item) => ["string", "text", "email"].includes(item.field_type || "") && !item.parent_item_id)
+                        .map((item) => (
+                          <SelectItem key={item.id} value={item.id}>
+                            {item.name}
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    The created file's ID is written to this field so later action nodes can retrieve its OCR. For array sources, the field receives the list of created file IDs.
+                  </p>
+                </div>
               </div>
             )}
               </>
