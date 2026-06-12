@@ -9,6 +9,7 @@ import { ChevronDown, ChevronUp, Wrench, Send, Loader2, Edit2, Check, X, Copy, E
 import { useToast } from "@/hooks/use-toast";
 import { api } from "@/lib/api";
 import { resolvePromptTemplate, type PromptValues } from "@/lib/promptTemplate";
+import { buildAgentDataPayload } from "@/lib/agentPayload";
 
 interface WebhookConfig {
     url: string;
@@ -165,51 +166,19 @@ export const DevModeBanner = ({
                 if (isAgentAction && stepConfig?.agent_id) {
                     const rawDataStructure = execution?.workflow?.data_structure;
                     const fields = Array.isArray(rawDataStructure) ? rawDataStructure : [];
-                    const fieldInfoMap: Record<string, { name: string; type: string }> = {};
-                    (fields as any[]).forEach((field: any) => {
-                        if (field?.id) {
-                            fieldInfoMap[field.id] = {
-                                name: field.name || field.id,
-                                type: field.field_type || field.field_type_new || field.type || 'text',
-                            };
-                        }
-                    });
-
-                    const dataToSendWithTypes = (apiData as any[]).map((item: any) => {
-                        if (!item?.value || typeof item.value !== 'string' || !item.value.startsWith('{{') || !item.value.endsWith('}}')) {
-                            return null;
-                        }
-                        const fieldId = item.value.slice(2, -2).trim();
-                        const info = fieldInfoMap[fieldId] || { name: fieldId, type: 'text' };
-                        const value = executionDataMap[fieldId] ?? null;
-                        return { key: fieldId, name: info.name, value, type: info.type };
-                    }).filter(Boolean);
-
-                    let dataToUpdateConfig = stepConfig.data_to_update;
-                    if (typeof dataToUpdateConfig === 'string') {
-                        try {
-                            dataToUpdateConfig = JSON.parse(dataToUpdateConfig);
-                        } catch {
-                            dataToUpdateConfig = [];
-                        }
-                    }
-                    const dataToUpdateList = Array.isArray(dataToUpdateConfig) ? dataToUpdateConfig : [];
-                    const dataToUpdateWithTypes = dataToUpdateList.map((item: any) => {
-                        const fieldId = item?.value;
-                        if (!fieldId) {
-                            return { key: null, name: item?.key ?? null, value: null, type: 'text' };
-                        }
-                        const info = fieldInfoMap[fieldId] || { name: fieldId, type: 'text' };
-                        const value = executionDataMap[fieldId] ?? null;
-                        return { key: fieldId, name: info.name, value, type: info.type };
+                    const { dataToSend, dataToUpdate } = buildAgentDataPayload({
+                        apiData,
+                        dataToUpdateConfig: stepConfig.data_to_update,
+                        executionDataMap,
+                        fields,
                     });
 
                     requestBody = {
                         execution_id: executionId,
                         execution_step_id: executionStepId,
                         agent_id: stepConfig.agent_id,
-                        data_to_send: dataToSendWithTypes,
-                        data_to_update: dataToUpdateWithTypes,
+                        data_to_send: dataToSend,
+                        data_to_update: dataToUpdate,
                     };
                     if (agentConfig?.prompt_template && stepConfig.prompt_values && typeof stepConfig.prompt_values === 'object') {
                         const prompt = resolvePromptTemplate(agentConfig.prompt_template, stepConfig.prompt_values as PromptValues);
@@ -378,51 +347,19 @@ export const DevModeBanner = ({
                 if (isAgentAction && stepConfig?.agent_id) {
                     const rawDataStructure = execution?.workflow?.data_structure;
                     const fields = Array.isArray(rawDataStructure) ? rawDataStructure : [];
-                    const fieldInfoMap: Record<string, { name: string; type: string }> = {};
-                    (fields as any[]).forEach((field: any) => {
-                        if (field?.id) {
-                            fieldInfoMap[field.id] = {
-                                name: field.name || field.id,
-                                type: field.field_type || field.field_type_new || field.type || 'text',
-                            };
-                        }
-                    });
-
-                    const dataToSendWithTypes = (apiData as any[]).map((item: any) => {
-                        if (!item?.value || typeof item.value !== 'string' || !item.value.startsWith('{{') || !item.value.endsWith('}}')) {
-                            return null;
-                        }
-                        const fieldId = item.value.slice(2, -2).trim();
-                        const info = fieldInfoMap[fieldId] || { name: fieldId, type: 'text' };
-                        const value = executionDataMap[fieldId] ?? null;
-                        return { key: fieldId, name: info.name, value, type: info.type };
-                    }).filter(Boolean);
-
-                    let dataToUpdateConfig = stepConfig.data_to_update;
-                    if (typeof dataToUpdateConfig === 'string') {
-                        try {
-                            dataToUpdateConfig = JSON.parse(dataToUpdateConfig);
-                        } catch {
-                            dataToUpdateConfig = [];
-                        }
-                    }
-                    const dataToUpdateList = Array.isArray(dataToUpdateConfig) ? dataToUpdateConfig : [];
-                    const dataToUpdateWithTypes = dataToUpdateList.map((item: any) => {
-                        const fieldId = item?.value;
-                        if (!fieldId) {
-                            return { key: null, name: item?.key ?? null, value: null, type: 'text' };
-                        }
-                        const info = fieldInfoMap[fieldId] || { name: fieldId, type: 'text' };
-                        const value = executionDataMap[fieldId] ?? null;
-                        return { key: fieldId, name: info.name, value, type: info.type };
+                    const { dataToSend, dataToUpdate } = buildAgentDataPayload({
+                        apiData,
+                        dataToUpdateConfig: stepConfig.data_to_update,
+                        executionDataMap,
+                        fields,
                     });
 
                     requestBody = {
                         execution_id: executionId,
                         execution_step_id: executionStepId,
                         agent_id: stepConfig.agent_id,
-                        data_to_send: dataToSendWithTypes,
-                        data_to_update: dataToUpdateWithTypes,
+                        data_to_send: dataToSend,
+                        data_to_update: dataToUpdate,
                     };
                     if (agentConfig?.prompt_template && stepConfig.prompt_values && typeof stepConfig.prompt_values === 'object') {
                         const prompt = resolvePromptTemplate(agentConfig.prompt_template, stepConfig.prompt_values as PromptValues);

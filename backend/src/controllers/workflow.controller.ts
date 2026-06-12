@@ -305,6 +305,46 @@ type WorkflowDataStructureField = {
 };
 
 /**
+ * Maps each top-level array field id to a child-field id -> name lookup, so array item
+ * values can be re-keyed by field name for consumers.
+ */
+function buildChildFieldNameMaps(
+  fields: WorkflowDataStructureField[]
+): Record<string, Record<string, string>> {
+  const maps: Record<string, Record<string, string>> = {};
+  for (const field of fields) {
+    if (field.field_type === 'array' && !field.parent_item_id) {
+      maps[field.id] = {};
+      for (const child of fields) {
+        if (child.parent_item_id === field.id && child.id && child.name) {
+          maps[field.id][child.id] = child.name;
+        }
+      }
+    }
+  }
+  return maps;
+}
+
+/**
+ * Re-keys one array item from child field ids to child field names. `_id` and keys
+ * without a matching child field are preserved as-is.
+ */
+function mapArrayItemKeysToNames(
+  item: unknown,
+  idToName: Record<string, string>
+): unknown {
+  if (!item || typeof item !== 'object' || Array.isArray(item)) return item;
+  const itemRecord = item as Record<string, unknown>;
+  const transformed: Record<string, unknown> = {};
+  if (itemRecord._id) transformed._id = itemRecord._id;
+  for (const [key, value] of Object.entries(itemRecord)) {
+    if (key === '_id') continue;
+    transformed[idToName[key] ?? key] = value;
+  }
+  return transformed;
+}
+
+/**
  * Builds the name-keyed views (`execution_data_array`, `execution_data_mapped`) and the
  * file_signed_urls map for an execution, given its first execution_data record. Pure
  * function: does not mutate inputs and does not call out to storage.
@@ -347,32 +387,10 @@ function buildMappedExecutionData(
 
   const topLevelFields = fields.filter((f) => !f.parent_item_id);
 
-  const childFieldIdToName: Record<string, Record<string, string>> = {};
-  for (const field of fields) {
-    if (field.field_type === 'array' && !field.parent_item_id) {
-      const childFields = fields.filter((f) => f.parent_item_id === field.id);
-      childFieldIdToName[field.id] = {};
-      for (const childField of childFields) {
-        if (childField.id && childField.name) {
-          childFieldIdToName[field.id][childField.id] = childField.name;
-        }
-      }
-    }
-  }
+  const childFieldIdToName = buildChildFieldNameMaps(fields);
 
-  const transformArrayItem = (item: unknown, arrayFieldId: string): unknown => {
-    if (!item || typeof item !== 'object' || Array.isArray(item)) return item;
-    const idToNameMap = childFieldIdToName[arrayFieldId] || {};
-    const transformed: Record<string, unknown> = {};
-    const itemRecord = item as Record<string, unknown>;
-    if (itemRecord._id) transformed._id = itemRecord._id;
-    for (const [key, value] of Object.entries(itemRecord)) {
-      if (key === '_id') continue;
-      const fieldName = idToNameMap[key];
-      transformed[fieldName ?? key] = value;
-    }
-    return transformed;
-  };
+  const transformArrayItem = (item: unknown, arrayFieldId: string): unknown =>
+    mapArrayItemKeysToNames(item, childFieldIdToName[arrayFieldId] || {});
 
   const execution_data_array: Array<Record<string, unknown>> = topLevelFields.map((field) => {
     const fieldValue = values[field.id];
@@ -835,14 +853,25 @@ export const workflowController = {
           }
         });
 
+        // Array field values are stored with child field ids as item keys; re-key them
+        // by child field name so agents can read items without a data-structure lookup.
+        const childNameMaps = buildChildFieldNameMaps(fields as WorkflowDataStructureField[]);
+        const resolveFieldValue = (fieldId: string) => {
+          const value = executionDataSnapshot[fieldId] ?? null;
+          const idToName = childNameMaps[fieldId];
+          if (idToName && Array.isArray(value)) {
+            return value.map((item) => mapArrayItemKeysToNames(item, idToName));
+          }
+          return value;
+        };
+
         const dataToSend = (apiData as any[]).map((item: any) => {
           if (!item?.value || typeof item.value !== 'string' || !item.value.startsWith('{{') || !item.value.endsWith('}}')) {
             return null;
           }
           const fieldId = item.value.slice(2, -2).trim();
           const info = fieldInfoMap[fieldId] || { name: fieldId, type: 'text' };
-          const value = executionDataSnapshot[fieldId] ?? null;
-          return { key: fieldId, name: info.name, value, type: info.type };
+          return { key: fieldId, name: info.name, value: resolveFieldValue(fieldId), type: info.type };
         }).filter(Boolean);
 
         let dataToUpdateConfig = config.data_to_update;
@@ -860,8 +889,7 @@ export const workflowController = {
             return { key: null, name: item?.key ?? null, value: null, type: 'text' };
           }
           const info = fieldInfoMap[fieldId] || { name: fieldId, type: 'text' };
-          const value = executionDataSnapshot[fieldId] ?? null;
-          return { key: fieldId, name: info.name, value, type: info.type };
+          return { key: fieldId, name: info.name, value: resolveFieldValue(fieldId), type: info.type };
         });
 
         requestBody = {
