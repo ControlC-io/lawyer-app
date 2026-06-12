@@ -28,7 +28,7 @@ import { FormPageStepper } from "@/components/execution/FormPageStepper";
 import { getStepExecutionStyles } from "@/lib/stepTypeColors";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { getActiveRunningStep } from "@/lib/executionSteps";
-import { buildChildFieldNameMaps, resolveAgentFieldValue } from "@/lib/agentPayload";
+import { buildAgentDataPayload } from "@/lib/agentPayload";
 const FIXED_FORM_PRIMARY_COLOR = "#2A5CE5";
 
 interface ExecutionDataPanelProps {
@@ -1646,70 +1646,18 @@ export const ExecutionDataPanel = ({
                           // Get workflow data structure to include field types (same as process-automatic-step)
                           const rawDataStructure = executionDataStructures?.[0]?.data_structures?.fields || [];
                           const fields = Array.isArray(rawDataStructure) ? rawDataStructure : [];
-                          
-                          // Build maps of field_id -> field info (name + type)
-                          const fieldInfoMap: Record<string, { name: string; type: string }> = {};
-                          fields.forEach((field: any) => {
-                            if (field.id) {
-                              const inferredType = field.field_type || field.field_type_new || field.type || 'text';
-                              fieldInfoMap[field.id] = {
-                                name: field.name || field.id,
-                                type: inferredType,
-                              };
-                            }
-                          });
-                          
-                          // Array field values are re-keyed by child field name (same as process-automatic-step)
-                          const childNameMaps = buildChildFieldNameMaps(fields);
 
-                          // Build data_to_send with key (field_id), name, value, and type (same as process-automatic-step)
-                          // We only include items that are bound to a workflow field ({{field_id}})
-                          const dataToSendWithTypes = (formAction.api_data || []).map((item: any) => {
-                            if (!item || !item.value) return null;
-                            let rawValue = item.value;
-                            let fieldId: string | null = null;
-
-                            if (typeof rawValue === 'string' && rawValue.startsWith('{{') && rawValue.endsWith('}}')) {
-                              fieldId = rawValue.slice(2, -2).trim();
-                            } else {
-                              // Not a binding to a workflow field, skip from structured payload
-                              return null;
-                            }
-
-                            const info = fieldInfoMap[fieldId] || { name: fieldId, type: 'text' };
-                            const value = executionDataMap[fieldId!] ?? null;
-
-                            return {
-                              key: fieldId,
-                              name: info.name,
-                              value: resolveAgentFieldValue(value, fieldId, childNameMaps) ?? null,
-                              type: info.type || 'text',
-                            };
-                          }).filter(Boolean);
-
-                          // Build data_to_update with key (field_id), name, value (current value), and type
-                          const dataToUpdate = formAction.data_to_update || [];
-                          const dataToUpdateWithTypes = dataToUpdate.map((item: any) => {
-                            // In data_to_update, the field_id is stored in item.value, not item.field_id
-                            const fieldId = item?.value as string | undefined;
-                            if (!fieldId) {
-                              return {
-                                key: null,
-                                name: item?.key ?? null,
-                                value: null,
-                                type: 'text',
-                              };
-                            }
-
-                            const info = fieldInfoMap[fieldId] || { name: fieldId, type: 'text' };
-                            const currentValue = executionDataMap[fieldId] ?? null;
-
-                            return {
-                              key: fieldId,
-                              name: info.name,
-                              value: resolveAgentFieldValue(currentValue, fieldId, childNameMaps),
-                              type: info.type || 'text',
-                            };
+                          // Build the agent payload (array field values re-keyed by child field
+                          // name); fieldInfoMap is reused below for response write-back.
+                          const {
+                            dataToSend: dataToSendWithTypes,
+                            dataToUpdate: dataToUpdateWithTypes,
+                            fieldInfoMap,
+                          } = buildAgentDataPayload({
+                            apiData: formAction.api_data,
+                            dataToUpdateConfig: formAction.data_to_update,
+                            executionDataMap,
+                            fields,
                           });
 
                           // Build headers
