@@ -49,7 +49,9 @@ describe('MistralOcrProvider', () => {
       'test.pdf'
     );
 
-    expect(result.markdown).toBe('# Page 1\nContent of page 1\n\n---\n\n# Page 2\nContent of page 2');
+    expect(result.markdown).toBe(
+      '#Page 1 over 2\n\n# Page 1\nContent of page 1\n\n---\n\n#Page 2 over 2\n\n# Page 2\nContent of page 2'
+    );
     expect(result.pagesProcessed).toBe(2);
     expect(result.provider).toBe('mistral');
     expect(result.model).toBe('mistral-ocr-latest');
