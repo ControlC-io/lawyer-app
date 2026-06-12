@@ -778,6 +778,65 @@ describe('Workflow Endpoints', () => {
       );
     });
 
+    it('should map array item child field ids to names in agent data_to_send and data_to_update', async () => {
+      (prisma.workflowExecutionStep.findFirst as jest.Mock).mockResolvedValue({
+        id: 'ex-step-123',
+        execution_id: 'exec-123',
+        step: {
+          step_type: 'action',
+          action_type: 'agent',
+          config: {
+            agent_id: 'agent-1',
+            api_data: [{ key: 'Documents', value: '{{array-field}}' }],
+            data_to_update: [{ key: 'documents_result', value: 'array-field' }],
+          },
+          workflow: {
+            data_structure: [
+              { id: 'array-field', name: 'Documents', field_type: 'array' },
+              { id: 'child-1', name: 'File Name', field_type: 'text', parent_item_id: 'array-field' },
+              { id: 'child-2', name: 'Amount', field_type: 'number', parent_item_id: 'array-field' },
+            ],
+          },
+        },
+      });
+      (prisma.agentConfiguration.findUnique as jest.Mock).mockResolvedValue({
+        api_url: 'https://agent.example.com',
+        api_method: 'POST',
+        api_headers: [],
+        api_data: [],
+      });
+      (workflowService.getExecutionDataSnapshot as jest.Mock).mockResolvedValue({
+        'array-field': [
+          { _id: 'item-1', 'child-1': 'invoice.pdf', 'child-2': 42, 'unknown-key': 'kept' },
+          'not-an-object',
+        ],
+      });
+      (aiService.callAgentEndpoint as jest.Mock).mockResolvedValue({ success: true, data: {} });
+
+      const response = await request(app)
+        .post('/api/workflows/executions/exec-123/steps/ex-step-123/process')
+        .set(mockAuthHeaders);
+
+      expect(response.status).toBe(200);
+      const expectedValue = [
+        { _id: 'item-1', 'File Name': 'invoice.pdf', Amount: 42, 'unknown-key': 'kept' },
+        'not-an-object',
+      ];
+      expect(aiService.callAgentEndpoint).toHaveBeenCalledWith(
+        'https://agent.example.com',
+        'POST',
+        expect.any(Object),
+        expect.objectContaining({
+          data_to_send: [
+            { key: 'array-field', name: 'Documents', type: 'array', value: expectedValue },
+          ],
+          data_to_update: [
+            { key: 'array-field', name: 'Documents', type: 'array', value: expectedValue },
+          ],
+        })
+      );
+    });
+
     it('should resolve {{ field }} template in api_data from execution snapshot', async () => {
       (prisma.workflowExecutionStep.findFirst as jest.Mock).mockResolvedValue({
         id: 'ex-step-123',

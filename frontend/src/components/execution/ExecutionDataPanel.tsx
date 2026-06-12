@@ -28,6 +28,7 @@ import { FormPageStepper } from "@/components/execution/FormPageStepper";
 import { getStepExecutionStyles } from "@/lib/stepTypeColors";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { getActiveRunningStep } from "@/lib/executionSteps";
+import { buildChildFieldNameMaps, resolveAgentFieldValue } from "@/lib/agentPayload";
 const FIXED_FORM_PRIMARY_COLOR = "#2A5CE5";
 
 interface ExecutionDataPanelProps {
@@ -1658,6 +1659,9 @@ export const ExecutionDataPanel = ({
                             }
                           });
                           
+                          // Array field values are re-keyed by child field name (same as process-automatic-step)
+                          const childNameMaps = buildChildFieldNameMaps(fields);
+
                           // Build data_to_send with key (field_id), name, value, and type (same as process-automatic-step)
                           // We only include items that are bound to a workflow field ({{field_id}})
                           const dataToSendWithTypes = (formAction.api_data || []).map((item: any) => {
@@ -1678,11 +1682,11 @@ export const ExecutionDataPanel = ({
                             return {
                               key: fieldId,
                               name: info.name,
-                              value: value ?? null,
+                              value: resolveAgentFieldValue(value, fieldId, childNameMaps) ?? null,
                               type: info.type || 'text',
                             };
                           }).filter(Boolean);
-                          
+
                           // Build data_to_update with key (field_id), name, value (current value), and type
                           const dataToUpdate = formAction.data_to_update || [];
                           const dataToUpdateWithTypes = dataToUpdate.map((item: any) => {
@@ -1699,11 +1703,11 @@ export const ExecutionDataPanel = ({
 
                             const info = fieldInfoMap[fieldId] || { name: fieldId, type: 'text' };
                             const currentValue = executionDataMap[fieldId] ?? null;
-                            
+
                             return {
                               key: fieldId,
                               name: info.name,
-                              value: currentValue,
+                              value: resolveAgentFieldValue(currentValue, fieldId, childNameMaps),
                               type: info.type || 'text',
                             };
                           });

@@ -9,6 +9,7 @@ import { ChevronDown, ChevronUp, Wrench, Send, Loader2, Edit2, Check, X, Copy, E
 import { useToast } from "@/hooks/use-toast";
 import { api } from "@/lib/api";
 import { resolvePromptTemplate, type PromptValues } from "@/lib/promptTemplate";
+import { buildChildFieldNameMaps, resolveAgentFieldValue } from "@/lib/agentPayload";
 
 interface WebhookConfig {
     url: string;
@@ -175,13 +176,14 @@ export const DevModeBanner = ({
                         }
                     });
 
+                    const childNameMaps = buildChildFieldNameMaps(fields as any[]);
                     const dataToSendWithTypes = (apiData as any[]).map((item: any) => {
                         if (!item?.value || typeof item.value !== 'string' || !item.value.startsWith('{{') || !item.value.endsWith('}}')) {
                             return null;
                         }
                         const fieldId = item.value.slice(2, -2).trim();
                         const info = fieldInfoMap[fieldId] || { name: fieldId, type: 'text' };
-                        const value = executionDataMap[fieldId] ?? null;
+                        const value = resolveAgentFieldValue(executionDataMap[fieldId] ?? null, fieldId, childNameMaps);
                         return { key: fieldId, name: info.name, value, type: info.type };
                     }).filter(Boolean);
 
@@ -200,7 +202,7 @@ export const DevModeBanner = ({
                             return { key: null, name: item?.key ?? null, value: null, type: 'text' };
                         }
                         const info = fieldInfoMap[fieldId] || { name: fieldId, type: 'text' };
-                        const value = executionDataMap[fieldId] ?? null;
+                        const value = resolveAgentFieldValue(executionDataMap[fieldId] ?? null, fieldId, childNameMaps);
                         return { key: fieldId, name: info.name, value, type: info.type };
                     });
 
@@ -388,13 +390,14 @@ export const DevModeBanner = ({
                         }
                     });
 
+                    const childNameMaps = buildChildFieldNameMaps(fields as any[]);
                     const dataToSendWithTypes = (apiData as any[]).map((item: any) => {
                         if (!item?.value || typeof item.value !== 'string' || !item.value.startsWith('{{') || !item.value.endsWith('}}')) {
                             return null;
                         }
                         const fieldId = item.value.slice(2, -2).trim();
                         const info = fieldInfoMap[fieldId] || { name: fieldId, type: 'text' };
-                        const value = executionDataMap[fieldId] ?? null;
+                        const value = resolveAgentFieldValue(executionDataMap[fieldId] ?? null, fieldId, childNameMaps);
                         return { key: fieldId, name: info.name, value, type: info.type };
                     }).filter(Boolean);
 
@@ -413,7 +416,7 @@ export const DevModeBanner = ({
                             return { key: null, name: item?.key ?? null, value: null, type: 'text' };
                         }
                         const info = fieldInfoMap[fieldId] || { name: fieldId, type: 'text' };
-                        const value = executionDataMap[fieldId] ?? null;
+                        const value = resolveAgentFieldValue(executionDataMap[fieldId] ?? null, fieldId, childNameMaps);
                         return { key: fieldId, name: info.name, value, type: info.type };
                     });
 
