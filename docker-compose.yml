@@ -61,7 +61,9 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - VITE_API_URL=${VITE_API_URL:-http://localhost:3001}
+      # Empty = browser calls /api on :3000; Vite proxies to backend service inside Docker network.
+      - VITE_API_URL=
+      - VITE_PROXY_TARGET=http://backend:3001
     volumes:
       - .:/usr/src/app
       - /usr/src/app/node_modules
