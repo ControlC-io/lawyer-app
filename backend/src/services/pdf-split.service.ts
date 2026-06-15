@@ -1,4 +1,4 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
+﻿import { GoogleGenerativeAI } from '@google/generative-ai';
 import { PDFDocument } from 'pdf-lib';
 
 export interface SplitSegment {
@@ -119,7 +119,7 @@ export async function proposeSplitWithGemini(params: {
 }): Promise<SplitSegment[]> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error('GEMINI_API_KEY is not configured');
-  const modelName = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
+  const modelName = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 
   if (!params.metadataKeys.length) throw new Error('At least one metadata key is required');
 
@@ -152,7 +152,7 @@ Rules:
 - "name" is the suggested output PDF base name (no path; .pdf will be added later). Use metadata where helpful.
 - "metadata" MUST include every id listed above. Values are strings.
 - start_page and end_page are 1-based inclusive page indices in the original PDF.
-- The OCR uses headings like "#Page N over M" — use these to determine boundaries.
+- The OCR uses headings like "#Page N over M" â€” use these to determine boundaries.
 - Segments must not overlap and should cover all relevant pages (gaps are allowed if the user instructions imply skipping).
 - Reference date (yyyy-mm-dd): ${params.currentDate}
 
@@ -178,7 +178,7 @@ export async function extractMetadataFromOcrWithGemini(params: {
 }): Promise<Record<string, string>> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error('GEMINI_API_KEY is not configured');
-  const modelName = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
+  const modelName = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 
   if (!params.metadataKeys.length) throw new Error('At least one metadata key is required');
 
@@ -232,7 +232,7 @@ export async function proposeFileNameFromOcrWithGemini(params: {
 }): Promise<string> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error('GEMINI_API_KEY is not configured');
-  const modelName = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
+  const modelName = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 
   const ocrBody = truncateOcr(params.ocrMarkdown);
 
@@ -286,7 +286,7 @@ export async function applyPdfSplit(
   for (const s of sorted) {
     if (s.start_page < 1 || s.end_page < s.start_page || s.end_page > pageCount) {
       throw new Error(
-        `Invalid page range for "${s.name}": pages ${s.start_page}–${s.end_page} (PDF has ${pageCount} page(s))`,
+        `Invalid page range for "${s.name}": pages ${s.start_page}â€“${s.end_page} (PDF has ${pageCount} page(s))`,
       );
     }
   }

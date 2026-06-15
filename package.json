@@ -10,11 +10,17 @@
     "mcp-server"
   ],
   "dependencies": {
-    "@prisma/client": "5.22.0"
+    "@prisma/client": "5.22.0",
+    "lodash.clonedeep": "^4.5.0",
+    "lodash.isequal": "^4.5.0"
+  },
+  "optionalDependencies": {
+    "@rollup/rollup-win32-arm64-msvc": "^4.62.0",
+    "@swc/core-win32-arm64-msvc": "^1.15.41"
   },
   "devDependencies": {
-    "prisma": "5.22.0",
-    "@vitejs/plugin-react-swc": "^3.11.0"
+    "@vitejs/plugin-react-swc": "^3.11.0",
+    "prisma": "5.22.0"
   },
   "scripts": {
     "dev": "npm run dev --workspaces --if-present",
