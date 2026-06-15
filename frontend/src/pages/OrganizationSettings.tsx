@@ -1,15 +1,11 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { Copy, RefreshCw, Building, FileText, Trash2, Plus, Upload, Pencil, Palette } from "lucide-react";
+import { Copy, RefreshCw, Building, Upload, Palette } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import type { FileMetadataKey } from "@/components/documents/MetadataValueControl";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { useCompanyId } from "@/hooks/useCompanyId";
@@ -30,18 +26,6 @@ export default function OrganizationSettings() {
   const [company, setCompany] = useState<Company | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const [metadataKeys, setMetadataKeys] = useState<FileMetadataKey[]>([]);
-  const [newKeyName, setNewKeyName] = useState("");
-  const [newKeyKind, setNewKeyKind] = useState<"free_text" | "predefined_list">("free_text");
-  const [newKeyOptions, setNewKeyOptions] = useState("");
-  const [creatingKey, setCreatingKey] = useState(false);
-  const [editKeyOpen, setEditKeyOpen] = useState(false);
-  const [editingKey, setEditingKey] = useState<FileMetadataKey | null>(null);
-  const [editKeyName, setEditKeyName] = useState("");
-  const [editKeyKind, setEditKeyKind] = useState<"free_text" | "predefined_list">("free_text");
-  const [editKeyOptions, setEditKeyOptions] = useState("");
-  const [savingKeyEdit, setSavingKeyEdit] = useState(false);
-
   const [brandingLogoUrl, setBrandingLogoUrl] = useState("");
   const [brandingPrimaryColor, setBrandingPrimaryColor] = useState("#3B82F6");
   const [showBrandingLogoUrlInput, setShowBrandingLogoUrlInput] = useState(false);
@@ -56,7 +40,6 @@ export default function OrganizationSettings() {
   useEffect(() => {
     if (companyId) {
       void fetchCompanyData();
-      void fetchMetadataKeys();
     }
   }, [companyId]);
 
@@ -81,110 +64,6 @@ export default function OrganizationSettings() {
     } catch (error) {
       console.error("Failed to copy to clipboard:", error);
       toast.error(t("organizationSettings.failedToCopyToClipboard"));
-    }
-  };
-
-  const fetchMetadataKeys = async () => {
-    try {
-      const data = await api.get<FileMetadataKey[]>(`/api/companies/${companyId}/files-metadata-keys`);
-      setMetadataKeys(data || []);
-    } catch (error) {
-      console.error("Error fetching metadata keys:", error);
-      toast.error(t("organizationSettings.failedToLoadMetadataKeys"));
-    }
-  };
-
-  const handleCreateKey = async () => {
-    if (!newKeyName.trim()) return;
-    if (newKeyKind === "predefined_list") {
-      const opts = newKeyOptions.split("\n").map((s) => s.trim()).filter(Boolean);
-      if (opts.length === 0) {
-        toast.error(t("organizationSettings.predefinedListNeedsOption"));
-        return;
-      }
-    }
-    setCreatingKey(true);
-    try {
-      const allowed_values =
-        newKeyKind === "predefined_list"
-          ? newKeyOptions.split("\n").map((s) => s.trim()).filter(Boolean)
-          : [];
-      await api.post(`/api/companies/${companyId}/files-metadata-keys`, {
-        name: newKeyName.trim(),
-        value_kind: newKeyKind,
-        allowed_values,
-      });
-      toast.success(t("organizationSettings.metadataKeyCreated"));
-      setNewKeyName("");
-      setNewKeyKind("free_text");
-      setNewKeyOptions("");
-      void fetchMetadataKeys();
-    } catch (error) {
-      console.error("Error creating metadata key:", error);
-      toast.error(t("organizationSettings.failedToCreateMetadataKey"));
-    } finally {
-      setCreatingKey(false);
-    }
-  };
-
-  const openEditKey = (key: FileMetadataKey) => {
-    setEditingKey(key);
-    setEditKeyName(key.name ?? "");
-    setEditKeyKind(key.value_kind === "predefined_list" ? "predefined_list" : "free_text");
-    const raw = key.allowed_values;
-    const lines = Array.isArray(raw) ? raw.filter((x): x is string => typeof x === "string") : [];
-    setEditKeyOptions(lines.join("\n"));
-    setEditKeyOpen(true);
-  };
-
-  const handleSaveKeyEdit = async () => {
-    if (!editingKey || !editKeyName.trim()) return;
-    if (editKeyKind === "predefined_list") {
-      const opts = editKeyOptions.split("\n").map((s) => s.trim()).filter(Boolean);
-      if (opts.length === 0) {
-        toast.error(t("organizationSettings.predefinedListNeedsOption"));
-        return;
-      }
-    }
-    setSavingKeyEdit(true);
-    try {
-      const allowed_values =
-        editKeyKind === "predefined_list"
-          ? editKeyOptions.split("\n").map((s) => s.trim()).filter(Boolean)
-          : [];
-      await api.patch(`/api/companies/${companyId}/files-metadata-keys/${editingKey.id}`, {
-        name: editKeyName.trim(),
-        value_kind: editKeyKind,
-        allowed_values,
-      });
-      toast.success(t("organizationSettings.metadataKeyUpdated"));
-      setEditKeyOpen(false);
-      setEditingKey(null);
-      void fetchMetadataKeys();
-    } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : "";
-      if (msg.includes("Cannot remove") || msg.includes("Cannot apply") || msg.includes("Conflict")) {
-        toast.error(t("organizationSettings.metadataKeyConflict"));
-      } else {
-        console.error("Error updating metadata key:", error);
-        toast.error(t("organizationSettings.failedToUpdateMetadataKey"));
-      }
-    } finally {
-      setSavingKeyEdit(false);
-    }
-  };
-
-  const handleDeleteKey = async (id: string) => {
-    if (!confirm(t("organizationSettings.deleteKeyConfirm"))) {
-      return;
-    }
-    try {
-      await api.delete(`/api/companies/${companyId}/files-metadata-keys/${id}`);
-      toast.success(t("organizationSettings.metadataKeyDeleted"));
-      void fetchMetadataKeys();
-    } catch (error) {
-      console.error("Error deleting metadata key:", error);
-      toast.error(t("organizationSettings.failedToDeleteMetadataKey"));
     }
   };
 
@@ -350,13 +229,13 @@ export default function OrganizationSettings() {
         </Button>
       </div>
 
-      <Tabs defaultValue="metadata" className="space-y-6">
+      <Tabs defaultValue="general" className="space-y-6">
         <TabsList className="grid h-auto w-full grid-cols-1 gap-2 md:grid-cols-2">
-          <TabsTrigger value="metadata">{t("organizationSettings.tabs.metadata")}</TabsTrigger>
+          <TabsTrigger value="general">{t("organizationSettings.tabs.general")}</TabsTrigger>
           <TabsTrigger value="branding">{t("organizationSettings.tabs.branding")}</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="metadata" className="space-y-6 mt-0">
+        <TabsContent value="general" className="space-y-6 mt-0">
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -385,127 +264,6 @@ export default function OrganizationSettings() {
                   {new Date(company.created_at).toLocaleDateString()}
                 </p>
               </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <FileText className="h-5 w-5" />
-                {t("organizationSettings.fileMetadataKeys")}
-              </CardTitle>
-              <CardDescription>{t("organizationSettings.fileMetadataKeysDesc")}</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-3 p-3 border rounded-md bg-muted/30">
-                <div className="flex flex-col sm:flex-row gap-2">
-                  <Input
-                    placeholder={t("organizationSettings.newKeyNamePlaceholder")}
-                    value={newKeyName}
-                    onChange={(e) => setNewKeyName(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === "Enter") void handleCreateKey(); }}
-                    className="flex-1"
-                  />
-                  <Select value={newKeyKind} onValueChange={(v: "free_text" | "predefined_list") => setNewKeyKind(v)}>
-                    <SelectTrigger className="w-full sm:w-[200px]">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="free_text">{t("organizationSettings.metadataTypeFreeText")}</SelectItem>
-                      <SelectItem value="predefined_list">{t("organizationSettings.metadataTypePredefined")}</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                {newKeyKind === "predefined_list" && (
-                  <Textarea
-                    value={newKeyOptions}
-                    onChange={(e) => setNewKeyOptions(e.target.value)}
-                    placeholder={t("organizationSettings.predefinedOptionsPlaceholder")}
-                    rows={4}
-                    className="font-mono text-sm"
-                  />
-                )}
-                <Button onClick={handleCreateKey} disabled={creatingKey || !newKeyName.trim()} className="w-full sm:w-auto">
-                  {creatingKey ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4 mr-2" />}
-                  {t("organizationSettings.addMetadataKey")}
-                </Button>
-              </div>
-
-              <div className="space-y-2">
-                {metadataKeys.length === 0 && (
-                  <p className="text-sm text-muted-foreground text-center py-4">
-                    {t("organizationSettings.noMetadataKeysDefined")}
-                  </p>
-                )}
-                {metadataKeys.map((key) => (
-                  <div key={key.id} className="flex items-center justify-between gap-2 p-2 border rounded-md bg-muted/50">
-                    <div className="min-w-0 flex flex-col gap-0.5">
-                      <span className="text-sm font-medium truncate">{key.name}</span>
-                      <span className="text-xs text-muted-foreground">
-                        {key.value_kind === "predefined_list"
-                          ? t("organizationSettings.metadataTypePredefined")
-                          : t("organizationSettings.metadataTypeFreeText")}
-                      </span>
-                    </div>
-                    <div className="flex items-center shrink-0 gap-1">
-                      <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => openEditKey(key)}>
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive"
-                        onClick={() => void handleDeleteKey(key.id)}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              <Dialog open={editKeyOpen} onOpenChange={setEditKeyOpen}>
-                <DialogContent className="max-w-lg">
-                  <DialogHeader>
-                    <DialogTitle>{t("organizationSettings.editMetadataKey")}</DialogTitle>
-                    <DialogDescription>{t("organizationSettings.editMetadataKeyDesc")}</DialogDescription>
-                  </DialogHeader>
-                  {editingKey && (
-                    <div className="space-y-4">
-                      <div className="space-y-2">
-                        <Label>{t("common.name")}</Label>
-                        <Input value={editKeyName} onChange={(e) => setEditKeyName(e.target.value)} />
-                      </div>
-                      <div className="space-y-2">
-                        <Label>{t("common.type")}</Label>
-                        <Select value={editKeyKind} onValueChange={(v: "free_text" | "predefined_list") => setEditKeyKind(v)}>
-                          <SelectTrigger><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="free_text">{t("organizationSettings.metadataTypeFreeText")}</SelectItem>
-                            <SelectItem value="predefined_list">{t("organizationSettings.metadataTypePredefined")}</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      {editKeyKind === "predefined_list" && (
-                        <Textarea
-                          value={editKeyOptions}
-                          onChange={(e) => setEditKeyOptions(e.target.value)}
-                          placeholder={t("organizationSettings.predefinedOptionsPlaceholder")}
-                          rows={6}
-                          className="font-mono text-sm"
-                        />
-                      )}
-                    </div>
-                  )}
-                  <DialogFooter>
-                    <Button variant="outline" onClick={() => setEditKeyOpen(false)}>{t("common.cancel")}</Button>
-                    <Button onClick={handleSaveKeyEdit} disabled={savingKeyEdit || !editKeyName.trim()}>
-                      {savingKeyEdit ? <RefreshCw className="h-4 w-4 animate-spin" /> : null}
-                      {t("common.save")}
-                    </Button>
-                  </DialogFooter>
-                </DialogContent>
-              </Dialog>
             </CardContent>
           </Card>
         </TabsContent>

@@ -166,7 +166,7 @@ export default function DocumentTypes() {
           <CardTitle>{String(t("documentTypes.metadataFieldsTitle"))}</CardTitle>
           <CardDescription>
             {String(t("documentTypes.metadataFieldsDescription"))}{" "}
-            <Link to="/organization-settings" className="underline">
+            <Link to="/metadata-keys" className="underline">
               {String(t("documentTypes.metadataFieldsLink"))}
             </Link>
           </CardDescription>

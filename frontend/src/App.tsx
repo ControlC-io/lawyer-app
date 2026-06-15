@@ -26,6 +26,7 @@ import AcceptInvitation from "./pages/AcceptInvitation";
 import Companies from "./pages/Companies";
 import ArchivedRecords from "./pages/ArchivedRecords";
 import NoOrganization from "./pages/NoOrganization";
+import MetadataKeys from "./pages/MetadataKeys";
 
 const queryClient = new QueryClient();
 
@@ -177,6 +178,7 @@ const App = () => (
                             <Route path="/documents/split-pdf" element={<PermissionRoute permission="documents.view"><SplitPdfPage /></PermissionRoute>} />
                             <Route path="/persons" element={<PermissionRoute permission="persons.view"><Persons /></PermissionRoute>} />
                             <Route path="/document-types" element={<PermissionRoute permission="documents.view"><DocumentTypes /></PermissionRoute>} />
+                            <Route path="/metadata-keys" element={<PermissionRoute permission="org_settings.manage"><MetadataKeys /></PermissionRoute>} />
                             <Route path="/users-groups" element={<UsersGroups />} />
                             <Route path="/organization-settings" element={<OrganizationSettings />} />
                             <Route path="/user-settings" element={<UserSettings />} />

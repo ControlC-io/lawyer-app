@@ -136,12 +136,14 @@
     "no": "No"
   },
   "sidebar": {
+    "brandTagline": "Document management",
     "groupResources": "Resources",
     "groupAdministration": "Administration",
     "groupSuperAdministration": "Super Administration",
     "documents": "Documents",
     "persons": "Persons",
     "documentTypes": "Document types",
+    "metadataKeys": "Metadata Keys",
     "splitPdf": "Split PDF",
     "usersGroups": "Users & Groups",
     "userSettings": "User Settings",
@@ -182,7 +184,15 @@
     "fullName": "Full name",
     "nationalId": "National ID",
     "notes": "Notes",
-    "openDocuments": "Documents"
+    "openDocuments": "Documents",
+    "searchPlaceholder": "Search by name, ID, or notes...",
+    "noResults": "No persons match your search.",
+    "paginationShowing": "Showing {{from}} to {{to}} of {{total}} persons",
+    "pageOf": "Page {{page}} of {{total}}"
+  },
+  "metadataKeys": {
+    "title": "Metadata Keys",
+    "subtitle": "Define the fields used to tag and classify documents across your organization"
   },
   "documentTypes": {
     "title": "Document types",
@@ -191,7 +201,7 @@
     "listDescription": "Each type defines which metadata fields to extract after OCR.",
     "metadataFieldsTitle": "Available metadata fields",
     "metadataFieldsDescription": "Define reusable fields in",
-    "metadataFieldsLink": "organization settings",
+    "metadataFieldsLink": "Metadata Keys",
     "noMetadataKeys": "No metadata fields defined yet.",
     "add": "Add document type",
     "empty": "No document types yet.",
@@ -872,11 +882,8 @@
     "admin": "Admin",
     "user": "User",
     "tabs": {
-      "api": "API",
-      "mcp": "MCP",
+      "general": "General",
       "metadata": "Metadata",
-      "portal": "Portal",
-      "members": "Members",
       "branding": "Branding"
     },
     "mcp": {
@@ -1155,7 +1162,7 @@
     "metadataKeysLabel": "Metadata to extract",
     "metadataKeysHint": "Choose which fields the model should fill for each output file. Keys with a predefined list must use one of the allowed values.",
     "metadataKeysLoading": "Loading metadata keys…",
-    "metadataKeysEmpty": "No metadata keys are defined for this organization. Add keys in organization settings, then return here.",
+    "metadataKeysEmpty": "No metadata keys are defined for this organization. Add keys in Metadata Keys, then return here.",
     "metadataKeyUnnamed": "Unnamed field",
     "metadataPredefinedOptions": "Allowed values",
     "namingRules": "Additional instructions",

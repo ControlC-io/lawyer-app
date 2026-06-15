@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Plus, Pencil, Trash2, FolderOpen } from "lucide-react";
+import { Plus, Pencil, Trash2, FolderOpen, Search, ChevronLeft, ChevronRight } from "lucide-react";
 import { api } from "@/lib/api";
 import { useCompanyId } from "@/hooks/useCompanyId";
 import { useLanguage } from "@/contexts/LanguageContext";
@@ -40,6 +40,32 @@ export default function Persons() {
   const [nationalId, setNationalId] = useState("");
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
+  const [query, setQuery] = useState("");
+  const [page, setPage] = useState(1);
+  const itemsPerPage = 10;
+
+  const filteredPersons = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return persons;
+    return persons.filter(
+      (p) =>
+        p.full_name.toLowerCase().includes(q) ||
+        (p.national_id?.toLowerCase().includes(q) ?? false) ||
+        (p.notes?.toLowerCase().includes(q) ?? false),
+    );
+  }, [persons, query]);
+
+  const paginatedPersons = useMemo(() => {
+    const start = (page - 1) * itemsPerPage;
+    return filteredPersons.slice(start, start + itemsPerPage);
+  }, [filteredPersons, page]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredPersons.length / itemsPerPage));
+
+  const handleSearchChange = (value: string) => {
+    setQuery(value);
+    setPage(1);
+  };
 
   const loadPersons = async () => {
     if (!companyId) return;
@@ -57,6 +83,10 @@ export default function Persons() {
   useEffect(() => {
     void loadPersons();
   }, [companyId]);
+
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
 
   const openCreate = () => {
     setEditing(null);
@@ -138,15 +168,26 @@ export default function Persons() {
         <CardHeader>
           <CardTitle>{String(t("persons.listTitle"))}</CardTitle>
           <CardDescription>{String(t("persons.listDescription"))}</CardDescription>
+          <div className="relative max-w-md pt-2">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              className="pl-9"
+              placeholder={String(t("persons.searchPlaceholder"))}
+              value={query}
+              onChange={(e) => handleSearchChange(e.target.value)}
+            />
+          </div>
         </CardHeader>
         <CardContent>
           {loading ? (
             <p className="text-sm text-muted-foreground">{String(t("common.loading"))}</p>
           ) : persons.length === 0 ? (
             <p className="text-sm text-muted-foreground">{String(t("persons.empty"))}</p>
+          ) : filteredPersons.length === 0 ? (
+            <p className="text-sm text-muted-foreground">{String(t("persons.noResults"))}</p>
           ) : (
             <div className="space-y-2">
-              {persons.map((person) => (
+              {paginatedPersons.map((person) => (
                 <div
                   key={person.id}
                   className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 border rounded-md"
@@ -174,6 +215,42 @@ export default function Persons() {
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+          {!loading && filteredPersons.length > 0 && (
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mt-4 pt-4 border-t">
+              <p className="text-sm text-muted-foreground">
+                {String(
+                  t("persons.paginationShowing", {
+                    from: (page - 1) * itemsPerPage + 1,
+                    to: Math.min(page * itemsPerPage, filteredPersons.length),
+                    total: filteredPersons.length,
+                  }),
+                )}
+              </p>
+              {totalPages > 1 && (
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPage((prev) => Math.max(prev - 1, 1))}
+                    disabled={page === 1}
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </Button>
+                  <span className="text-sm">
+                    {String(t("persons.pageOf", { page, total: totalPages }))}
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPage((prev) => Math.min(prev + 1, totalPages))}
+                    disabled={page === totalPages}
+                  >
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                </div>
+              )}
             </div>
           )}
         </CardContent>

@@ -142,6 +142,7 @@
     "documents": "Documents",
     "persons": "Personnes",
     "documentTypes": "Types de document",
+    "metadataKeys": "Clés de métadonnées",
     "splitPdf": "Découper PDF",
     "usersGroups": "Utilisateurs & Groupes",
     "userSettings": "Paramètres utilisateur",
@@ -182,7 +183,15 @@
     "fullName": "Nom complet",
     "nationalId": "Identifiant national",
     "notes": "Notes",
-    "openDocuments": "Documents"
+    "openDocuments": "Documents",
+    "searchPlaceholder": "Rechercher par nom, identifiant ou notes...",
+    "noResults": "Aucune personne ne correspond à votre recherche.",
+    "paginationShowing": "Affichage de {{from}} à {{to}} sur {{total}} personnes",
+    "pageOf": "Page {{page}} sur {{total}}"
+  },
+  "metadataKeys": {
+    "title": "Clés de métadonnées",
+    "subtitle": "Définissez les champs utilisés pour étiqueter et classer les documents de l'organisation"
   },
   "documentTypes": {
     "title": "Types de document",
@@ -190,8 +199,8 @@
     "listTitle": "Types configurés",
     "listDescription": "Chaque type définit les métadonnées à extraire après l'OCR.",
     "metadataFieldsTitle": "Champs de métadonnées disponibles",
-    "metadataFieldsDescription": "Définissez les champs réutilisables dans les",
-    "metadataFieldsLink": "paramètres de l'organisation",
+    "metadataFieldsDescription": "Définissez les champs réutilisables dans",
+    "metadataFieldsLink": "Clés de métadonnées",
     "noMetadataKeys": "Aucun champ de métadonnées défini.",
     "add": "Ajouter un type",
     "empty": "Aucun type de document pour le moment.",
@@ -872,11 +881,8 @@
     "admin": "Admin",
     "user": "Utilisateur",
     "tabs": {
-      "api": "API",
-      "mcp": "MCP",
+      "general": "Général",
       "metadata": "Métadonnées",
-      "portal": "Portail",
-      "members": "Membres",
       "branding": "Identité visuelle"
     },
     "mcp": {
@@ -1155,7 +1161,7 @@
     "metadataKeysLabel": "Métadonnées à extraire",
     "metadataKeysHint": "Choisissez les champs que le modèle doit remplir pour chaque fichier. Les listes prédéfinies doivent utiliser une valeur autorisée.",
     "metadataKeysLoading": "Chargement des clés de métadonnées…",
-    "metadataKeysEmpty": "Aucune clé de métadonnée n’est définie pour cette organisation. Ajoutez-en dans les paramètres de l’organisation, puis revenez ici.",
+    "metadataKeysEmpty": "Aucune clé de métadonnée n’est définie pour cette organisation. Ajoutez-en dans Clés de métadonnées, puis revenez ici.",
     "metadataKeyUnnamed": "Champ sans nom",
     "metadataPredefinedOptions": "Valeurs autorisées",
     "namingRules": "Instructions supplémentaires",

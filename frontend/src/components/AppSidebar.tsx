@@ -1,5 +1,5 @@
 import { Link, useLocation } from "react-router-dom";
-import { Users, Building2, FolderOpen, LogOut, Settings, Sun, Globe, User, Archive, FileType } from "lucide-react";
+import { Users, Building2, FolderOpen, LogOut, Settings, Sun, Globe, User, Archive, FileType, Tag } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -29,6 +29,7 @@ import { Label } from "@/components/ui/label";
 import { LanguageSelector } from "@/components/LanguageSelector";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { FeedbackDialog } from "@/components/FeedbackDialog";
+import { cn } from "@/lib/utils";
 
 type MenuItem = { titleKey: string; url: string; icon: typeof FolderOpen; permission?: string };
 
@@ -39,6 +40,7 @@ const menuSections: { groupLabelKey: string; items: MenuItem[] }[] = [
       { titleKey: "sidebar.documents", url: "/documents", icon: FolderOpen, permission: "documents.view" },
       { titleKey: "sidebar.persons", url: "/persons", icon: Users, permission: "persons.view" },
       { titleKey: "sidebar.documentTypes", url: "/document-types", icon: FileType, permission: "documents.view" },
+      { titleKey: "sidebar.metadataKeys", url: "/metadata-keys", icon: Tag, permission: "org_settings.manage" },
     ],
   },
   {
@@ -78,9 +80,17 @@ export function AppSidebar() {
   };
   const customLogoUrl = companyBranding?.internal_logo_url ?? "";
   const shouldUseFallbackLogo = logoLoadFailed || !customLogoUrl;
-  const sidebarLogoSrc = (open || isMobile) ? (shouldUseFallbackLogo ? "/logo.png" : customLogoUrl) : (shouldUseFallbackLogo ? "/favicon.png" : customLogoUrl);
-  const sidebarLogoAlt = (open || isMobile) ? "Company logo" : "Company icon";
-  const showSidebarLogo = open || isMobile || shouldUseFallbackLogo;
+  const isExpanded = open || isMobile;
+  const sidebarLogoSrc = isExpanded
+    ? (shouldUseFallbackLogo ? "/logo.png" : customLogoUrl)
+    : (shouldUseFallbackLogo ? "/favicon.png" : customLogoUrl);
+  const brandTitle =
+    !shouldUseFallbackLogo &&
+    companyBranding?.companyId === selectedCompanyId &&
+    companyBranding.name
+      ? companyBranding.name
+      : "Lawyer App";
+  const brandSubtitle = shouldUseFallbackLogo ? t("sidebar.brandTagline") : null;
 
   const handleLogoError = () => {
     if (!logoLoadFailed) {
@@ -94,17 +104,41 @@ export function AppSidebar() {
 
   return (
     <Sidebar collapsible="icon" className="border-r border-sidebar-border" style={{ overflow: 'visible' }}>
-      <SidebarHeader className="border-b border-sidebar-border p-4 flex flex-row items-center justify-center">
-        <div className="flex items-center gap-2">
-          {showSidebarLogo && (
+      <SidebarHeader className="h-14 shrink-0 border-b border-sidebar-border p-0">
+        <Link
+          to="/documents"
+          className={cn(
+            "flex h-full min-w-0 items-center gap-2.5 overflow-hidden transition-colors hover:bg-sidebar-accent/60",
+            isExpanded ? "justify-start px-3" : "justify-center px-0",
+          )}
+          title={brandTitle}
+        >
+          <div
+            className={cn(
+              "flex shrink-0 items-center justify-center overflow-hidden rounded-md border border-primary/10 bg-gradient-to-br from-primary/10 to-[hsl(var(--brand-secondary)/0.12)]",
+              isExpanded ? "h-9 w-9" : "h-8 w-8",
+            )}
+          >
             <img
               src={sidebarLogoSrc}
-              alt={sidebarLogoAlt}
-              className="h-8"
+              alt={brandTitle}
+              className={cn("object-contain", isExpanded ? "h-7 w-7" : "h-5 w-5")}
               onError={handleLogoError}
             />
+          </div>
+          {isExpanded && (
+            <div className="flex min-w-0 flex-col gap-0.5">
+              <span className="truncate text-sm font-semibold leading-none tracking-tight text-sidebar-foreground">
+                {brandTitle}
+              </span>
+              {brandSubtitle && (
+                <span className="truncate text-[11px] leading-none text-sidebar-foreground/60">
+                  {brandSubtitle}
+                </span>
+              )}
+            </div>
           )}
-        </div>
+        </Link>
       </SidebarHeader>
       <SidebarContent>
         {menuSections.map((section) => {
