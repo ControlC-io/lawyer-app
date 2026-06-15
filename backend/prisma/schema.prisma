@@ -17,40 +17,11 @@ enum CompanyRole {
   @@schema("public")
 }
 
-enum ExecutionStatus {
-  pending
-  running
-  completed
-  failed
-  paused
-
-  @@map("execution_status")
-  @@schema("public")
-}
-
-enum LogType {
-  Info
-  Success
-  Error
-
-  @@map("log_type")
-  @@schema("public")
-}
-
 enum FilesMetadataValueKind {
   free_text
   predefined_list
 
   @@map("files_metadata_value_kind")
-  @@schema("public")
-}
-
-enum DecisionNodeType {
-  Human
-  Agent
-  Agent_Human
-
-  @@map("decision_node_type")
   @@schema("public")
 }
 
@@ -62,235 +33,71 @@ model User {
   created_at         DateTime  @default(now()) @db.Timestamptz(6)
   updated_at         DateTime  @default(now()) @db.Timestamptz(6)
   profile            Profile?
-  records_created    DataTableRecord[]
 
   @@map("users")
   @@schema("auth")
 }
 
 model Company {
-  id                    String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name                  String
-  created_at            DateTime               @default(now()) @db.Timestamptz(6)
-  api_key               String?                @unique
-  is_active             Boolean?               @default(true)
-  slug                  String?                @unique
-  logo_url              String?
-  logo_storage_path     String?
-  internal_logo_url     String?
+  id                         String                         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name                       String
+  created_at                 DateTime                       @default(now()) @db.Timestamptz(6)
+  api_key                    String?                        @unique
+  is_active                  Boolean?                       @default(true)
+  slug                       String?                        @unique
+  logo_url                   String?
+  logo_storage_path          String?
+  internal_logo_url          String?
   internal_logo_storage_path String?
-  internal_primary_color String?
-  portal_description    String?
-  portal_primary_color  String?
-  portal_enabled        Boolean                @default(false)
-  portal_default_language String               @default("en")
-  portal_enabled_languages Json                @default("[\"en\"]")
-  agent_permissions     AgentPermission[]
-  api_configurations    ApiConfiguration[]
-  global_variables      DataGlobalVariable[]
-  tables                DataTable[]
-  table_fields          DataTableField[]
-  records               DataTableRecord[]
-  folders               Folder[]
-  files                 File[]
-  metadata_keys         FilesMetadataKey[]
-  metadata_values       FilesMetadataValue[]
-  profile_groups        ProfileGroup[]
-  folder_permissions    FolderPermission[]
-  invitations           Invitation[]
-  notifications         Notification[]
-  user_companies        UserCompany[]
-  workflow_categories   WorkflowCategory[]
-  workflows             Workflow[]
-  workflow_statuses     WorkflowStatus[]
-  workflow_steps        WorkflowStep[]
-  workflow_executions   WorkflowExecution[]
-  execution_steps       WorkflowExecutionStep[]
-  agent_usage           AgentUsage[]
-  workflow_connections  WorkflowConnection[]
-  workflow_execution_data WorkflowExecutionData[]
-  workflow_execution_logs WorkflowExecutionLog[]
-  workflow_files        WorkflowFile[]
-  workflow_permissions  WorkflowPermission[]
-  step_reminder_jobs    StepReminderJob[]
-  roles              Role[]
-  audit_logs         AuditLog[]
-  document_permission_rules      DocumentPermissionRule[]
+  internal_primary_color     String?
+  portal_description         String?
+  portal_primary_color       String?
+  portal_enabled             Boolean                        @default(false)
+  portal_default_language    String                         @default("en")
+  portal_enabled_languages   Json                           @default("[\"en\"]")
+  folders                    Folder[]
+  files                      File[]
+  metadata_keys              FilesMetadataKey[]
+  metadata_values            FilesMetadataValue[]
+  profile_groups             ProfileGroup[]
+  folder_permissions         FolderPermission[]
+  invitations                Invitation[]
+  notifications              Notification[]
+  user_companies             UserCompany[]
+  roles                      Role[]
+  audit_logs                 AuditLog[]
+  document_permission_rules  DocumentPermissionRule[]
   document_permission_assignments DocumentPermissionAssignment[]
-  user_document_tree_configs     UserDocumentTreeConfig[]
-  document_split_presets         DocumentSplitPreset[]
-  file_history_events            FileHistoryEvent[]
+  user_document_tree_configs UserDocumentTreeConfig[]
+  document_split_presets     DocumentSplitPreset[]
+  file_history_events        FileHistoryEvent[]
+  persons                    Person[]
 
   @@map("companies")
   @@schema("public")
 }
 
 model Profile {
-  id                    String                @id @db.Uuid
-  email                 String
-  full_name             String?
-  created_at            DateTime              @default(now()) @db.Timestamptz(6)
-  updated_at            DateTime              @default(now()) @db.Timestamptz(6)
-  notifications_enabled Boolean?              @default(true)
-  user                  User                  @relation(fields: [id], references: [id])
-  admin_role            ProfileAdminRole?
-  files_uploaded        File[]
-  profile_groups_created ProfileGroup[]
-  folder_permissions    FolderPermission[]
-  invitations_sent      Invitation[]
-  notifications         Notification[]
-  group_memberships     ProfileGroupMember[]
-  user_companies        UserCompany[]
-  workflow_steps        WorkflowStep[]
-  workflow_executions   WorkflowExecution[]
-  execution_steps       WorkflowExecutionStep[]
-  workflow_permissions  WorkflowPermission[]
+  id                              String                         @id @db.Uuid
+  email                           String
+  full_name                       String?
+  created_at                      DateTime                       @default(now()) @db.Timestamptz(6)
+  updated_at                      DateTime                       @default(now()) @db.Timestamptz(6)
+  notifications_enabled           Boolean?                       @default(true)
+  user                            User                           @relation(fields: [id], references: [id])
+  admin_role                      ProfileAdminRole?
+  files_uploaded                  File[]
+  profile_groups_created          ProfileGroup[]
+  folder_permissions              FolderPermission[]
+  invitations_sent                Invitation[]
+  notifications                   Notification[]
+  group_memberships               ProfileGroupMember[]
+  user_companies                  UserCompany[]
   document_permission_assignments DocumentPermissionAssignment[]
-  document_tree_configs          UserDocumentTreeConfig[]
-  file_history_events_as_actor   FileHistoryEvent[] @relation("FileHistoryActor")
+  document_tree_configs           UserDocumentTreeConfig[]
+  file_history_events_as_actor    FileHistoryEvent[]             @relation("FileHistoryActor")
 
   @@map("profiles")
-  @@schema("public")
-}
-
-model AgentCategory {
-  id             String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name           String
-  description    String?
-  icon           String?
-  created_at     DateTime             @default(now()) @db.Timestamptz(6)
-  updated_at     DateTime             @default(now()) @db.Timestamptz(6)
-  configurations AgentConfiguration[]
-
-  @@map("agent_categories")
-  @@schema("public")
-}
-
-model AgentConfiguration {
-  id                String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name              String
-  description       String?
-  api_url           String
-  api_method        String            @default("POST")
-  api_headers       Json?             @default("[]")
-  api_params        Json?             @default("[]")
-  prompt_template   String?           @db.Text
-  created_at        DateTime          @default(now()) @db.Timestamptz(6)
-  updated_at        DateTime          @default(now()) @db.Timestamptz(6)
-  is_archived       Boolean           @default(false)
-  archived_datetime DateTime?         @db.Timestamptz(6)
-  category_id       String?           @db.Uuid
-  agent_type        String?
-  category          AgentCategory?    @relation(fields: [category_id], references: [id])
-  permissions       AgentPermission[]
-  usage             AgentUsage[]
-
-  @@index([is_archived, archived_datetime], map: "idx_agent_configurations_archive")
-  @@map("agent_configurations")
-  @@schema("public")
-}
-
-model AgentPermission {
-  id                     String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  agent_configuration_id String             @db.Uuid
-  company_id             String             @db.Uuid
-  enabled                Boolean            @default(true)
-  created_at             DateTime           @default(now()) @db.Timestamptz(6)
-  agent_configuration    AgentConfiguration @relation(fields: [agent_configuration_id], references: [id])
-  company                Company            @relation(fields: [company_id], references: [id])
-
-  @@map("agent_permissions")
-  @@schema("public")
-}
-
-model ApiConfiguration {
-  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name        String
-  description String?
-  config_type String
-  api_url     String
-  api_method  String   @default("POST")
-  api_headers Json?    @default("[]")
-  api_params  Json?    @default("[]")
-  api_data    Json?    @default("[]")
-  company_id  String   @db.Uuid
-  created_at  DateTime @default(now()) @db.Timestamptz(6)
-  updated_at  DateTime @default(now()) @db.Timestamptz(6)
-  company     Company  @relation(fields: [company_id], references: [id])
-
-  @@map("api_configurations")
-  @@schema("public")
-}
-
-model DataGlobalVariable {
-  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  company_id    String   @db.Uuid
-  name          String
-  key           String?
-  variable_type String
-  options       Json?    @default("{}")
-  position      Int      @default(0)
-  value         Json?
-  created_at    DateTime @default(now()) @db.Timestamptz(6)
-  updated_at    DateTime @default(now()) @db.Timestamptz(6)
-  is_locked     Boolean  @default(false)
-  company       Company  @relation(fields: [company_id], references: [id])
-
-  @@map("data_global_variables")
-  @@schema("public")
-}
-
-model DataTable {
-  id               String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name             String
-  description      String?
-  position         Int              @default(0)
-  company_id       String           @db.Uuid
-  created_at       DateTime         @default(now()) @db.Timestamptz(6)
-  updated_at       DateTime         @default(now()) @db.Timestamptz(6)
-  primary_field_id String?          @db.Uuid
-  company          Company          @relation(fields: [company_id], references: [id])
-  fields           DataTableField[] @relation("TableFields")
-  primary_field    DataTableField?  @relation("PrimaryField", fields: [primary_field_id], references: [id])
-  records          DataTableRecord[]
-
-  @@map("data_tables")
-  @@schema("public")
-}
-
-model DataTableField {
-  id            String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  table_id      String      @db.Uuid
-  name          String
-  field_type    String
-  options       Json?
-  position      Int         @default(0)
-  is_required   Boolean     @default(false)
-  company_id    String      @db.Uuid
-  created_at    DateTime    @default(now()) @db.Timestamptz(6)
-  updated_at    DateTime    @default(now()) @db.Timestamptz(6)
-  table         DataTable   @relation("TableFields", fields: [table_id], references: [id])
-  company       Company     @relation(fields: [company_id], references: [id])
-  primary_for   DataTable[] @relation("PrimaryField")
-
-  @@map("data_table_fields")
-  @@schema("public")
-}
-
-model DataTableRecord {
-  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  table_id   String    @db.Uuid
-  data       Json      @default("{}")
-  created_by String?   @db.Uuid
-  company_id String    @db.Uuid
-  created_at DateTime  @default(now()) @db.Timestamptz(6)
-  updated_at DateTime  @default(now()) @db.Timestamptz(6)
-  position   Int       @default(0)
-  table      DataTable @relation(fields: [table_id], references: [id])
-  creator    User?     @relation(fields: [created_by], references: [id])
-  company    Company   @relation(fields: [company_id], references: [id])
-
-  @@map("data_table_records")
   @@schema("public")
 }
 
@@ -307,6 +114,7 @@ model Folder {
   company          Company?           @relation(fields: [company_id], references: [id])
   files            File[]
   permissions      FolderPermission[]
+  person_root      Person?            @relation("PersonRootFolder")
 
   @@map("folders")
   @@schema("public")
@@ -327,7 +135,6 @@ model File {
   is_archived     Boolean              @default(false)
   archived_datetime DateTime?          @db.Timestamptz(6)
 
-  // OCR fields
   ocr_markdown     String?   @db.Text
   ocr_status       String?
   ocr_error        String?   @db.Text
@@ -335,7 +142,6 @@ model File {
   ocr_provider     String?
   ocr_model        String?
 
-  /// UUIDs of metadata keys to fill via Gemini after OCR completes (set at upload).
   ocr_pending_metadata_key_ids Json?
   metadata_ai_extract_status   String?
   metadata_ai_extract_error      String?   @db.Text
@@ -344,7 +150,6 @@ model File {
   uploader        Profile?             @relation(fields: [uploaded_by], references: [id])
   company         Company?             @relation(fields: [company_id], references: [id])
   metadata_values FilesMetadataValue[]
-  workflow_files  WorkflowFile[]
   history_events  FileHistoryEvent[]
 
   @@index([is_archived, archived_datetime], map: "idx_files_archive")
@@ -400,21 +205,35 @@ model FilesMetadataValue {
   @@schema("public")
 }
 
+model Person {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  company_id     String   @db.Uuid
+  full_name      String
+  national_id    String?
+  notes          String?  @db.Text
+  root_folder_id String?  @unique @db.Uuid
+  created_at     DateTime @default(now()) @db.Timestamptz(6)
+  updated_at     DateTime @default(now()) @updatedAt @db.Timestamptz(6)
+  company        Company  @relation(fields: [company_id], references: [id])
+  root_folder    Folder?  @relation("PersonRootFolder", fields: [root_folder_id], references: [id])
+
+  @@index([company_id, created_at(sort: Desc)], map: "idx_persons_company_created")
+  @@map("persons")
+  @@schema("public")
+}
+
 model ProfileGroup {
-  id                 String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name               String
-  description        String?
-  company_id         String?              @db.Uuid
-  created_by         String?              @db.Uuid
-  created_at         DateTime?            @default(now()) @db.Timestamptz(6)
-  updated_at         DateTime?            @default(now()) @db.Timestamptz(6)
-  company            Company?             @relation(fields: [company_id], references: [id])
-  creator            Profile?             @relation(fields: [created_by], references: [id])
-  folder_permissions FolderPermission[]
-  members            ProfileGroupMember[]
-  workflow_steps     WorkflowStep[]
-  execution_steps    WorkflowExecutionStep[]
-  workflow_permissions WorkflowPermission[]
+  id                              String                         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name                            String
+  description                     String?
+  company_id                      String?                        @db.Uuid
+  created_by                      String?                        @db.Uuid
+  created_at                      DateTime?                      @default(now()) @db.Timestamptz(6)
+  updated_at                      DateTime?                      @default(now()) @db.Timestamptz(6)
+  company                         Company?                       @relation(fields: [company_id], references: [id])
+  creator                         Profile?                       @relation(fields: [created_by], references: [id])
+  folder_permissions              FolderPermission[]
+  members                         ProfileGroupMember[]
   document_permission_assignments DocumentPermissionAssignment[]
 
   @@map("profile_groups")
@@ -422,33 +241,33 @@ model ProfileGroup {
 }
 
 model FolderPermission {
-  id              String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  folder_id       String      @db.Uuid
-  user_id         String?     @db.Uuid
-  group_id        String?     @db.Uuid
+  id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  folder_id       String        @db.Uuid
+  user_id         String?       @db.Uuid
+  group_id        String?       @db.Uuid
   permission_type String
-  company_id      String?     @db.Uuid
-  created_at      DateTime    @default(now()) @db.Timestamptz(6)
-  folder          Folder      @relation(fields: [folder_id], references: [id])
-  user            Profile?    @relation(fields: [user_id], references: [id])
+  company_id      String?       @db.Uuid
+  created_at      DateTime      @default(now()) @db.Timestamptz(6)
+  folder          Folder        @relation(fields: [folder_id], references: [id])
+  user            Profile?      @relation(fields: [user_id], references: [id])
   group           ProfileGroup? @relation(fields: [group_id], references: [id])
-  company         Company?    @relation(fields: [company_id], references: [id])
+  company         Company?      @relation(fields: [company_id], references: [id])
 
   @@map("folder_permissions")
   @@schema("public")
 }
 
 model Invitation {
-  id          String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  company_id  String      @db.Uuid
-  email       String
-  token       String      @unique
-  role        CompanyRole @default(user)
-  invited_by  String      @db.Uuid
-  status      String      @default("pending")
-  created_at  DateTime    @default(now()) @db.Timestamptz(6)
-  company     Company     @relation(fields: [company_id], references: [id])
-  inviter     Profile     @relation(fields: [invited_by], references: [id])
+  id         String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  company_id String      @db.Uuid
+  email      String
+  token      String      @unique
+  role       CompanyRole @default(user)
+  invited_by String      @db.Uuid
+  status     String      @default("pending")
+  created_at DateTime    @default(now()) @db.Timestamptz(6)
+  company    Company     @relation(fields: [company_id], references: [id])
+  inviter    Profile     @relation(fields: [invited_by], references: [id])
 
   @@map("invitations")
   @@schema("public")
@@ -484,32 +303,21 @@ model ProfileAdminRole {
 }
 
 model ProfileGroupMember {
-  id         String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  group_id   String?      @db.Uuid
-  profile_id String?      @db.Uuid
-  created_at DateTime?    @default(now()) @db.Timestamptz(6)
+  id         String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  group_id   String?       @db.Uuid
+  profile_id String?       @db.Uuid
+  created_at DateTime?     @default(now()) @db.Timestamptz(6)
   group      ProfileGroup? @relation(fields: [group_id], references: [id])
-  profile    Profile?     @relation(fields: [profile_id], references: [id])
+  profile    Profile?      @relation(fields: [profile_id], references: [id])
 
   @@map("profile_group_members")
   @@schema("public")
 }
 
-model TriggerSetting {
-  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  setting_key   String   @unique
-  setting_value String
-  created_at    DateTime @default(now()) @db.Timestamptz(6)
-  updated_at    DateTime @default(now()) @db.Timestamptz(6)
-
-  @@map("trigger_settings")
-  @@schema("public")
-}
-
 model UserCompany {
-  id         String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  user_id    String      @db.Uuid
-  company_id String      @db.Uuid
+  id             String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id        String      @db.Uuid
+  company_id     String      @db.Uuid
   role           CompanyRole @default(user)
   custom_role_id String?     @db.Uuid
   created_at     DateTime    @default(now()) @db.Timestamptz(6)
@@ -597,15 +405,15 @@ model DocumentPermissionAssignment {
 }
 
 model UserDocumentTreeConfig {
-  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  user_id   String   @db.Uuid
-  company_id String  @db.Uuid
-  key_order Json     @default("[]")
-  hide_key_labels Boolean @default(false)
-  created_at DateTime @default(now()) @db.Timestamptz(6)
-  updated_at DateTime @default(now()) @updatedAt @db.Timestamptz(6)
-  user      Profile  @relation(fields: [user_id], references: [id])
-  company   Company  @relation(fields: [company_id], references: [id])
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id         String   @db.Uuid
+  company_id      String   @db.Uuid
+  key_order       Json     @default("[]")
+  hide_key_labels Boolean  @default(false)
+  created_at      DateTime @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime @default(now()) @updatedAt @db.Timestamptz(6)
+  user            Profile  @relation(fields: [user_id], references: [id])
+  company         Company  @relation(fields: [company_id], references: [id])
 
   @@unique([user_id, company_id])
   @@map("user_document_tree_configs")
@@ -624,292 +432,5 @@ model DocumentSplitPreset {
 
   @@index([company_id, created_at], map: "idx_document_split_presets_company_created_at")
   @@map("document_split_presets")
-  @@schema("public")
-}
-
-model WorkflowCategory {
-  id                 String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name               String
-  description        String?
-  parent_category_id String?            @db.Uuid
-  icon               String?
-  company_id         String             @db.Uuid
-  created_at         DateTime           @default(now()) @db.Timestamptz(6)
-  updated_at         DateTime           @default(now()) @db.Timestamptz(6)
-  parent_category    WorkflowCategory?  @relation("CategoryHierarchy", fields: [parent_category_id], references: [id])
-  sub_categories     WorkflowCategory[] @relation("CategoryHierarchy")
-  company            Company            @relation(fields: [company_id], references: [id])
-  workflows          Workflow[]
-
-  @@map("workflow_categories")
-  @@schema("public")
-}
-
-model Workflow {
-  id                String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name              String
-  description       String?
-  created_at        DateTime           @default(now()) @db.Timestamptz(6)
-  updated_at        DateTime           @default(now()) @db.Timestamptz(6)
-  company_id        String?            @db.Uuid
-  file_enabled      Boolean            @default(false)
-  is_public         Boolean            @default(false)
-  visibility_scope  String             @default("all_company")
-  start_permission_scope String        @default("public")
-  api_enabled       Boolean            @default(false)
-  data_structure    Json?              @default("[]")
-  name_i18n         Json?
-  description_i18n  Json?
-  category_id       String?            @db.Uuid
-  icon              String?
-  default_status_id String?            @db.Uuid
-  is_active         Boolean?           @default(false)
-  is_archived       Boolean            @default(false)
-  archived_datetime DateTime?          @db.Timestamptz(6)
-  portal_enabled    Boolean            @default(false)
-  canvas_comments   Json?
-  company           Company?           @relation(fields: [company_id], references: [id])
-  category          WorkflowCategory?  @relation(fields: [category_id], references: [id])
-  default_status    WorkflowStatus?    @relation("DefaultStatus", fields: [default_status_id], references: [id])
-  statuses          WorkflowStatus[]   @relation("WorkflowStatuses")
-  steps             WorkflowStep[]
-  executions        WorkflowExecution[]
-  connections       WorkflowConnection[]
-  workflow_files    WorkflowFile[]
-  permissions       WorkflowPermission[]
-
-  @@index([is_archived, archived_datetime], map: "idx_workflows_archive")
-  @@map("workflows")
-  @@schema("public")
-}
-
-model WorkflowStatus {
-  id                 String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  workflow_id        String      @db.Uuid
-  name               String
-  order              Int
-  color              String
-  created_at         DateTime    @default(now()) @db.Timestamptz(6)
-  updated_at         DateTime    @default(now()) @db.Timestamptz(6)
-  company_id         String?     @db.Uuid
-  workflow           Workflow    @relation("WorkflowStatuses", fields: [workflow_id], references: [id])
-  default_for        Workflow[]  @relation("DefaultStatus")
-  company            Company?    @relation(fields: [company_id], references: [id])
-
-  @@map("workflow_statuses")
-  @@schema("public")
-}
-
-model WorkflowStep {
-  id                   String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  workflow_id          String            @db.Uuid
-  step_type            String
-  name                 String
-  position_x           Decimal           @default(0) @db.Decimal
-  position_y           Decimal           @default(0) @db.Decimal
-  config               Json?             @default("{}")
-  created_at           DateTime          @default(now()) @db.Timestamptz(6)
-  updated_at           DateTime          @default(now()) @db.Timestamptz(6)
-  assigned_to_user_id  String?           @db.Uuid
-  assigned_to_group_id String?           @db.Uuid
-  decision_node_type   DecisionNodeType?
-  company_id           String?           @db.Uuid
-  action_type          String?           @default("manual")
-  workflow             Workflow          @relation(fields: [workflow_id], references: [id])
-  assigned_user        Profile?          @relation(fields: [assigned_to_user_id], references: [id])
-  assigned_group       ProfileGroup?     @relation(fields: [assigned_to_group_id], references: [id])
-  company              Company?          @relation(fields: [company_id], references: [id])
-  executions           WorkflowExecution[]
-  execution_steps      WorkflowExecutionStep[]
-  connections_source   WorkflowConnection[] @relation("SourceStep")
-  connections_target   WorkflowConnection[] @relation("TargetStep")
-
-  @@map("workflow_steps")
-  @@schema("public")
-}
-
-model WorkflowExecution {
-  id              String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  workflow_id     String            @db.Uuid
-  status          ExecutionStatus   @default(pending)
-  started_at      DateTime?         @db.Timestamptz(6)
-  completed_at    DateTime?         @db.Timestamptz(6)
-  current_step_id String?           @db.Uuid
-  created_by      String?           @db.Uuid
-  created_at      DateTime          @default(now()) @db.Timestamptz(6)
-  updated_at      DateTime          @default(now()) @db.Timestamptz(6)
-  is_archived     Boolean           @default(false)
-  archived_datetime DateTime?       @db.Timestamptz(6)
-  company_id      String?           @db.Uuid
-  execution_data  Json?             @default("{}")
-  name            String?
-  workflow        Workflow          @relation(fields: [workflow_id], references: [id])
-  current_step    WorkflowStep?     @relation(fields: [current_step_id], references: [id])
-  creator         Profile?          @relation(fields: [created_by], references: [id])
-  company         Company?          @relation(fields: [company_id], references: [id])
-  execution_steps WorkflowExecutionStep[]
-  usage           AgentUsage[]
-  execution_data_records WorkflowExecutionData[]
-  execution_logs   WorkflowExecutionLog[]
-
-  @@index([is_archived, archived_datetime], map: "idx_workflow_executions_archive")
-  @@map("workflow_executions")
-  @@schema("public")
-}
-
-model WorkflowExecutionStep {
-  id                   String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  execution_id         String            @db.Uuid
-  step_id              String            @db.Uuid
-  status               ExecutionStatus   @default(pending)
-  started_at           DateTime?         @db.Timestamptz(6)
-  completed_at         DateTime?         @db.Timestamptz(6)
-  step_data            Json?             @default("{}")
-  decision_choice      String?
-  assigned_to_user_id  String?           @db.Uuid
-  assigned_to_group_id String?           @db.Uuid
-  created_at           DateTime          @default(now()) @db.Timestamptz(6)
-  updated_at           DateTime          @default(now()) @db.Timestamptz(6)
-  company_id           String?           @db.Uuid
-  external_token            String?           @db.Uuid
-  external_token_expires_at DateTime?         @db.Timestamptz(6)
-  execution            WorkflowExecution @relation(fields: [execution_id], references: [id])
-  step                 WorkflowStep      @relation(fields: [step_id], references: [id])
-  assigned_user        Profile?          @relation(fields: [assigned_to_user_id], references: [id])
-  assigned_group       ProfileGroup?     @relation(fields: [assigned_to_group_id], references: [id])
-  company              Company?          @relation(fields: [company_id], references: [id])
-  execution_logs       WorkflowExecutionLog[]
-  reminder_jobs        StepReminderJob[]
-
-  @@index([execution_id, step_id, status])
-  @@map("workflow_execution_steps")
-  @@schema("public")
-}
-
-model StepReminderJob {
-  id                   String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  execution_step_id    String                @db.Uuid
-  reminder_key         String
-  company_id           String                @db.Uuid
-  mode                 String
-  status               String                @default("pending")
-  next_run_at          DateTime              @db.Timestamptz(6)
-  repeat_every_minutes Int?
-  max_count            Int?
-  sent_count           Int                   @default(0)
-  schedule_minutes     Json?                 @default("[]")
-  schedule_index       Int?
-  attempt_count        Int                   @default(0)
-  last_error           String?               @db.Text
-  last_sent_at         DateTime?             @db.Timestamptz(6)
-  created_at           DateTime              @default(now()) @db.Timestamptz(6)
-  updated_at           DateTime              @default(now()) @updatedAt @db.Timestamptz(6)
-  execution_step       WorkflowExecutionStep @relation(fields: [execution_step_id], references: [id], onDelete: Cascade)
-  company              Company               @relation(fields: [company_id], references: [id])
-
-  @@index([status, next_run_at], map: "idx_step_reminder_jobs_status_next_run_at")
-  @@index([execution_step_id], map: "idx_step_reminder_jobs_execution_step_id")
-  @@unique([execution_step_id, reminder_key], map: "step_reminder_jobs_execution_step_reminder_key")
-  @@map("step_reminder_jobs")
-  @@schema("public")
-}
-
-model AgentUsage {
-  id                    String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  workflow_execution_id String?             @db.Uuid
-  agent_id              String?             @db.Uuid
-  model_name            String?
-  input_tokens          BigInt?
-  thinking_tokens       BigInt?
-  output_tokens         BigInt?
-  total_cost            Decimal?            @db.Decimal
-  company_id            String?             @db.Uuid
-  comment               String?            @db.Text
-  created_at            DateTime            @default(now()) @db.Timestamptz(6)
-  execution             WorkflowExecution?  @relation(fields: [workflow_execution_id], references: [id])
-  agent                 AgentConfiguration? @relation(fields: [agent_id], references: [id])
-  company               Company?            @relation(fields: [company_id], references: [id])
-
-  @@map("agent_usage")
-  @@schema("public")
-}
-
-model WorkflowConnection {
-  id             String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  workflow_id    String        @db.Uuid
-  source_step_id String        @db.Uuid
-  target_step_id String        @db.Uuid
-  output_name    String?       @default("default")
-  created_at     DateTime      @default(now()) @db.Timestamptz(6)
-  updated_at     DateTime      @default(now()) @db.Timestamptz(6)
-  company_id     String?       @db.Uuid
-  config         Json?
-  workflow       Workflow      @relation(fields: [workflow_id], references: [id])
-  source_step    WorkflowStep  @relation("SourceStep", fields: [source_step_id], references: [id])
-  target_step    WorkflowStep  @relation("TargetStep", fields: [target_step_id], references: [id])
-  company        Company?      @relation(fields: [company_id], references: [id])
-
-  @@map("workflow_connections")
-  @@schema("public")
-}
-
-model WorkflowExecutionData {
-  id           String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  execution_id String            @db.Uuid
-  company_id   String?           @db.Uuid
-  created_at   DateTime          @default(now()) @db.Timestamptz(6)
-  updated_at   DateTime          @default(now()) @db.Timestamptz(6)
-  values       Json?             @default("{}")
-  execution    WorkflowExecution @relation(fields: [execution_id], references: [id])
-  company      Company?          @relation(fields: [company_id], references: [id])
-
-  @@map("workflow_execution_data")
-  @@schema("public")
-}
-
-model WorkflowExecutionLog {
-  id           String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  company_id   String                 @db.Uuid
-  execution_id String                 @db.Uuid
-  log_text     String
-  created_at   DateTime               @default(now()) @db.Timestamptz(6)
-  step_id      String?                @db.Uuid
-  log_type     LogType?
-  execution    WorkflowExecution      @relation(fields: [execution_id], references: [id])
-  company      Company                @relation(fields: [company_id], references: [id])
-  step         WorkflowExecutionStep? @relation(fields: [step_id], references: [id], map: "workflow_execution_log_step_id_fkey")
-
-  @@map("workflow_execution_log")
-  @@schema("public")
-}
-
-model WorkflowFile {
-  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  workflow_id String   @db.Uuid
-  file_id     String   @db.Uuid
-  company_id  String?  @db.Uuid
-  created_at  DateTime @default(now()) @db.Timestamptz(6)
-  workflow    Workflow @relation(fields: [workflow_id], references: [id])
-  file        File     @relation(fields: [file_id], references: [id])
-  company     Company? @relation(fields: [company_id], references: [id])
-
-  @@map("workflow_files")
-  @@schema("public")
-}
-
-model WorkflowPermission {
-  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  workflow_id     String   @db.Uuid
-  user_id         String?  @db.Uuid
-  group_id        String?  @db.Uuid
-  permission_type String
-  company_id      String?  @db.Uuid
-  created_at      DateTime @default(now()) @db.Timestamptz(6)
-  workflow        Workflow @relation(fields: [workflow_id], references: [id])
-  user            Profile? @relation(fields: [user_id], references: [id])
-  group           ProfileGroup? @relation(fields: [group_id], references: [id])
-  company         Company? @relation(fields: [company_id], references: [id])
-
-  @@map("workflow_permissions")
   @@schema("public")
 }

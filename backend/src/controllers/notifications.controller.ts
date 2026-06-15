@@ -1,7 +1,6 @@
 import { Response } from 'express';
 import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
-import { notificationService } from '../services/notification.service';
 
 export const notificationsController = {
   /**
@@ -112,42 +111,6 @@ export const notificationsController = {
       return res.status(204).send();
     } catch (error) {
       console.error('delete notification error:', error);
-      return res.status(500).json({
-        error: error instanceof Error ? error.message : 'Unknown error',
-      });
-    }
-  },
-
-  /**
-   * POST /api/notifications/assignment
-   * Send assignment notification (was: send-assignment-notification)
-   */
-  async sendAssignmentNotification(req: AuthRequest, res: Response) {
-    try {
-      const { execution_step_id } = req.body;
-
-      if (!execution_step_id) {
-        return res.status(400).json({
-          error: 'execution_step_id is required',
-        });
-      }
-
-      const result = await notificationService.dispatchAssignmentForExecutionStep(execution_step_id);
-      if (!result.found) {
-        return res.status(404).json({
-          error: 'Step instance not found',
-        });
-      }
-
-      return res.json({
-        success: true,
-        message: result.message,
-        recipients_total: result.recipients_total,
-        recipients_notified: result.recipients_notified,
-        recipients_emailed: result.recipients_emailed,
-      });
-    } catch (error) {
-      console.error('Notification error:', error);
       return res.status(500).json({
         error: error instanceof Error ? error.message : 'Unknown error',
       });

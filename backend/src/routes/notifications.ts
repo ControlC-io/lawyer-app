@@ -49,15 +49,5 @@ router.post(
   asyncHandler(notificationsController.markAllAsRead)
 );
 
-/**
- * POST /api/notifications/assignment
- * Send assignment notification
- * Auth: JWT
- */
-router.post(
-  '/assignment',
-  authMiddleware,
-  asyncHandler(notificationsController.sendAssignmentNotification)
-);
 
 export default router;

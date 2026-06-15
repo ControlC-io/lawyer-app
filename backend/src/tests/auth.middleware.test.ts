@@ -14,7 +14,6 @@ jest.mock('../lib/prisma', () => ({
   prisma: {
     company: { findUnique: jest.fn() },
     user: { findUnique: jest.fn() },
-    workflowExecutionStep: { findFirst: jest.fn() },
   },
 }));
 
@@ -443,67 +442,17 @@ describe('auth middleware', () => {
   });
 
   describe('externalStepAuth', () => {
-    it('returns 401 when token is missing', async () => {
-      const req = mockRequest({ params: {} });
-      const res = mockResponse();
-      const next = mockNext();
-
-      await externalStepAuth(req, res, next);
-
-      expect(res.status).toHaveBeenCalledWith(401);
-      expect(res.json).toHaveBeenCalledWith(
-        expect.objectContaining({ error: 'Missing token' })
-      );
-      expect(next).not.toHaveBeenCalled();
-    });
-
-    it('returns 404 when step not found for token', async () => {
-      (prisma.workflowExecutionStep.findFirst as jest.Mock).mockResolvedValue(null);
+    it('returns 410 because external workflow forms were removed', async () => {
       const req = mockRequest({ params: { token: 'some-token' } });
       const res = mockResponse();
       const next = mockNext();
 
       await externalStepAuth(req, res, next);
 
-      expect(res.status).toHaveBeenCalledWith(404);
+      expect(res.status).toHaveBeenCalledWith(410);
       expect(res.json).toHaveBeenCalledWith(
-        expect.objectContaining({ error: 'Invalid or expired token' })
+        expect.objectContaining({ error: 'Gone' })
       );
-      expect(next).not.toHaveBeenCalled();
-    });
-
-    it('calls next() when step found for token', async () => {
-      const executionStep = {
-        id: 'es-1',
-        execution: { id: 'e1', company_id: 'c1' },
-        step: { id: 's1', step_type: 'edit_form' },
-      };
-      (prisma.workflowExecutionStep.findFirst as jest.Mock).mockResolvedValue(executionStep);
-      const req = mockRequest({ params: { token: 'valid-token' } }) as AuthRequest & {
-        executionStep?: unknown;
-      };
-      const res = mockResponse();
-      const next = mockNext();
-
-      await externalStepAuth(req, res, next);
-
-      expect(req.executionStep).toEqual(executionStep);
-      expect(next).toHaveBeenCalled();
-      expect(res.status).not.toHaveBeenCalled();
-    });
-
-    it('returns 500 when prisma throws', async () => {
-      (prisma.workflowExecutionStep.findFirst as jest.Mock).mockRejectedValue(
-        new Error('DB error')
-      );
-      const req = mockRequest({ params: { token: 't' } });
-      const res = mockResponse();
-      const next = mockNext();
-
-      await externalStepAuth(req, res, next);
-
-      expect(res.status).toHaveBeenCalledWith(500);
-      expect(res.json).toHaveBeenCalledWith({ error: 'Internal server error' });
       expect(next).not.toHaveBeenCalled();
     });
   });

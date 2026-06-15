@@ -176,6 +176,8 @@ interface TreeNode {
 interface Props {
   companyId: string;
   canManage?: boolean;
+  defaultFolderId?: string | null;
+  personLabel?: string | null;
 }
 
 function nodeDirectlyMatches(node: TreeNode, query: string): boolean {
@@ -446,7 +448,12 @@ function createHighlightComponents(regex: RegExp, activeIndex: number) {
   };
 }
 
-export default function MetadataDocumentView({ companyId, canManage = false }: Props) {
+export default function MetadataDocumentView({
+  companyId,
+  canManage = false,
+  defaultFolderId = null,
+  personLabel = null,
+}: Props) {
   const [files, setFiles] = useState<FileType[]>([]);
   const [totalFileCount, setTotalFileCount] = useState(0);
   const [tree, setTree] = useState<TreeNode[]>([]);
@@ -500,6 +507,16 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
   const [extractMetadataAfterOcr, setExtractMetadataAfterOcr] = useState(false);
   const [selectedExtractMetadataKeyIds, setSelectedExtractMetadataKeyIds] = useState<string[]>([]);
   const [extractRenameInstructionsAfterUpload, setExtractRenameInstructionsAfterUpload] = useState("");
+  const [uploadPersons, setUploadPersons] = useState<
+    Array<{ id: string; full_name: string; root_folder_id: string | null }>
+  >([]);
+  const [uploadPersonsLoading, setUploadPersonsLoading] = useState(false);
+  const [selectedUploadPersonId, setSelectedUploadPersonId] = useState("");
+  const [uploadPresets, setUploadPresets] = useState<
+    Array<{ id: string; name: string; namingInstructions: string; metadataKeyIds: string[] }>
+  >([]);
+  const [uploadPresetsLoading, setUploadPresetsLoading] = useState(false);
+  const [selectedUploadPresetId, setSelectedUploadPresetId] = useState("");
   // Per-file extract metadata action
   const [extractDialogOpen, setExtractDialogOpen] = useState(false);
   const [extractTargetFile, setExtractTargetFile] = useState<FileType | null>(null);
@@ -528,6 +545,25 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
     : null;
 
   const canWriteFiles = canManage || hasWriteAccess;
+
+  const uploadFolderId = useMemo(() => {
+    if (defaultFolderId) return defaultFolderId;
+    if (!selectedUploadPersonId) return null;
+    const person = uploadPersons.find((p) => p.id === selectedUploadPersonId);
+    return person?.root_folder_id ?? null;
+  }, [defaultFolderId, selectedUploadPersonId, uploadPersons]);
+
+  const applyUploadPreset = (presetId: string) => {
+    const preset = uploadPresets.find((p) => p.id === presetId);
+    if (!preset) return;
+    const validKeySet = new Set(metadataKeys.map((k) => k.id));
+    const validIds = preset.metadataKeyIds.filter((id) => validKeySet.has(id));
+    setSelectedUploadPresetId(presetId);
+    setSelectedExtractMetadataKeyIds(validIds);
+    setExtractRenameInstructionsAfterUpload(preset.namingInstructions);
+    setOcrAfterUpload(true);
+    setExtractMetadataAfterOcr(true);
+  };
   const selectedOcrEligibleFileIds = useMemo(() => {
     const eligibleIds: string[] = [];
     for (const file of files) {
@@ -657,6 +693,44 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
   useEffect(() => {
     fetchFiles();
   }, [fetchFiles]);
+
+  useEffect(() => {
+    if (!isUploadOpen || !companyId) return;
+    let cancelled = false;
+    if (!defaultFolderId) {
+      setUploadPersonsLoading(true);
+      void api
+        .get<Array<{ id: string; full_name: string; root_folder_id: string | null }>>(
+          `/api/companies/${companyId}/persons`,
+        )
+        .then((rows) => {
+          if (!cancelled) setUploadPersons(Array.isArray(rows) ? rows : []);
+        })
+        .catch(() => {
+          if (!cancelled) setUploadPersons([]);
+        })
+        .finally(() => {
+          if (!cancelled) setUploadPersonsLoading(false);
+        });
+    }
+    setUploadPresetsLoading(true);
+    void api
+      .get<{ presets: Array<{ id: string; name: string; namingInstructions: string; metadataKeyIds: string[] }> }>(
+        `/api/companies/${companyId}/documents/split-pdf-presets`,
+      )
+      .then((data) => {
+        if (!cancelled) setUploadPresets(Array.isArray(data?.presets) ? data.presets : []);
+      })
+      .catch(() => {
+        if (!cancelled) setUploadPresets([]);
+      })
+      .finally(() => {
+        if (!cancelled) setUploadPresetsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isUploadOpen, companyId, defaultFolderId]);
 
   // Auto-start polling for files with in-progress OCR
   useEffect(() => {
@@ -971,6 +1045,9 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
           formData.append("extractMetadataRenameInstructions", extractRenameInstructionsAfterUpload.trim());
         }
       }
+    }
+    if (uploadFolderId) {
+      formData.append("folderId", uploadFolderId);
     }
     const wantsExtract =
       ocrAfterUpload && extractMetadataAfterOcr && geminiConfigured && selectedExtractMetadataKeyIds.length > 0;
@@ -2389,6 +2466,8 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
           setOcrAfterUpload(false);
           setExtractMetadataAfterOcr(false);
           setSelectedExtractMetadataKeyIds([]);
+          setSelectedUploadPersonId("");
+          setSelectedUploadPresetId("");
         }
       }}>
         <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
@@ -2463,6 +2542,73 @@ export default function MetadataDocumentView({ companyId, canManage = false }: P
                     </Button>
                   </div>
                 ))}
+              </div>
+            )}
+
+            {personLabel && (
+              <p className="text-sm text-primary font-medium">
+                {String(t("metadataDocuments.uploadPersonContext", { name: personLabel }))}
+              </p>
+            )}
+
+            {!defaultFolderId && (
+              <div className="space-y-1">
+                <Label>{String(t("splitPdf.personLabel"))}</Label>
+                <p className="text-xs text-muted-foreground">{String(t("metadataDocuments.uploadPersonHint"))}</p>
+                {uploadPersonsLoading ? (
+                  <p className="text-xs text-muted-foreground flex items-center gap-1">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    {String(t("splitPdf.personsLoading"))}
+                  </p>
+                ) : (
+                  <select
+                    className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm"
+                    value={selectedUploadPersonId}
+                    onChange={(e) => setSelectedUploadPersonId(e.target.value)}
+                    disabled={isImportBusy || uploadPersons.length === 0}
+                  >
+                    <option value="">{String(t("splitPdf.personSelectPlaceholder"))}</option>
+                    {uploadPersons.map((person) => (
+                      <option key={person.id} value={person.id}>
+                        {person.full_name}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+            )}
+
+            {geminiConfigured && (
+              <div className="space-y-1">
+                <Label>{String(t("splitPdf.presetsLabel"))}</Label>
+                <p className="text-xs text-muted-foreground">{String(t("metadataDocuments.uploadDocumentTypeHint"))}</p>
+                {uploadPresetsLoading ? (
+                  <p className="text-xs text-muted-foreground flex items-center gap-1">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    {String(t("splitPdf.presetsLoading"))}
+                  </p>
+                ) : (
+                  <select
+                    className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm"
+                    value={selectedUploadPresetId}
+                    onChange={(e) => {
+                      const nextId = e.target.value;
+                      if (!nextId) {
+                        setSelectedUploadPresetId("");
+                        return;
+                      }
+                      applyUploadPreset(nextId);
+                    }}
+                    disabled={isImportBusy || uploadPresets.length === 0}
+                  >
+                    <option value="">{String(t("splitPdf.presetSelectPlaceholder"))}</option>
+                    {uploadPresets.map((preset) => (
+                      <option key={preset.id} value={preset.id}>
+                        {preset.name}
+                      </option>
+                    ))}
+                  </select>
+                )}
               </div>
             )}
 

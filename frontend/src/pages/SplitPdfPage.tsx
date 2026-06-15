@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import SplitPdfPageStrip from "@/components/documents/SplitPdfPageStrip";
@@ -57,6 +57,12 @@ interface SplitPdfPreset {
   metadataKeyIds: string[];
   createdAt: string;
   updatedAt: string;
+}
+
+interface PersonOption {
+  id: string;
+  full_name: string;
+  root_folder_id: string | null;
 }
 
 function mergeSegmentMetadata(
@@ -260,6 +266,7 @@ function stepIndex(step: Step): number {
 export default function SplitPdfPage() {
   const companyId = useCompanyId();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { t } = useLanguage();
   const { hasPermission } = useAuth();
   const { toast } = useToast();
@@ -289,6 +296,9 @@ export default function SplitPdfPage() {
   const [keepOriginalFile, setKeepOriginalFile] = useState(false);
   /** When true (default), each created PDF is queued for OCR like a new upload. */
   const [ocrCreatedFiles, setOcrCreatedFiles] = useState(true);
+  const [persons, setPersons] = useState<PersonOption[]>([]);
+  const [personsLoading, setPersonsLoading] = useState(false);
+  const [selectedPersonId, setSelectedPersonId] = useState("");
   const canManagePresets = hasPermission("documents.manage");
 
   const goBackToDocuments = useCallback(() => {
@@ -363,6 +373,37 @@ export default function SplitPdfPage() {
       cancelled = true;
     };
   }, [companyId, step]);
+
+  useEffect(() => {
+    if (!companyId || step !== "configure") return;
+    let cancelled = false;
+    setPersonsLoading(true);
+    void api
+      .get<PersonOption[]>(`/api/companies/${companyId}/persons`)
+      .then((data) => {
+        if (cancelled) return;
+        const rows = Array.isArray(data) ? data : [];
+        setPersons(rows);
+        const fromUrl = searchParams.get("personId");
+        if (fromUrl && rows.some((p) => p.id === fromUrl)) {
+          setSelectedPersonId(fromUrl);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setPersons([]);
+      })
+      .finally(() => {
+        if (!cancelled) setPersonsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [companyId, step, searchParams]);
+
+  const selectedPersonFolderId = useMemo(() => {
+    const person = persons.find((p) => p.id === selectedPersonId);
+    return person?.root_folder_id ?? null;
+  }, [persons, selectedPersonId]);
 
   const fetchPresets = useCallback(async () => {
     if (!companyId) return;
@@ -700,6 +741,7 @@ export default function SplitPdfPage() {
           segments: normalized.segments,
           keepOriginalFile,
           ocrCreatedFiles,
+          ...(selectedPersonFolderId ? { folderId: selectedPersonFolderId } : {}),
         },
       );
       const ocrNote =
@@ -810,6 +852,30 @@ export default function SplitPdfPage() {
 
         {step === "configure" && (
           <div className="space-y-6 max-w-3xl flex-1 flex flex-col">
+            <div>
+              <Label>{String(t("splitPdf.personLabel"))}</Label>
+              <p className="text-sm text-muted-foreground mt-1">{String(t("splitPdf.personHint"))}</p>
+              {personsLoading ? (
+                <p className="text-sm text-muted-foreground mt-2 flex items-center gap-2">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  {String(t("splitPdf.personsLoading"))}
+                </p>
+              ) : (
+                <select
+                  value={selectedPersonId}
+                  onChange={(e) => setSelectedPersonId(e.target.value)}
+                  className="mt-2 h-10 w-full rounded-md border bg-background px-3 text-sm"
+                  disabled={busy || persons.length === 0}
+                >
+                  <option value="">{String(t("splitPdf.personSelectPlaceholder"))}</option>
+                  {persons.map((person) => (
+                    <option key={person.id} value={person.id}>
+                      {person.full_name}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
             <div>
               <Label>{String(t("splitPdf.presetsLabel"))}</Label>
               <p className="text-sm text-muted-foreground mt-1">{String(t("splitPdf.presetsHint"))}</p>

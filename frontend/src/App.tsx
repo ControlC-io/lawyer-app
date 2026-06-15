@@ -2,7 +2,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route, Navigate, useParams } from "react-router-dom";
+import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/AppSidebar";
 import { Header } from "@/components/Header";
@@ -14,28 +14,18 @@ import { ThemeProvider } from "next-themes";
 import { useTheme } from "next-themes";
 import { useEffect } from "react";
 import Auth from "./pages/Auth";
-import WorkflowList from "./pages/WorkflowList";
-import WorkflowEditor from "./pages/WorkflowEditor";
-import WorkflowExecutions from "./pages/WorkflowExecutions";
-import ExecutionDetail from "./pages/ExecutionDetail";
-import ExecutionData from "./pages/ExecutionData";
 import DocumentManagement from "./pages/DocumentManagement";
 import SplitPdfPage from "./pages/SplitPdfPage";
+import Persons from "./pages/Persons";
+import DocumentTypes from "./pages/DocumentTypes";
 import NotFound from "./pages/NotFound";
 import UsersGroups from "./pages/UsersGroups";
 import OrganizationSettings from "./pages/OrganizationSettings";
 import UserSettings from "./pages/UserSettings";
 import AcceptInvitation from "./pages/AcceptInvitation";
-import ApiConfigurations from "./pages/ApiConfigurations";
-import AgentConfigurations from "./pages/AgentConfigurations";
-import AgentUsage from "./pages/AgentUsage";
 import Companies from "./pages/Companies";
 import ArchivedRecords from "./pages/ArchivedRecords";
 import NoOrganization from "./pages/NoOrganization";
-import { ExternalForm } from "./pages/ExternalForm";
-import CompanyPortal from "./pages/CompanyPortal";
-import Data from "./pages/Data";
-import GlobalVariables from "./pages/GlobalVariables";
 
 const queryClient = new QueryClient();
 
@@ -156,11 +146,6 @@ function CompanyBrandingThemeSync() {
   return null;
 }
 
-function ExternalFormLegacyRedirect() {
-  const { token } = useParams();
-  return <Navigate to={`/external/form/${token ?? ""}`} replace />;
-}
-
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
@@ -175,9 +160,6 @@ const App = () => (
             <Route path="/auth" element={<Auth />} />
             <Route path="/no-organization" element={<NoOrganization />} />
             <Route path="/accept-invitation" element={<AcceptInvitation />} />
-            <Route path="/external/form/:token" element={<ExternalForm />} />
-            <Route path="/external/steps/:token" element={<ExternalFormLegacyRedirect />} />
-            <Route path="/portal/:slug" element={<CompanyPortal />} />
             <Route
               path="/*"
               element={
@@ -190,26 +172,16 @@ const App = () => (
                         <Header />
                         <main className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
                           <Routes>
-                            <Route index element={<WorkflowExecutions />} />
-                            <Route path="/app" element={<WorkflowExecutions />} />
-                            <Route path="/executions" element={<WorkflowExecutions />} />
-                            <Route path="/executions/:id" element={<ExecutionDetail />} />
-                            <Route path="/execution-data" element={<ExecutionData />} />
-                            <Route path="/workflows" element={<WorkflowList />} />
-                            <Route path="/workflow/:id" element={<WorkflowEditor />} />
+                            <Route index element={<PermissionRoute permission="documents.view"><DocumentManagement /></PermissionRoute>} />
                             <Route path="/documents" element={<PermissionRoute permission="documents.view"><DocumentManagement /></PermissionRoute>} />
                             <Route path="/documents/split-pdf" element={<PermissionRoute permission="documents.view"><SplitPdfPage /></PermissionRoute>} />
-                            <Route path="/data/global-variables" element={<GlobalVariables />} />
-                            <Route path="/data" element={<Data />} />
-                            <Route path="/data/:tableId" element={<Data />} />
+                            <Route path="/persons" element={<PermissionRoute permission="persons.view"><Persons /></PermissionRoute>} />
+                            <Route path="/document-types" element={<PermissionRoute permission="documents.view"><DocumentTypes /></PermissionRoute>} />
                             <Route path="/users-groups" element={<UsersGroups />} />
                             <Route path="/organization-settings" element={<OrganizationSettings />} />
                             <Route path="/user-settings" element={<UserSettings />} />
-                            <Route path="/api-configurations" element={<ApiConfigurations />} />
-                            <Route path="/agent-configurations" element={<SuperAdminRoute><AgentConfigurations /></SuperAdminRoute>} />
                             <Route path="/companies" element={<SuperAdminRoute><Companies /></SuperAdminRoute>} />
                             <Route path="/archived-records" element={<SuperAdminRoute><ArchivedRecords /></SuperAdminRoute>} />
-                            <Route path="/agent-usage" element={<PermissionRoute permission="usage.view"><AgentUsage /></PermissionRoute>} />
                             <Route path="*" element={<NotFound />} />
                           </Routes>
                         </main>

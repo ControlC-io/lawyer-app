@@ -44,6 +44,28 @@ async function ensureCompanyAccess(req: AuthRequest, companyId: string) {
   return { userCompany };
 }
 
+async function resolveCompanyFolderId(
+  companyId: string,
+  folderId: unknown,
+): Promise<{ folderId: string | null } | { error: string; status: number }> {
+  if (folderId === undefined || folderId === null || folderId === '') {
+    return { folderId: null };
+  }
+  if (typeof folderId !== 'string') {
+    return { error: 'folderId must be a string', status: 400 };
+  }
+  const trimmed = folderId.trim();
+  if (!trimmed) return { folderId: null };
+  const folder = await prisma.folder.findFirst({
+    where: { id: trimmed, company_id: companyId },
+    select: { id: true },
+  });
+  if (!folder) {
+    return { error: 'Invalid folderId for this company', status: 400 };
+  }
+  return { folderId: folder.id };
+}
+
 function sanitizeFlatFileName(original: string): string {
   return original
     .normalize('NFD')
@@ -794,6 +816,12 @@ export const documentsController = {
     }
 
     const baseTs = Date.now();
+    const resolvedUploadFolder = await resolveCompanyFolderId(companyId, req.body?.folderId);
+    if ('error' in resolvedUploadFolder) {
+      return res.status(resolvedUploadFolder.status).json({ error: resolvedUploadFolder.error });
+    }
+    const uploadFolderId = resolvedUploadFolder.folderId;
+
     const created: Array<{
       id: string;
       name: string;
@@ -831,7 +859,7 @@ export const documentsController = {
           mime_type: file.mimetype,
           size_bytes: BigInt(file.size),
           uploaded_by: userId,
-          folder_id: null,
+          folder_id: uploadFolderId,
           ...(pendingExtractKeyIds && pendingExtractKeyIds.length > 0
             ? {
                 ocr_pending_metadata_key_ids: {
@@ -1627,7 +1655,6 @@ export const documentsController = {
         } catch {
           // Object may not exist in storage; proceed with DB cleanup
         }
-        await prisma.workflowFile.deleteMany({ where: { file_id: sourceFile.id } });
         await prisma.filesMetadataValue.deleteMany({ where: { files_id: sourceFile.id } });
         await prisma.file.delete({ where: { id: sourceFile.id } });
         removedOriginal = true;
@@ -1650,7 +1677,7 @@ export const documentsController = {
 
   async splitPdfApply(req: AuthRequest, res: Response) {
     const { companyId } = req.params;
-    const { fileId, segments, keepOriginalFile, ocrCreatedFiles } = req.body || {};
+    const { fileId, segments, keepOriginalFile, ocrCreatedFiles, folderId: rawFolderId } = req.body || {};
 
     if (!(await assertFlatDocumentWriteAccess(req, companyId, res))) return;
 
@@ -1663,6 +1690,12 @@ export const documentsController = {
     const keepSource = keepOriginalFile === true;
     /** Queue OCR on each output PDF unless explicitly disabled (default: true). */
     const runOcrOnCreated = ocrCreatedFiles !== false;
+
+    const resolvedFolder = await resolveCompanyFolderId(companyId, rawFolderId);
+    if ('error' in resolvedFolder) {
+      return res.status(resolvedFolder.status).json({ error: resolvedFolder.error });
+    }
+    const targetFolderId = resolvedFolder.folderId;
 
     const userId = req.user?.id ?? null;
 
@@ -1747,7 +1780,7 @@ export const documentsController = {
           mime_type: 'application/pdf',
           size_bytes: BigInt(size),
           uploaded_by: userId,
-          folder_id: null,
+          folder_id: targetFolderId,
         },
       });
       await appendFileHistoryEvent({
@@ -1822,7 +1855,6 @@ export const documentsController = {
         } catch {
           // Object may not exist in storage; proceed with DB cleanup
         }
-        await prisma.workflowFile.deleteMany({ where: { file_id: fileId } });
         await prisma.filesMetadataValue.deleteMany({ where: { files_id: fileId } });
         await prisma.file.delete({ where: { id: fileId } });
         removedOriginal = true;

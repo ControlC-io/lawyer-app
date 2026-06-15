@@ -191,53 +191,13 @@ export const apiKeyAuth = async (req: AuthRequest, res: Response, next: NextFunc
 };
 
 /**
- * External step token authentication - for public form submissions
+ * External step token authentication — removed with workflow vertical.
  */
-export const externalStepAuth = async (req: AuthRequest, res: Response, next: NextFunction) => {
-  const token = req.params.token;
-
-  if (!token) {
-    return res.status(401).json({
-      error: 'Missing token',
-      details: 'Token is required in the URL',
-    });
-  }
-
-  try {
-    // Find execution step with this external token
-    const executionStep = await prisma.workflowExecutionStep.findFirst({
-      where: { external_token: token },
-      include: {
-        execution: {
-          select: {
-            id: true,
-            company_id: true,
-          },
-        },
-        step: {
-          select: {
-            id: true,
-            step_type: true,
-          },
-        },
-      },
-    });
-
-    if (!executionStep) {
-      return res.status(404).json({
-        error: 'Invalid or expired token',
-        details: 'The provided token does not match any active step',
-      });
-    }
-
-    // Add execution step info to request
-    (req as any).executionStep = executionStep;
-
-    next();
-  } catch (error) {
-    console.error('External token validation error:', error);
-    return res.status(500).json({ error: 'Internal server error' });
-  }
+export const externalStepAuth = async (_req: AuthRequest, res: Response, _next: NextFunction) => {
+  return res.status(410).json({
+    error: 'Gone',
+    details: 'External workflow forms are no longer supported',
+  });
 };
 
 /**
@@ -320,9 +280,6 @@ export const optionalAuth = async (req: AuthRequest, res: Response, next: NextFu
 
 /**
  * Resolve req.company for apiKeyAuth-only routes when caller is super_admin.
- * If req.company is already set, returns true. If req.user?.super_admin and company_id
- * is provided (X-Company-Id header or body.company_id), loads company and sets req.company.
- * Otherwise sends 401 and returns false.
  */
 export async function resolveCompanyForRequest(
   req: AuthRequest,
@@ -334,42 +291,11 @@ export async function resolveCompanyForRequest(
   if (req.user) {
     const isSuperAdmin = !!req.user.super_admin;
 
-    // Super admins can specify company explicitly via header/body/query
-    let companyId = isSuperAdmin
+    const companyId = isSuperAdmin
       ? (req.headers['x-company-id'] as string) ||
         (req.body?.company_id as string) ||
         (req.query?.company_id as string)
       : undefined;
-
-    // Auto-resolve company from execution if no company explicitly provided
-    if (!companyId && req.params?.executionId) {
-      try {
-        const execution = await prisma.workflowExecution.findUnique({
-          where: { id: req.params.executionId },
-          select: { company_id: true },
-        });
-        if (execution?.company_id) {
-          companyId = execution.company_id;
-        }
-      } catch (error) {
-        console.error('resolveCompanyForRequest: error looking up execution company:', error);
-      }
-    }
-
-    // Auto-resolve company from workflow if no company explicitly provided
-    if (!companyId && req.params?.workflowId) {
-      try {
-        const workflow = await prisma.workflow.findUnique({
-          where: { id: req.params.workflowId },
-          select: { company_id: true },
-        });
-        if (workflow?.company_id) {
-          companyId = workflow.company_id;
-        }
-      } catch (error) {
-        console.error('resolveCompanyForRequest: error looking up workflow company:', error);
-      }
-    }
 
     if (companyId && typeof companyId === 'string') {
       // Non-super_admin JWT users must belong to the resolved company

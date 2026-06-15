@@ -26,9 +26,8 @@ export function NotificationBell() {
 
   const handleNotificationClick = (notification: Notification) => {
     markAsRead(notification.id);
-    
-    if (notification.type === 'assignment' && notification.data?.execution_id) {
-      navigate(`/executions/${notification.data.execution_id}`);
+    if (notification.type === 'assignment') {
+      navigate('/documents');
     }
   };
 

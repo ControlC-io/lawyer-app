@@ -7,31 +7,16 @@ import { prisma } from './prisma';
  * Each key maps to a domain and action from the RBAC spec.
  */
 export const PERMISSIONS = {
-  // 4.1 Executions
-  EXECUTIONS_CREATE_VIEW: 'executions.create_view',
-  EXECUTIONS_DELETE_OWN: 'executions.delete_own',
-  // 4.2 Workflows
-  WORKFLOWS_MANAGE: 'workflows.manage',
-  // 4.3 Execution Data
-  EXECUTION_DATA_VIEW: 'execution_data.view',
-  // 4.4 Data (Tables)
-  DATA_MANAGE_STRUCTURE: 'data.manage_structure',
-  DATA_MANAGE_DATA: 'data.manage_data',
-  DATA_VIEW: 'data.view',
-  // 4.5 Global Variables
-  VARIABLES_VIEW: 'variables.view',
-  VARIABLES_MANAGE: 'variables.manage',
-  // 4.6 Documents
+  // Documents
   DOCUMENTS_VIEW: 'documents.view',
   DOCUMENTS_MANAGE: 'documents.manage',
-  // 4.7 API Configuration
-  API_CONFIG_MANAGE: 'api_config.manage',
-  // 4.8 Users & Groups
+  // Persons
+  PERSONS_VIEW: 'persons.view',
+  PERSONS_MANAGE: 'persons.manage',
+  // Users & Groups
   USERS_GROUPS_MANAGE: 'users_groups.manage',
-  // 4.9 Organisation Settings
+  // Organisation Settings
   ORG_SETTINGS_MANAGE: 'org_settings.manage',
-  // 4.10 Usage
-  USAGE_VIEW: 'usage.view',
 } as const;
 
 export type PermissionKey = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
@@ -43,40 +28,6 @@ export const ALL_PERMISSION_KEYS: PermissionKey[] = Object.values(PERMISSIONS);
  */
 export const PERMISSION_GROUPS = [
   {
-    domain: 'Executions',
-    permissions: [
-      { key: PERMISSIONS.EXECUTIONS_CREATE_VIEW, label: 'Create & View Executions', description: 'Start new executions and view existing ones (workflow-level filters still apply)' },
-      { key: PERMISSIONS.EXECUTIONS_DELETE_OWN, label: 'Delete Own Executions', description: 'Delete executions that the user personally initiated' },
-    ],
-  },
-  {
-    domain: 'Workflows',
-    permissions: [
-      { key: PERMISSIONS.WORKFLOWS_MANAGE, label: 'Manage Workflows', description: 'Create, edit, and delete workflow definitions' },
-    ],
-  },
-  {
-    domain: 'Execution Data',
-    permissions: [
-      { key: PERMISSIONS.EXECUTION_DATA_VIEW, label: 'View Execution Data', description: 'Read data payloads and outputs from workflow executions' },
-    ],
-  },
-  {
-    domain: 'Data (Tables)',
-    permissions: [
-      { key: PERMISSIONS.DATA_MANAGE_STRUCTURE, label: 'Manage Table Structure', description: 'Create, modify, and delete tables and columns' },
-      { key: PERMISSIONS.DATA_MANAGE_DATA, label: 'Manage Table Data', description: 'Insert, update, and delete rows within tables' },
-      { key: PERMISSIONS.DATA_VIEW, label: 'View Table Data', description: 'Read data within tables' },
-    ],
-  },
-  {
-    domain: 'Global Variables',
-    permissions: [
-      { key: PERMISSIONS.VARIABLES_VIEW, label: 'View Global Variables', description: 'Read names and values of global variables' },
-      { key: PERMISSIONS.VARIABLES_MANAGE, label: 'Manage Global Variables', description: 'Create, edit, and delete global variables (implies view)' },
-    ],
-  },
-  {
     domain: 'Documents',
     permissions: [
       { key: PERMISSIONS.DOCUMENTS_VIEW, label: 'View Documents', description: 'Access the documents page — file-level read/write is controlled by document permission rules' },
@@ -84,9 +35,10 @@ export const PERMISSION_GROUPS = [
     ],
   },
   {
-    domain: 'API Configuration',
+    domain: 'Persons',
     permissions: [
-      { key: PERMISSIONS.API_CONFIG_MANAGE, label: 'Manage API Configuration', description: 'Create, edit, and delete API configurations' },
+      { key: PERMISSIONS.PERSONS_VIEW, label: 'View Persons', description: 'View person records and related information' },
+      { key: PERMISSIONS.PERSONS_MANAGE, label: 'Manage Persons', description: 'Create, edit, and delete person records' },
     ],
   },
   {
@@ -99,12 +51,6 @@ export const PERMISSION_GROUPS = [
     domain: 'Organisation Settings',
     permissions: [
       { key: PERMISSIONS.ORG_SETTINGS_MANAGE, label: 'Manage Organisation Settings', description: 'Edit organisation-level configuration' },
-    ],
-  },
-  {
-    domain: 'Usage',
-    permissions: [
-      { key: PERMISSIONS.USAGE_VIEW, label: 'View Usage', description: 'View usage dashboards and metrics' },
     ],
   },
 ];

@@ -1,14 +1,13 @@
 {
-  "name": "@yourapp/backend",
+  "name": "@lawyer-app/backend",
   "version": "1.0.0",
   "main": "dist/index.js",
   "scripts": {
     "start": "npm run migrate:deploy && node dist/index.js",
     "dev": "npm run migrate:deploy && nodemon --watch 'src/**/*.ts' --exec 'ts-node --transpile-only' src/index.ts",
     "build": "npx prisma generate --schema=./prisma/schema.prisma && tsc",
-    "migrate:deploy": "sh ./scripts/migrate.sh",
+    "migrate:deploy": "node ./scripts/migrate.js",
     "migrate:dev": "prisma migrate dev",
-    "migrate:multiple-files": "node dist/scripts/migrate-multiple-files.js",
     "test": "jest",
     "test:coverage": "jest --coverage"
   },

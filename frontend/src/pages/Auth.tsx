@@ -157,7 +157,7 @@ const Auth = () => {
           <div className="flex justify-center mb-4">
             <img 
               src="/logo.png" 
-              alt="Picobello" 
+              alt="Lawyer App" 
               className="h-[60px]"
             />
           </div>

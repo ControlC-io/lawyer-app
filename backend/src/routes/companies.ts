@@ -1,14 +1,13 @@
 import { Router, Response, NextFunction } from 'express';
 import { companiesController } from '../controllers/companies.controller';
-import { workflowDefinitionController } from '../controllers/workflowDefinition.controller';
 import { usersController } from '../controllers/users.controller';
 import { filesController } from '../controllers/files.controller';
 import { rolesController } from '../controllers/roles.controller';
 import { documentsController } from '../controllers/documents.controller';
+import { personsController } from '../controllers/persons.controller';
 import { authMiddleware, ALL_COMPANIES, AuthRequest, requireSuperAdmin } from '../middleware/auth';
 import { asyncHandler } from '../middleware/validation';
 import { requirePermission } from '../lib/rbac';
-import workflowDefinitionRoutes from './workflowDefinition';
 
 const router = Router();
 
@@ -43,18 +42,12 @@ router.get('/:companyId/my-permissions', asyncHandler(rolesController.getMyPermi
 router.get('/:companyId/permission-catalogue', asyncHandler(rolesController.getPermissionCatalogue));
 router.patch('/:companyId/users/:userId/role', requirePermission('users_groups.manage'), asyncHandler(rolesController.assignUserRole));
 
-router.get(
-  '/:companyId/executions',
-  asyncHandler(companiesController.listExecutions)
-);
-router.get(
-  '/:companyId/execution-steps',
-  asyncHandler(companiesController.listExecutionSteps)
-);
-router.delete(
-  '/:companyId/executions/:executionId',
-  asyncHandler(companiesController.deleteExecution)
-);
+router.get('/:companyId/persons', requirePermission('persons.view'), asyncHandler(personsController.list));
+router.get('/:companyId/persons/:personId', requirePermission('persons.view'), asyncHandler(personsController.get));
+router.post('/:companyId/persons', requirePermission('persons.manage'), asyncHandler(personsController.create));
+router.patch('/:companyId/persons/:personId', requirePermission('persons.manage'), asyncHandler(personsController.update));
+router.delete('/:companyId/persons/:personId', requirePermission('persons.manage'), asyncHandler(personsController.remove));
+
 router.get(
   '/:companyId/users',
   asyncHandler(usersController.getCompanyUsers)
@@ -85,25 +78,6 @@ router.get(
   '/:companyId/invitations',
   asyncHandler(usersController.getCompanyInvitations)
 );
-router.get(
-  '/:companyId/workflow-categories',
-  asyncHandler(workflowDefinitionController.listCategories)
-);
-router.post(
-  '/:companyId/workflow-categories',
-  requirePermission('workflows.manage'),
-  asyncHandler(workflowDefinitionController.createCategory)
-);
-router.patch(
-  '/:companyId/workflow-categories/:categoryId',
-  requirePermission('workflows.manage'),
-  asyncHandler(workflowDefinitionController.updateCategory)
-);
-router.delete(
-  '/:companyId/workflow-categories/:categoryId',
-  requirePermission('workflows.manage'),
-  asyncHandler(workflowDefinitionController.deleteCategory)
-);
 
 router.get('/:companyId/my-group-ids', asyncHandler(companiesController.getMyGroupIds));
 router.get('/:companyId/groups', asyncHandler(companiesController.listGroups));
@@ -115,16 +89,6 @@ router.get('/:companyId/groups/:groupId/members', asyncHandler(companiesControll
 router.post('/:companyId/groups/:groupId/members', requirePermission('users_groups.manage'), asyncHandler(companiesController.addGroupMember));
 router.delete('/:companyId/groups/:groupId/members/by-profile/:profileId', requirePermission('users_groups.manage'), asyncHandler(companiesController.removeGroupMemberByProfile));
 router.delete('/:companyId/groups/:groupId/members/:memberId', requirePermission('users_groups.manage'), asyncHandler(companiesController.removeGroupMember));
-
-router.get('/:companyId/api-configurations', requirePermission('api_config.manage'), asyncHandler(companiesController.listApiConfigurations));
-router.post('/:companyId/api-configurations', requirePermission('api_config.manage'), asyncHandler(companiesController.createApiConfiguration));
-router.patch('/:companyId/api-configurations/:configId', requirePermission('api_config.manage'), asyncHandler(companiesController.updateApiConfiguration));
-router.delete('/:companyId/api-configurations/:configId', requirePermission('api_config.manage'), asyncHandler(companiesController.deleteApiConfiguration));
-
-router.get('/:companyId/global-variables', requirePermission('variables.view'), asyncHandler(companiesController.listGlobalVariables));
-router.post('/:companyId/global-variables', requirePermission('variables.manage'), asyncHandler(companiesController.createGlobalVariable));
-router.patch('/:companyId/global-variables/:variableId', requirePermission('variables.manage'), asyncHandler(companiesController.updateGlobalVariable));
-router.delete('/:companyId/global-variables/:variableId', requirePermission('variables.manage'), asyncHandler(companiesController.deleteGlobalVariable));
 
 router.get('/:companyId/folders', requirePermission('documents.view'), asyncHandler(companiesController.listFolders));
 router.get('/:companyId/folders/:folderId', requirePermission('documents.view'), asyncHandler(companiesController.getFolder));
@@ -145,28 +109,6 @@ router.get(
 router.post('/:companyId/folders/:folderId/upload', filesController.uploadMiddleware, requirePermission('documents.view'), asyncHandler(filesController.uploadCompanyDocument));
 router.put('/:companyId/files/:fileId/metadata', requirePermission('documents.view'), asyncHandler(companiesController.updateFileMetadata));
 router.delete('/:companyId/files/:fileId', requirePermission('documents.view'), asyncHandler(filesController.deleteCompanyFile));
-
-router.get('/:companyId/agent-permissions', asyncHandler(companiesController.listAgentPermissions));
-router.post('/:companyId/agent-permissions', requirePermission('workflows.manage'), asyncHandler(companiesController.addAgentPermission));
-router.patch('/:companyId/agent-permissions/:permissionId', requirePermission('workflows.manage'), asyncHandler(companiesController.updateAgentPermission));
-router.delete('/:companyId/agent-permissions/:permissionId', requirePermission('workflows.manage'), asyncHandler(companiesController.deleteAgentPermission));
-router.get('/:companyId/agent-usage', requirePermission('usage.view'), asyncHandler(companiesController.listCompanyAgentUsage));
-
-router.get('/:companyId/data-tables', requirePermission('data.view'), asyncHandler(companiesController.listDataTables));
-router.post('/:companyId/data-tables', requirePermission('data.manage_structure'), asyncHandler(companiesController.createDataTable));
-router.patch('/:companyId/data-tables/:tableId', requirePermission('data.manage_structure'), asyncHandler(companiesController.updateDataTable));
-router.delete('/:companyId/data-tables/:tableId', requirePermission('data.manage_structure'), asyncHandler(companiesController.deleteDataTable));
-router.post('/:companyId/data-tables/:tableId/copy', requirePermission('data.manage_structure'), asyncHandler(companiesController.copyDataTable));
-router.get('/:companyId/data-tables/:tableId/fields', requirePermission('data.view'), asyncHandler(companiesController.listDataTableFields));
-router.post('/:companyId/data-tables/:tableId/fields', requirePermission('data.manage_structure'), asyncHandler(companiesController.createDataTableField));
-router.patch('/:companyId/data-tables/:tableId/fields/:fieldId', requirePermission('data.manage_structure'), asyncHandler(companiesController.updateDataTableField));
-router.delete('/:companyId/data-tables/:tableId/fields/:fieldId', requirePermission('data.manage_structure'), asyncHandler(companiesController.deleteDataTableField));
-router.get('/:companyId/data-tables/:tableId/records', requirePermission('data.view'), asyncHandler(companiesController.listDataTableRecords));
-router.post('/:companyId/data-tables/:tableId/records', requirePermission('data.manage_data'), asyncHandler(companiesController.createDataTableRecord));
-router.patch('/:companyId/data-tables/:tableId/records/:recordId', requirePermission('data.manage_data'), asyncHandler(companiesController.updateDataTableRecord));
-router.delete('/:companyId/data-tables/:tableId/records/:recordId', requirePermission('data.manage_data'), asyncHandler(companiesController.deleteDataTableRecord));
-
-router.use('/:companyId/workflows', workflowDefinitionRoutes);
 
 // ─── Flat Metadata Document Management ───
 
@@ -281,37 +223,6 @@ router.delete(
 router.get(
   '/:companyId',
   asyncHandler(companiesController.getCompany)
-);
-
-router.get(
-  '/:companyId/portal/translations',
-  requirePermission('org_settings.manage'),
-  asyncHandler(companiesController.getPortalTranslations)
-);
-
-router.put(
-  '/:companyId/portal/translations',
-  requirePermission('org_settings.manage'),
-  asyncHandler(companiesController.updatePortalTranslations)
-);
-
-/**
- * POST /api/companies/:companyId/portal-logo
- */
-router.post(
-  '/:companyId/portal-logo',
-  filesController.uploadMiddleware,
-  requirePermission('org_settings.manage'),
-  asyncHandler(companiesController.uploadPortalLogo)
-);
-
-/**
- * DELETE /api/companies/:companyId/portal-logo
- */
-router.delete(
-  '/:companyId/portal-logo',
-  requirePermission('org_settings.manage'),
-  asyncHandler(companiesController.deletePortalLogo)
 );
 
 /**

@@ -48,7 +48,7 @@ export default function NoOrganization() {
       <div className="mt-8">
         <img 
           src="/logo.png" 
-          alt="Picobello" 
+          alt="Lawyer App" 
           className="h-8 opacity-50 grayscale hover:grayscale-0 transition-all"
         />
       </div>

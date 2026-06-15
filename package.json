@@ -1,7 +1,7 @@
 {
-  "name": "Picobello",
+  "name": "lawyer-app",
   "version": "1.0.0",
-  "description": "Monorepo for Picobello",
+  "description": "Lawyer App — document management vertical",
   "private": true,
   "workspaces": [
     "frontend",
@@ -25,8 +25,7 @@
     "db:restore": "sh scripts/restore-from-dump.sh",
     "db:dump": "sh scripts/dump-local-db.sh",
     "prod:first-startup": "sh scripts/first-startup-prod.sh",
-    "prod:start": "docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d",
-    "openapi:json": "npx @apidevtools/swagger-cli bundle docs/openapi.yaml -t json -o frontend/public/docs/openapi.json && node scripts/strip-public-openapi.js"
+    "prod:start": "docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d"
   },
   "overrides": {
     "esbuild": "0.25.12"
