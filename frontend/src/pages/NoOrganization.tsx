@@ -1,8 +1,6 @@
-import { Link } from "react-router-dom";
 import { useLanguage } from "@/contexts/LanguageContext";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Building2, ArrowLeft } from "lucide-react";
+import { Building2 } from "lucide-react";
 import { LanguageSelector } from "@/components/LanguageSelector";
 
 export default function NoOrganization() {
@@ -13,7 +11,7 @@ export default function NoOrganization() {
       <div className="absolute top-4 right-4">
         <LanguageSelector />
       </div>
-      
+
       <Card className="w-full max-w-md border-2">
         <CardHeader className="text-center">
           <div className="flex justify-center mb-4">
@@ -21,38 +19,17 @@ export default function NoOrganization() {
               <Building2 className="h-10 w-10 text-primary" />
             </div>
           </div>
-          <CardTitle className="text-2xl font-bold">{t("noOrganization.title")}</CardTitle>
+          <CardTitle className="text-2xl font-bold">{String(t("noOrganization.title"))}</CardTitle>
           <CardDescription className="text-base mt-2">
-            {t("noOrganization.description")}
+            {String(t("noOrganization.description"))}
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <Button 
-            className="w-full bg-brand-gradient text-white hover:opacity-90 text-lg py-6"
-            asChild
-          >
-            <Link to="/?demo=true">
-              {t("noOrganization.cta")}
-            </Link>
-          </Button>
-          
-          <Button variant="ghost" className="w-full text-muted-foreground" asChild>
-            <Link to="/" className="flex items-center justify-center">
-              <ArrowLeft className="mr-2 h-4 w-4" />
-              {t("noOrganization.backToLanding")}
-            </Link>
-          </Button>
+        <CardContent>
+          <p className="text-sm text-center text-muted-foreground">
+            {String(t("noOrganization.contactAdmin"))}
+          </p>
         </CardContent>
       </Card>
-      
-      <div className="mt-8">
-        <img 
-          src="/logo.png" 
-          alt="Lawyer App" 
-          className="h-8 opacity-50 grayscale hover:grayscale-0 transition-all"
-        />
-      </div>
     </div>
   );
 }
-

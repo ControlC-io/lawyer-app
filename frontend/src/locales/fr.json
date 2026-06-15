@@ -28,112 +28,6 @@
     "signInError": "Échec de la connexion",
     "signUpError": "Échec de l'inscription"
   },
-  "hero": {
-    "badge": "Automatisation IA avec supervision humaine",
-    "title": "Lawyer App — gestion documentaire",
-    "rotatingWords": ["assistant", "acheteur", "comptable", "commercial", "HR officer"],
-    "subtitle": "Créez, gérez et exécutez vos processus métier en toute simplicité. Automatisez vos tâches répétitives et gagnez en productivité.",
-    "ctaPrimary": "Commencer gratuitement",
-    "ctaSecondary": "Voir la démo"
-  },
-  "features": {
-    "title": "Tout ce dont vous avez besoin",
-    "subtitle": "OCR, fractionnement PDF et extraction de métadonnées pour l'administration juridique",
-    "visualWorkflows": {
-      "title": "Workflows Visuels",
-      "description": "Créez et gérez vos processus métier avec un éditeur visuel intuitif. Connectez les étapes, définissez les règles et automatisez vos flux de travail."
-    },
-    "aiAssisted": {
-      "title": "Création Assistée par IA",
-      "description": "Laissez l'IA vous aider à créer vos workflows. Décrivez simplement votre processus et notre assistant génère la structure complète."
-    },
-    "realtimeExecution": {
-      "title": "Exécution en Temps Réel",
-      "description": "Lancez et suivez l'exécution de vos workflows en temps réel. Visualisez la progression et intervenez quand nécessaire."
-    },
-    "documentManagement": {
-      "title": "Gestion de Documents",
-      "description": "Centralisez tous vos documents liés aux workflows. Téléchargez, organisez et partagez facilement vos fichiers."
-    },
-    "apiIntegrations": {
-      "title": "Intégrations API",
-      "description": "Connectez Picobello à vos outils existants via des API. Automatisez les échanges de données entre vos systèmes."
-    },
-    "multiTenant": {
-      "title": "Gestion Multi-tenant",
-      "description": "Gérez plusieurs organisations, utilisateurs et groupes. Contrôlez les permissions et l'accès à vos workflows."
-    },
-    "security": {
-      "title": "Sécurité Avancée",
-      "description": "Vos données sont protégées avec des mécanismes de sécurité robustes. Conformité et confidentialité garanties."
-    },
-    "analytics": {
-      "title": "Suivi & Analytics",
-      "description": "Analysez les performances de vos workflows. Identifiez les goulots d'étranglement et optimisez vos processus."
-    }
-  },
-  "useCases": {
-    "title": "Cas d'usage par département",
-    "subtitle": "Découvrez comment Picobello peut transformer les processus de votre entreprise",
-    "filterAll": "Tous les départements",
-    "showMore": "Voir plus",
-    "showLess": "Voir moins",
-    "more": "de plus",
-    "departments": {
-      "hr": "Ressources Humaines",
-      "finance": "Finance",
-      "procurement": "Achats",
-      "it": "IT",
-      "legal": "Juridique",
-      "operations": "Opérations"
-    },
-    "workflows": {
-      "recruitment": "Recrutement",
-      "recruitmentDescription": "Automatisez le processus de recrutement de la publication de l'offre à l'intégration du candidat.",
-      "onboarding": "Onboarding",
-      "onboardingDescription": "Simplifiez l'intégration des nouveaux employés avec des workflows personnalisés.",
-      "leaveRequest": "Demande de congés",
-      "leaveRequestDescription": "Gérez les demandes de congés avec validation hiérarchique automatique.",
-      "performanceReview": "Évaluation de performance",
-      "performanceReviewDescription": "Organisez et suivez les évaluations annuelles de performance.",
-      "expenseApproval": "Approbation de frais",
-      "expenseApprovalDescription": "Automatisez la validation et le remboursement des notes de frais.",
-      "invoiceProcessing": "Traitement des factures",
-      "invoiceProcessingDescription": "Optimisez le traitement et l'approbation des factures fournisseurs.",
-      "budgetApproval": "Approbation budgétaire",
-      "budgetApprovalDescription": "Gérez les demandes d'approbation budgétaire avec workflows multi-niveaux.",
-      "paymentRequest": "Demande de paiement",
-      "paymentRequestDescription": "Automatisez les demandes de paiement et leur validation.",
-      "purchaseOrder": "Bon de commande",
-      "purchaseOrderDescription": "Créez et suivez les bons de commande avec validation automatique.",
-      "vendorManagement": "Gestion des fournisseurs",
-      "vendorManagementDescription": "Gérez l'onboarding et l'évaluation de vos fournisseurs.",
-      "contractApproval": "Approbation de contrat",
-      "contractApprovalDescription": "Automatisez le processus d'approbation des contrats fournisseurs.",
-      "supplierEvaluation": "Évaluation fournisseur",
-      "supplierEvaluationDescription": "Organisez l'évaluation périodique de vos fournisseurs.",
-      "accessRequest": "Demande d'accès",
-      "accessRequestDescription": "Gérez les demandes d'accès aux systèmes et applications.",
-      "softwareRequest": "Demande de logiciel",
-      "softwareRequestDescription": "Automatisez les demandes d'installation de logiciels.",
-      "incidentManagement": "Gestion d'incidents",
-      "incidentManagementDescription": "Suivez et résolvez les incidents IT de manière structurée.",
-      "changeRequest": "Demande de changement",
-      "changeRequestDescription": "Gérez les demandes de changement IT avec validation appropriée.",
-      "contractReview": "Révision de contrat",
-      "contractReviewDescription": "Organisez la révision juridique des contrats avec workflow d'approbation.",
-      "complianceCheck": "Vérification de conformité",
-      "complianceCheckDescription": "Assurez la conformité réglementaire avec des workflows dédiés.",
-      "ndaApproval": "Approbation NDA",
-      "ndaApprovalDescription": "Gérez l'approbation des accords de confidentialité.",
-      "maintenanceRequest": "Demande de maintenance",
-      "maintenanceRequestDescription": "Organisez les demandes de maintenance avec priorisation automatique.",
-      "qualityControl": "Contrôle qualité",
-      "qualityControlDescription": "Automatisez les processus de contrôle qualité et de validation.",
-      "incidentReport": "Rapport d'incident",
-      "incidentReportDescription": "Gérez les rapports d'incidents avec workflow d'investigation."
-    }
-  },
   "canvas": {
     "title": "Éditeur visuel intuitif",
     "subtitle": "Créez vos workflows en toute simplicité avec notre éditeur visuel. Connectez les étapes, définissez les règles et visualisez vos processus en temps réel.",
@@ -176,12 +70,6 @@
       "title": "Lancez l'exécution",
       "description": "Démarrez votre workflow et suivez son exécution en temps réel avec un suivi détaillé."
     }
-  },
-  "cta": {
-    "title": "Prêt à transformer vos processus ?",
-    "subtitle": "Rejoignez Picobello dès aujourd'hui et découvrez comment simplifier vos workflows",
-    "primary": "Créer un compte gratuit",
-    "secondary": "Contacter les ventes"
   },
   "footer": {
     "tagline": "La plateforme de gestion de workflows nouvelle génération",
@@ -719,9 +607,8 @@
   },
   "noOrganization": {
     "title": "Aucune organisation trouvée",
-    "description": "Il semble que vous ne fassiez pas encore partie d'une organisation. Vous devez être invité à une organisation ou en créer une pour accéder à Lawyer App.",
-    "cta": "Demander une démo pour en créer une",
-    "backToLanding": "Retour à l'accueil"
+    "description": "Vous ne faites pas encore partie d'une organisation.",
+    "contactAdmin": "Contactez votre administrateur pour être ajouté à une organisation."
   },
   "settings": {
     "profileUpdated": "Profil mis à jour avec succès",

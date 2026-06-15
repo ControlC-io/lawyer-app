@@ -58,7 +58,7 @@ All colors MUST be HSL.
     --node-action: 217 91% 60%;
     --node-action-glow: 217 91% 80%;
 
-    /* Gradients - Picobello brand: primary #2a5ce5 → secondary #00b87d */
+    /* Gradients - brand: primary #2a5ce5 → secondary #00b87d */
     --gradient-primary: linear-gradient(135deg, hsl(221 77% 53%), hsl(162 100% 36%));
     --gradient-primary-reverse: linear-gradient(135deg, hsl(162 100% 36%), hsl(221 77% 53%));
     --gradient-subtle: linear-gradient(180deg, hsl(240 20% 99%), hsl(240 15% 97%));
@@ -142,7 +142,7 @@ All colors MUST be HSL.
   animation: flow-animation 1s linear infinite;
 }
 
-/* Picobello brand gradient (primary → secondary) */
+/* Brand gradient (primary → secondary) */
 .bg-brand-gradient {
   background: var(--gradient-primary);
 }

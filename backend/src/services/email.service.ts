@@ -1,7 +1,8 @@
 import sgMail from '@sendgrid/mail';
 
 const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY || '';
-const FROM_EMAIL = process.env.FROM_EMAIL || 'noreply@picobello.app'; 
+const FROM_EMAIL = process.env.FROM_EMAIL || 'noreply@example.com';
+const APP_NAME = process.env.APP_NAME || 'Lawyer App';
 const APP_URL = process.env.APP_URL || 'http://localhost';
 let configuredApiKeyLength = 0;
 export type WorkflowEmailAttachment = {
@@ -133,17 +134,17 @@ export const emailService = {
     }
 
     const inviteLink = `${APP_URL}/accept-invitation?token=${token}`;
-    const subject = `You have been invited to join ${companyName} on Picobello`;
+    const subject = `You have been invited to join ${companyName} on ${APP_NAME}`;
 
     const msg = {
       to: email,
-      from: { email: FROM_EMAIL, name: 'Picobello' },
+      from: { email: FROM_EMAIL, name: APP_NAME },
       subject,
       html: `
         <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eee; border-radius: 8px;">
           <h2 style="color: #333;">Join ${companyName}</h2>
           <p style="color: #555; font-size: 16px;">Hello,</p>
-          <p style="color: #555; font-size: 16px;">You have been invited to join <strong>${companyName}</strong> on Picobello.</p>
+          <p style="color: #555; font-size: 16px;">You have been invited to join <strong>${companyName}</strong> on ${APP_NAME}.</p>
           <p style="color: #555; font-size: 16px;">Click the button below to accept the invitation and get started:</p>
           <div style="margin: 35px 0; text-align: center;">
             <a href="${inviteLink}" style="background-color: #000; color: white; padding: 14px 28px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">Accept Invitation</a>
@@ -200,7 +201,7 @@ export const emailService = {
 
     const msg = {
       to: email,
-      from: { email: FROM_EMAIL, name: 'Picobello' },
+      from: { email: FROM_EMAIL, name: APP_NAME },
       subject,
       html: `
         <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eee; border-radius: 8px;">
@@ -248,7 +249,7 @@ export const emailService = {
 
     const msg = {
       to: FROM_EMAIL, // Send to admin
-      from: { email: FROM_EMAIL, name: 'Picobello Demo Requests' },
+      from: { email: FROM_EMAIL, name: `${APP_NAME} Demo Requests` },
       replyTo: email,
       subject,
       html: `
@@ -290,7 +291,7 @@ export const emailService = {
 
     const msg = {
       to: FROM_EMAIL, // Send to admin
-      from: { email: FROM_EMAIL, name: 'Picobello Feedback' },
+      from: { email: FROM_EMAIL, name: `${APP_NAME} Feedback` },
       replyTo: email,
       subject: mailSubject,
       html: `
@@ -333,7 +334,7 @@ export const emailService = {
 
     const msg = {
       to: email,
-      from: { email: FROM_EMAIL, name: 'Picobello' },
+      from: { email: FROM_EMAIL, name: APP_NAME },
       subject,
       html: `
         <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eee; border-radius: 8px;">
@@ -382,7 +383,7 @@ export const emailService = {
 
     const msg: sgMail.MailDataRequired = {
       to: email,
-      from: { email: FROM_EMAIL, name: 'Picobello' },
+      from: { email: FROM_EMAIL, name: APP_NAME },
       subject: sanitizedSubject,
       html: sanitizedHtml,
       ...(text ? { text } : {}),

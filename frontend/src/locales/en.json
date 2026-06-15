@@ -28,112 +28,6 @@
     "signInError": "Failed to sign in",
     "signUpError": "Failed to sign up"
   },
-  "hero": {
-    "badge": "AI automation with human supervision",
-    "title": "Lawyer App — document management",
-    "rotatingWords": ["assistant", "buyer", "accountant", "salesperson", "HR officer"],
-    "subtitle": "Create, manage, and execute your business processes with ease. Automate repetitive tasks and boost productivity.",
-    "ctaPrimary": "Get started for free",
-    "ctaSecondary": "View demo"
-  },
-  "features": {
-    "title": "Everything you need",
-    "subtitle": "OCR, PDF split, and metadata extraction for legal document administration",
-    "visualWorkflows": {
-      "title": "Visual Workflows",
-      "description": "Create and manage your business processes with an intuitive visual editor. Connect steps, define rules, and automate your workflows."
-    },
-    "aiAssisted": {
-      "title": "AI-Assisted Creation",
-      "description": "Let AI help you create your workflows. Simply describe your process and our assistant generates the complete structure."
-    },
-    "realtimeExecution": {
-      "title": "Real-Time Execution",
-      "description": "Launch and track your workflow execution in real-time. Visualize progress and intervene when necessary."
-    },
-    "documentManagement": {
-      "title": "Document Management",
-      "description": "Centralize all your workflow-related documents. Upload, organize, and share files easily."
-    },
-    "apiIntegrations": {
-      "title": "API Integrations",
-      "description": "Connect Picobello to your existing tools via APIs. Automate data exchanges between your systems."
-    },
-    "multiTenant": {
-      "title": "Multi-Tenant Management",
-      "description": "Manage multiple organizations, users, and groups. Control permissions and access to your workflows."
-    },
-    "security": {
-      "title": "Advanced Security",
-      "description": "Your data is protected with robust security mechanisms. Compliance and confidentiality guaranteed."
-    },
-    "analytics": {
-      "title": "Tracking & Analytics",
-      "description": "Analyze your workflow performance. Identify bottlenecks and optimize your processes."
-    }
-  },
-  "useCases": {
-    "title": "Use Cases by Department",
-    "subtitle": "Discover how Picobello can transform your company's processes",
-    "filterAll": "All Departments",
-    "showMore": "Show more",
-    "showLess": "Show less",
-    "more": "more",
-    "departments": {
-      "hr": "Human Resources",
-      "finance": "Finance",
-      "procurement": "Procurement",
-      "it": "IT",
-      "legal": "Legal",
-      "operations": "Operations"
-    },
-    "workflows": {
-      "recruitment": "Recruitment",
-      "recruitmentDescription": "Automate the recruitment process from job posting to candidate onboarding.",
-      "onboarding": "Onboarding",
-      "onboardingDescription": "Simplify new employee integration with customized workflows.",
-      "leaveRequest": "Leave Request",
-      "leaveRequestDescription": "Manage leave requests with automatic hierarchical validation.",
-      "performanceReview": "Performance Review",
-      "performanceReviewDescription": "Organize and track annual performance reviews.",
-      "expenseApproval": "Expense Approval",
-      "expenseApprovalDescription": "Automate expense report validation and reimbursement.",
-      "invoiceProcessing": "Invoice Processing",
-      "invoiceProcessingDescription": "Optimize vendor invoice processing and approval.",
-      "budgetApproval": "Budget Approval",
-      "budgetApprovalDescription": "Manage budget approval requests with multi-level workflows.",
-      "paymentRequest": "Payment Request",
-      "paymentRequestDescription": "Automate payment requests and their validation.",
-      "purchaseOrder": "Purchase Order",
-      "purchaseOrderDescription": "Create and track purchase orders with automatic validation.",
-      "vendorManagement": "Vendor Management",
-      "vendorManagementDescription": "Manage vendor onboarding and evaluation.",
-      "contractApproval": "Contract Approval",
-      "contractApprovalDescription": "Automate vendor contract approval process.",
-      "supplierEvaluation": "Supplier Evaluation",
-      "supplierEvaluationDescription": "Organize periodic supplier evaluations.",
-      "accessRequest": "Access Request",
-      "accessRequestDescription": "Manage access requests to systems and applications.",
-      "softwareRequest": "Software Request",
-      "softwareRequestDescription": "Automate software installation requests.",
-      "incidentManagement": "Incident Management",
-      "incidentManagementDescription": "Track and resolve IT incidents in a structured way.",
-      "changeRequest": "Change Request",
-      "changeRequestDescription": "Manage IT change requests with appropriate validation.",
-      "contractReview": "Contract Review",
-      "contractReviewDescription": "Organize legal contract review with approval workflow.",
-      "complianceCheck": "Compliance Check",
-      "complianceCheckDescription": "Ensure regulatory compliance with dedicated workflows.",
-      "ndaApproval": "NDA Approval",
-      "ndaApprovalDescription": "Manage non-disclosure agreement approvals.",
-      "maintenanceRequest": "Maintenance Request",
-      "maintenanceRequestDescription": "Organize maintenance requests with automatic prioritization.",
-      "qualityControl": "Quality Control",
-      "qualityControlDescription": "Automate quality control and validation processes.",
-      "incidentReport": "Incident Report",
-      "incidentReportDescription": "Manage incident reports with investigation workflow."
-    }
-  },
   "canvas": {
     "title": "Intuitive Visual Editor",
     "subtitle": "Create your workflows with ease using our visual editor. Connect steps, define rules, and visualize your processes in real-time.",
@@ -176,12 +70,6 @@
       "title": "Launch execution",
       "description": "Start your workflow and track its execution in real-time with detailed monitoring."
     }
-  },
-  "cta": {
-    "title": "Ready to transform your processes?",
-    "subtitle": "Join Picobello today and discover how to simplify your workflows",
-    "primary": "Create free account",
-    "secondary": "Contact sales"
   },
   "footer": {
     "tagline": "The next-generation workflow management platform",
@@ -719,9 +607,8 @@
   },
   "noOrganization": {
     "title": "No Organization Found",
-    "description": "It seems you are not yet part of an organization. You need to be invited to an organization or create one to access Lawyer App.",
-    "cta": "Request a Demo to Create One",
-    "backToLanding": "Back to Landing Page"
+    "description": "You are not yet part of an organization.",
+    "contactAdmin": "Contact your administrator to be added to an organization."
   },
   "settings": {
     "profileUpdated": "Profile updated successfully",

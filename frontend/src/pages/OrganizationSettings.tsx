@@ -1,12 +1,11 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { Copy, Eye, EyeOff, RefreshCw, Key, Shield, Building, FileText, Trash2, Plus, Upload, Pencil, Palette } from "lucide-react";
+import { Copy, RefreshCw, Building, FileText, Trash2, Plus, Upload, Pencil, Palette } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -19,7 +18,6 @@ import { useLanguage } from "@/contexts/LanguageContext";
 interface Company {
   id: string;
   name: string;
-  api_key: string;
   created_at: string;
   internal_logo_url?: string | null;
   internal_primary_color?: string | null;
@@ -31,8 +29,6 @@ export default function OrganizationSettings() {
   const companyId = useCompanyId();
   const [company, setCompany] = useState<Company | null>(null);
   const [loading, setLoading] = useState(true);
-  const [showApiKey, setShowApiKey] = useState(false);
-  const [regeneratingKey, setRegeneratingKey] = useState(false);
 
   const [metadataKeys, setMetadataKeys] = useState<FileMetadataKey[]>([]);
   const [newKeyName, setNewKeyName] = useState("");
@@ -85,25 +81,6 @@ export default function OrganizationSettings() {
     } catch (error) {
       console.error("Failed to copy to clipboard:", error);
       toast.error(t("organizationSettings.failedToCopyToClipboard"));
-    }
-  };
-
-  const regenerateApiKey = async () => {
-    if (!confirm(t("organizationSettings.regenerateConfirm"))) {
-      return;
-    }
-    setRegeneratingKey(true);
-    try {
-      const updated = await api.patch<Company>(`/api/companies/${companyId}`, {
-        regenerate_api_key: true,
-      });
-      if (updated?.api_key) setCompany((c) => (c ? { ...c, api_key: updated.api_key } : null));
-      toast.success(t("organizationSettings.apiKeyRegenerated"));
-    } catch (error) {
-      console.error("Error regenerating API key:", error);
-      toast.error(t("organizationSettings.failedToRegenerateApiKey"));
-    } finally {
-      setRegeneratingKey(false);
     }
   };
 
@@ -373,99 +350,11 @@ export default function OrganizationSettings() {
         </Button>
       </div>
 
-      <Tabs defaultValue="api" className="space-y-6">
-        <TabsList className="grid h-auto w-full grid-cols-1 gap-2 md:grid-cols-3">
-          <TabsTrigger value="api">{t("organizationSettings.tabs.api")}</TabsTrigger>
+      <Tabs defaultValue="metadata" className="space-y-6">
+        <TabsList className="grid h-auto w-full grid-cols-1 gap-2 md:grid-cols-2">
           <TabsTrigger value="metadata">{t("organizationSettings.tabs.metadata")}</TabsTrigger>
           <TabsTrigger value="branding">{t("organizationSettings.tabs.branding")}</TabsTrigger>
         </TabsList>
-
-        <TabsContent value="api" className="space-y-6 mt-0">
-          <div className="grid gap-6 md:grid-cols-2">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Shield className="h-5 w-5" />
-                  {t("organizationSettings.apiAuthentication")}
-                </CardTitle>
-                <CardDescription>{t("organizationSettings.apiAuthDesc")}</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <Alert>
-                  <Shield className="h-4 w-4" />
-                  <AlertDescription>{t("organizationSettings.credentialsSafe")}</AlertDescription>
-                </Alert>
-                <div className="space-y-2">
-                  <Label htmlFor="api-base-url">{t("organizationSettings.baseApiUrl")}</Label>
-                  <div className="flex items-center gap-2">
-                    <Input
-                      id="api-base-url"
-                      value={import.meta.env.VITE_API_URL ?? ""}
-                      disabled
-                      className="bg-muted font-mono text-sm"
-                    />
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => copyToClipboard(import.meta.env.VITE_API_URL ?? "", t("organizationSettings.baseApiUrl"))}
-                    >
-                      <Copy className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Key className="h-5 w-5" />
-                  {t("organizationSettings.companyApiKey")}
-                </CardTitle>
-                <CardDescription>{t("organizationSettings.companyApiKeyDesc")}</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="api-key">{t("organizationSettings.companyApiKey")}</Label>
-                  <div className="flex items-center gap-2">
-                    <Input
-                      id="api-key"
-                      type={showApiKey ? "text" : "password"}
-                      value={company.api_key}
-                      disabled
-                      className="bg-muted font-mono text-sm"
-                    />
-                    <Button variant="outline" size="sm" onClick={() => setShowApiKey(!showApiKey)}>
-                      {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => copyToClipboard(company.api_key, t("organizationSettings.companyApiKey"))}
-                    >
-                      <Copy className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-                <div className="pt-4 border-t">
-                  <Button variant="destructive" onClick={regenerateApiKey} disabled={regeneratingKey} className="w-full">
-                    {regeneratingKey ? (
-                      <>
-                        <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                        {t("organizationSettings.regenerating")}
-                      </>
-                    ) : (
-                      <>
-                        <RefreshCw className="h-4 w-4 mr-2" />
-                        {t("organizationSettings.regenerateApiKey")}
-                      </>
-                    )}
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        </TabsContent>
 
         <TabsContent value="metadata" className="space-y-6 mt-0">
           <Card>
