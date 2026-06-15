@@ -155,6 +155,41 @@ function splitPresetMetadataKeyIdsFromJson(raw: Prisma.JsonValue): string[] {
   return raw.filter((id): id is string => typeof id === 'string').map((id) => id.trim()).filter(Boolean);
 }
 
+const DOCUMENT_TYPE_KEY_NAME = 'Type';
+
+/**
+ * Keeps the "Type" FilesMetadataKey allowed_values in sync with the current
+ * list of DocumentSplitPreset names for a company. Creates the key if missing.
+ */
+async function syncDocumentTypesMetadataKey(companyId: string): Promise<void> {
+  const presets = await prisma.documentSplitPreset.findMany({
+    where: { company_id: companyId },
+    orderBy: { name: 'asc' },
+    select: { name: true },
+  });
+  const allowedValues: Prisma.InputJsonValue = presets.map((p) => p.name);
+
+  const existing = await prisma.filesMetadataKey.findFirst({
+    where: { company_id: companyId, name: DOCUMENT_TYPE_KEY_NAME },
+  });
+
+  if (existing) {
+    await prisma.filesMetadataKey.update({
+      where: { id: existing.id },
+      data: { allowed_values: allowedValues },
+    });
+  } else {
+    await prisma.filesMetadataKey.create({
+      data: {
+        company_id: companyId,
+        name: DOCUMENT_TYPE_KEY_NAME,
+        value_kind: 'predefined_list',
+        allowed_values: allowedValues,
+      },
+    });
+  }
+}
+
 export const documentsController = {
   // ─── Permission Rules CRUD ───
 
@@ -1210,6 +1245,8 @@ export const documentsController = {
       },
     });
 
+    await syncDocumentTypesMetadataKey(companyId);
+
     return res.status(201).json({
       id: created.id,
       name: created.name,
@@ -1276,6 +1313,10 @@ export const documentsController = {
       data,
     });
 
+    if (data.name !== undefined) {
+      await syncDocumentTypesMetadataKey(companyId);
+    }
+
     return res.json({
       id: updated.id,
       name: updated.name,
@@ -1295,6 +1336,9 @@ export const documentsController = {
       where: { id: presetId, company_id: companyId },
     });
     if (deleted.count === 0) return res.status(404).json({ error: 'Preset not found' });
+
+    await syncDocumentTypesMetadataKey(companyId);
+
     return res.status(204).send();
   },
 

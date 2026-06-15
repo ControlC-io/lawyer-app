@@ -11,7 +11,6 @@ jest.mock('../lib/prisma', () => ({
     filesMetadataKey: { findMany: jest.fn() },
     file: { create: jest.fn(), update: jest.fn(), delete: jest.fn() },
     filesMetadataValue: { create: jest.fn(), deleteMany: jest.fn() },
-    workflowFile: { deleteMany: jest.fn() },
   },
 }));
 

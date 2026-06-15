@@ -77,27 +77,6 @@ services:
     depends_on:
       - backend
 
-  mcp-server:
-    build:
-      context: .
-      dockerfile: mcp-server/Dockerfile
-    ports:
-      - "${MCP_PORT:-3002}:${MCP_PORT:-3002}"
-    environment:
-      - MCP_PORT=${MCP_PORT:-3002}
-      - FLOOWLY_API_URL=http://backend:${PORT:-3001}/api
-      - SUPER_ADMIN_API_KEY=${SUPER_ADMIN_API_KEY:-}
-      - FLOOWLY_COMPANY_API_KEY=${FLOOWLY_COMPANY_API_KEY:-}
-    command: sh -c "npm install && npm run dev -w mcp-server"
-    volumes:
-      - .:/usr/src/app
-      - /usr/src/app/node_modules
-      - /usr/src/app/mcp-server/node_modules
-    networks:
-      - app-network
-    depends_on:
-      - backend
-
   nginx:
     image: nginx:alpine
     ports:

@@ -1,4 +1,4 @@
-# Floowly Monorepo Documentation
+# Lawyer App Monorepo Documentation
 
 ## Project Structure
 
@@ -46,7 +46,7 @@ The application will be available at:
 
 ## Database & Migrations
 
-Floowly uses **Prisma** as its ORM and migration management tool.
+Lawyer App uses **Prisma** as its ORM and migration management tool.
 
 ### Migration Flow
 
@@ -66,12 +66,12 @@ The migration process is fully automated within the Docker lifecycle:
 
 ## File Storage (MinIO)
 
-Floowly uses **MinIO** for S3-compatible object storage to manage file uploads and assets.
+Lawyer App uses **MinIO** for S3-compatible object storage to manage file uploads and assets.
 
 ## Get file dump through SCP
 
 ```bash
-scp root@[SERVER_IP]:path/to/dump/floowly_dump.sql ./dumps/
+scp root@[SERVER_IP]:path/to/dump/lawyer_app_dump.sql ./dumps/
 ```
 
 ### Integration Details

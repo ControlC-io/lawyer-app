@@ -55,10 +55,13 @@ Se reutiliza el modelo `DocumentSplitPreset` (ya existía en PicoBello) como "ti
 
 ### Metadata keys
 
-Se reutiliza `FilesMetadataKey`. Las 3 claves del tenant ControlC son:
+Se reutiliza `FilesMetadataKey`. Las claves del tenant ControlC son:
 - **Année** — año del documento (texto libre)
 - **Mois** — mes (`01`–`12`)
-- **Type** — tipo de documento (lista cerrada)
+- **Type** — tipo de documento — **sincronizado automáticamente** desde `DocumentSplitPreset`
+- **Personne** — nombre de la persona — **sincronizado automáticamente** desde `Person`
+
+Las claves "Type" y "Personne" se mantienen en sync: cuando se crea, renombra o borra un documento tipo o persona, sus `allowed_values` se actualizan automáticamente. Así la IA siempre tiene la lista correcta al sugerir el split.
 
 ### Nuevas páginas frontend
 

@@ -1,5 +1,48 @@
-﻿import { GoogleGenerativeAI } from '@google/generative-ai';
+﻿import { GoogleGenerativeAI, type GenerativeModel } from '@google/generative-ai';
 import { PDFDocument } from 'pdf-lib';
+
+/** Gemini call resilience: mirror the Mistral OCR provider (3 attempts, backoff, per-attempt timeout). */
+const GEMINI_RETRY_DELAYS = [1000, 3000, 9000];
+const GEMINI_TIMEOUT_MS = 120_000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(`${label} timed out after ${Math.round(ms / 1000)}s`)), ms),
+    ),
+  ]);
+}
+
+function isRetriableGeminiError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return (
+    /\b(408|409|429|500|502|503|504)\b/.test(msg) ||
+    /timed out|timeout|ETIMEDOUT|ECONNRESET|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|fetch failed|network|overloaded|rate.?limit|unavailable|try again/i.test(
+      msg,
+    )
+  );
+}
+
+/** Call Gemini with retries + timeout. Returns the response text. */
+async function generateContentWithRetry(model: GenerativeModel, prompt: string): Promise<string> {
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const result = await withTimeout(model.generateContent(prompt), GEMINI_TIMEOUT_MS, 'Gemini request');
+      return result.response.text();
+    } catch (err) {
+      lastError = err;
+      if (attempt < 2 && isRetriableGeminiError(err)) {
+        await new Promise((r) => setTimeout(r, GEMINI_RETRY_DELAYS[attempt]));
+        continue;
+      }
+      break;
+    }
+  }
+  const msg = lastError instanceof Error ? lastError.message : String(lastError);
+  throw new Error(`Gemini request failed: ${msg}`);
+}
 
 export interface SplitSegment {
   name: string;
@@ -12,7 +55,7 @@ export interface SplitSegment {
 /** Max chars sent to Gemini (OCR can be huge); tail is preserved for recency. */
 const MAX_OCR_CHARS = 900_000;
 
-export function parseGeminiJsonArray(raw: string): unknown {
+function stripJsonFences(raw: string): string {
   let s = raw.trim();
   const fence = /^```(?:json)?\s*\n?([\s\S]*?)\n?```$/m;
   const m = s.match(fence);
@@ -20,19 +63,26 @@ export function parseGeminiJsonArray(raw: string): unknown {
   else if (s.startsWith('```')) {
     s = s.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '');
   }
-  return JSON.parse(s);
+  return s;
+}
+
+export function parseGeminiJsonArray(raw: string): unknown {
+  const s = stripJsonFences(raw);
+  try {
+    return JSON.parse(s);
+  } catch {
+    throw new Error(`Gemini returned invalid JSON (expected an array): ${s.slice(0, 200)}`);
+  }
 }
 
 /** Strip markdown fences and parse a single JSON object (not array). */
 export function parseGeminiJsonObject(raw: string): unknown {
-  let s = raw.trim();
-  const fence = /^```(?:json)?\s*\n?([\s\S]*?)\n?```$/m;
-  const m = s.match(fence);
-  if (m) s = m[1].trim();
-  else if (s.startsWith('```')) {
-    s = s.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '');
+  const s = stripJsonFences(raw);
+  try {
+    return JSON.parse(s);
+  } catch {
+    throw new Error(`Gemini returned invalid JSON (expected an object): ${s.slice(0, 200)}`);
   }
-  return JSON.parse(s);
 }
 
 function parseMetadataObject(
@@ -97,6 +147,9 @@ export function truncateOcr(ocrMarkdown: string): string {
   if (ocrMarkdown.length <= MAX_OCR_CHARS) return ocrMarkdown;
   const head = Math.floor(MAX_OCR_CHARS * 0.85);
   const tail = MAX_OCR_CHARS - head - 80;
+  console.warn(
+    `[pdf-split] OCR truncated before sending to Gemini: ${ocrMarkdown.length} chars -> ~${MAX_OCR_CHARS} (middle omitted). Extraction on very long documents may be incomplete.`,
+  );
   return (
     ocrMarkdown.slice(0, head) +
     '\n\n[... middle of OCR omitted due to length ...]\n\n' +
@@ -110,6 +163,35 @@ export type ProposeMetadataKeySpec = {
   valueKind: 'free_text' | 'predefined_list';
   allowedValues: string[];
 };
+
+/**
+ * Blank out predefined_list values Gemini proposed that are not in the allowed set,
+ * so the review UI never shows an invalid value that would later be rejected on apply.
+ */
+function sanitizePredefinedMetadata(
+  segments: SplitSegment[],
+  metadataKeys: ProposeMetadataKeySpec[],
+): SplitSegment[] {
+  const allowedByKey = new Map(
+    metadataKeys
+      .filter((k) => k.valueKind === 'predefined_list' && k.allowedValues.length > 0)
+      .map((k) => [k.id, new Set(k.allowedValues)] as const),
+  );
+  if (allowedByKey.size === 0) return segments;
+  for (const seg of segments) {
+    if (!seg.metadata) continue;
+    for (const [keyId, allowed] of allowedByKey) {
+      const v = seg.metadata[keyId];
+      if (v && !allowed.has(v)) {
+        console.warn(
+          `[pdf-split] Gemini returned out-of-list value for key ${keyId} in segment "${seg.name}": ${JSON.stringify(v)} -> cleared`,
+        );
+        seg.metadata[keyId] = '';
+      }
+    }
+  }
+  return segments;
+}
 
 export async function proposeSplitWithGemini(params: {
   ocrMarkdown: string;
@@ -161,11 +243,11 @@ ${ocrBody}`;
 
   const genAI = new GoogleGenerativeAI(apiKey);
   const model = genAI.getGenerativeModel({ model: modelName });
-  const result = await model.generateContent(prompt);
-  const text = result.response.text();
+  const text = await generateContentWithRetry(model, prompt);
   const parsed = parseGeminiJsonArray(text);
   const ids = params.metadataKeys.map((k) => k.id);
-  return validateSegments(parsed, ids);
+  const segments = validateSegments(parsed, ids);
+  return sanitizePredefinedMetadata(segments, params.metadataKeys);
 }
 
 /**
@@ -213,8 +295,7 @@ ${ocrBody}`;
 
   const genAI = new GoogleGenerativeAI(apiKey);
   const model = genAI.getGenerativeModel({ model: modelName });
-  const result = await model.generateContent(prompt);
-  const text = result.response.text();
+  const text = await generateContentWithRetry(model, prompt);
   const parsed = parseGeminiJsonObject(text);
   const ids = params.metadataKeys.map((k) => k.id);
   return parseMetadataObject(parsed, ids);
@@ -257,8 +338,7 @@ ${ocrBody}`;
 
   const genAI = new GoogleGenerativeAI(apiKey);
   const model = genAI.getGenerativeModel({ model: modelName });
-  const result = await model.generateContent(prompt);
-  const text = result.response.text();
+  const text = await generateContentWithRetry(model, prompt);
   const parsed = parseGeminiJsonObject(text);
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new Error('Invalid rename response format');

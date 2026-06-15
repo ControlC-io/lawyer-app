@@ -1,6 +1,6 @@
 # Testing Strategy
 
-This document describes the testing approach for the Floowly project. Backend and frontend testing are kept separate: each has its own stack, conventions, and location.
+This document describes the testing approach for the Lawyer App project. Backend and frontend testing are kept separate: each has its own stack, conventions, and location.
 
 ---
 
@@ -41,21 +41,31 @@ Backend tests live in the Express API (`backend/`) and focus on **API endpoints*
 
 ### Test layout by area
 
+Current suites (19 files, all under `backend/src/tests/`):
+
 | File | Coverage |
 |------|----------|
 | `auth.test.ts` | Register, login; success and error cases (e.g. duplicate user, invalid credentials). |
+| `auth.middleware.test.ts` | `authMiddleware` credential resolution: JWT vs company `x-api-key` vs `x-super-admin-api-key`, precedence, and rejection paths. |
 | `users.test.ts` | `GET /api/users/:userId` (API key auth, profile + companies). |
-| `workflow.test.ts` | Trigger, process step, complete step, decision, get execution, update data, rename execution, add logs. |
-| `agents.test.ts` | Get agent, create workflow with AI, validate form with AI, transcribe audio. |
-| `files.test.ts` | Upload execution file (base64/URL), signed URL, process file step. |
-| `folderAccess.test.ts` | Unit tests for `getRootFolderId`, `getUserGroupIdsInCompany`, `canUserAccessFolder` (admin, public root, user/group permission). |
-| `companies.folders.test.ts` | List/get folders (401, 200, 403 when no access); folder permissions GET/POST/DELETE (admin required, root-only); list files (403 when no folder access, 200 with ids); by-metadata (200 with fileIds, 400 when metadata_id missing). |
-| `external.test.ts` | Submit external step (token), send external form link. |
-| `notifications.test.ts` | `POST /api/notifications/assignment` (JWT): 400 missing execution_step_id, 404 step not found, 200 no recipients, 200 with recipients and email, 401 unauthorized. |
-| `public.test.ts` | `POST /api/public/feedback` and `POST /api/public/demo-request`: 400 missing required fields, 200 success, 500 when email service throws. |
-| **Service unit tests** | `workflow.service.test.ts`, `ai.service.test.ts`, `notification.service.test.ts`, `email.service.test.ts` — services are unit-tested with mocked Prisma / `fetch` / SendGrid; controller API tests remain the main integration point. |
+| `companies.branding.test.ts` | Company branding: get/update org, logo upload/remove, primary color. |
+| `companies.folders.test.ts` | List/get folders (401/200/403 by access); folder permissions GET/POST/DELETE (admin, root-only); list files (403/200); by-metadata (200 with fileIds, 400 when metadata_id missing). |
+| `documentAccess.test.ts` | Metadata-condition document permission rules: rule matching and per-user virtual tree resolution. |
+| `folderAccess.test.ts` | `getRootFolderId`, `getUserGroupIdsInCompany`, `canUserAccessFolder` (admin, public root, user/group permission). |
+| `splitPdfPresets.test.ts` | Document-type preset CRUD (`/documents/split-pdf-presets`): list/create/update/delete with auth + validation. |
+| `splitPdfAuto.test.ts` | Auto split (`/documents/split-pdf/auto`): OCR → Gemini segments → file creation with `FilesMetadataValue` written per segment. |
+| `ocr.test.ts` | OCR endpoints (`POST/GET /files/:fileId/ocr`): trigger, status, error paths. |
+| `ocr.service.test.ts` | `processDocumentOcr` orchestration with mocked provider + pending-metadata chaining. |
+| `metadata-from-ocr-extraction.service.test.ts` | `extractAndApplyMetadataFromOcr`: Gemini extraction, validation against allowed values, persistence, optional rename. |
+| `mistral.provider.test.ts` | Mistral OCR provider adapter with mocked HTTP. |
+| `files-metadata-validation.test.ts` | `validateMetadataValueForKey` / `parseAllowedValuesJson` (free_text vs predefined_list). |
+| `fileHistory.test.ts` | `appendFileHistoryEvent` event recording. |
+| `notifications.test.ts` | Notification endpoints (JWT): missing/invalid input, not found, success with recipients, 401 unauthorized. |
+| `public.test.ts` | `POST /api/public/feedback` and `/demo-request`: 400 missing fields, 200 success, 500 when email service throws. |
+| `validation.middleware.test.ts` | express-validator wrapper middleware behaviour. |
+| `email.service.test.ts` | Smoke test that `emailService` is mocked in test env and exposes the expected interface. |
 
-Controller API tests for workflow, users, agents, and files include error-path and auth cases (401 missing API key, 403/404 not found or access denied) in addition to happy-path coverage.
+Controller API tests include error-path and auth cases (401 missing API key, 403/404 not found or access denied) in addition to happy-path coverage.
 
 ### Running backend tests
 

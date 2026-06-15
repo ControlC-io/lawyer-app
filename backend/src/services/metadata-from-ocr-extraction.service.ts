@@ -102,12 +102,12 @@ export async function extractAndApplyMetadataFromOcr(params: {
     if (!row) continue;
     const check = validateMetadataValueForKey(row, strVal);
     if (!check.ok) {
-      const err: ExtractMetadataFromOcrHttpError = {
-        status: check.status,
-        error: check.error,
-        details: check.details,
-      };
-      throw err;
+      // Gemini returned a value outside the predefined list: skip this key rather than
+      // failing the whole file. The field is simply left for the user to fill manually.
+      console.warn(
+        `[metadata-extract] Skipping out-of-list value for key ${keyId} (file ${params.fileId}): ${JSON.stringify(strVal)}`,
+      );
+      continue;
     }
     const existing = await prisma.filesMetadataValue.findFirst({
       where: { files_id: params.fileId, metadata_id: keyId },
