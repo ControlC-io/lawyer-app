@@ -76,7 +76,7 @@ export default function DocumentPermissionRules({ companyId }: Props) {
 
   const fetchMetadataKeys = useCallback(async () => {
     const data = await api.get<MetadataKey[]>(
-      `/api/companies/${companyId}/files-metadata-keys?includeSystemManaged=true`,
+      `/api/companies/${companyId}/files-metadata-keys`,
     );
     setMetadataKeys(data || []);
   }, [companyId]);

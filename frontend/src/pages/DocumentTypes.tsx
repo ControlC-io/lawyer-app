@@ -32,7 +32,6 @@ interface MetadataKey {
   id: string;
   name: string | null;
   value_kind: "free_text" | "predefined_list";
-  system_managed?: boolean;
 }
 
 interface DocumentType {
@@ -66,18 +65,13 @@ export default function DocumentTypes() {
     return map;
   }, [metadataKeys]);
 
-  const systemManagedKeys = useMemo(() => metadataKeys.filter((k) => k.system_managed), [metadataKeys]);
-  const regularKeys = useMemo(() => metadataKeys.filter((k) => !k.system_managed), [metadataKeys]);
-
   const loadData = async () => {
     if (!companyId) return;
     setLoading(true);
     try {
       const [presetRes, keys] = await Promise.all([
         api.get<{ presets: DocumentType[] }>(`/api/companies/${companyId}/documents/document-types`),
-        api.get<MetadataKey[]>(
-          `/api/companies/${companyId}/files-metadata-keys?includeSystemManaged=true`,
-        ),
+        api.get<MetadataKey[]>(`/api/companies/${companyId}/files-metadata-keys`),
       ]);
       setPresets(Array.isArray(presetRes?.presets) ? presetRes.presets : []);
       setMetadataKeys(Array.isArray(keys) ? keys : []);
@@ -271,17 +265,11 @@ export default function DocumentTypes() {
             </div>
             <div className="space-y-2">
               <Label>{String(t("documentTypes.fieldsToExtract"))}</Label>
-              {systemManagedKeys.length > 0 && (
-                <p className="text-xs text-muted-foreground">
-                  <span className="font-medium">{systemManagedKeys.map((k) => k.name).join(", ")}</span>{" "}
-                  {String(t("documentTypes.alwaysExtracted"))}
-                </p>
-              )}
-              {regularKeys.length === 0 ? (
+              {metadataKeys.length === 0 ? (
                 <p className="text-sm text-muted-foreground">{String(t("documentTypes.noMetadataKeys"))}</p>
               ) : (
                 <div className="space-y-2 border rounded-md p-3 max-h-56 overflow-y-auto">
-                  {regularKeys.map((key) => (
+                  {metadataKeys.map((key) => (
                     <label key={key.id} className="flex items-center gap-2 text-sm cursor-pointer">
                       <Checkbox
                         checked={selectedKeyIds.includes(key.id)}

@@ -149,13 +149,14 @@ export function AppSidebar() {
               <SidebarGroupContent>
                 <SidebarMenu>
                   {visibleItems.map((item) => {
+                    const active = isItemActive(item);
                     const isDocuments = item.titleKey === "sidebar.documents";
                     return (
                       <SidebarMenuItem key={item.titleKey}>
                         <SidebarMenuButton
                           asChild
-                          isActive={isItemActive(item)}
-                          className={isDocuments ? "bg-sidebar-accent/50 hover:bg-sidebar-accent font-semibold border-l-2 border-primary" : ""}
+                          isActive={active}
+                          className={isDocuments && active ? "font-semibold border-l-2 border-primary" : ""}
                         >
                           <Link to={item.url}>
                             <item.icon className="h-4 w-4" />

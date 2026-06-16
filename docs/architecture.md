@@ -87,7 +87,7 @@ Dossier uses **MinIO** for S3-compatible object storage to manage file uploads a
 ## Get file dump through SCP
 
 ```bash
-scp root@[SERVER_IP]:path/to/dump/lawyer_app_dump.sql ./dumps/
+scp root@[SERVER_IP]:path/to/dump/dossier_app_dump.sql ./dumps/
 ```
 
 ### Integration Details

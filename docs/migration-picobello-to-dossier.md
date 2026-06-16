@@ -96,7 +96,7 @@ Ejecutado via `scripts/seed-data.js` (Node.js directo a PostgreSQL, sin Docker C
 ### Modo Docker (producción / normal)
 
 ```env
-DATABASE_URL=postgresql://postgres:postgres@db:5432/lawyer_app_db
+DATABASE_URL=postgresql://postgres:postgres@db:5432/dossier_app_db
 MINIO_ENDPOINT=minio
 VITE_API_URL=          # vacío — Vite proxea /api → backend vía nginx
 ```
@@ -110,7 +110,7 @@ docker compose up -d
 ### Modo local (dev sin Docker para frontend/backend)
 
 ```env
-DATABASE_URL=postgresql://postgres:postgres@localhost:5432/lawyer_app_db
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/dossier_app_db
 MINIO_ENDPOINT=localhost
 VITE_API_URL=http://127.0.0.1:3001
 ```
@@ -125,7 +125,7 @@ docker compose up -d db minio
 
 # Backend local (usar node x64 de nvm4w)
 cd backend
-$env:DATABASE_URL="postgresql://postgres:postgres@localhost:5432/lawyer_app_db"
+$env:DATABASE_URL="postgresql://postgres:postgres@localhost:5432/dossier_app_db"
 $env:MINIO_ENDPOINT="localhost"
 & "C:\nvm4w\nodejs\node.exe" "C:\nvm4w\nodejs\node_modules\ts-node\dist\bin.js" --transpile-only src/index.ts
 

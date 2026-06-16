@@ -534,8 +534,7 @@ export default function MetadataDocumentView({
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [searchActive, setSearchActive] = useState(false);
-  const autoAppliedPersonFilterRef = useRef<string | null>(null);
-  const { toast } = useToast();
+const { toast } = useToast();
   const { t, language } = useLanguage();
   const { companyBranding } = useAuth();
   const navigate = useNavigate();
@@ -646,7 +645,7 @@ export default function MetadataDocumentView({
 
   const fetchMetadataKeys = useCallback(async () => {
     const data = await api.get<MetadataKey[]>(
-      `/api/companies/${companyId}/files-metadata-keys?includeSystemManaged=true`,
+      `/api/companies/${companyId}/files-metadata-keys`,
     );
     setMetadataKeys(data || []);
   }, [companyId]);
@@ -694,23 +693,6 @@ export default function MetadataDocumentView({
     fetchTree();
   }, [fetchMetadataKeys, fetchTree]);
 
-  // When opened from /persons?personId=..., auto-apply the matching Personne filter once.
-  useEffect(() => {
-    if (!personLabel) {
-      autoAppliedPersonFilterRef.current = null;
-      return;
-    }
-    if (autoAppliedPersonFilterRef.current === personLabel) return;
-
-    const personKey = metadataKeys.find((k) => (k.name || "").trim().toLowerCase() === "personne");
-    if (!personKey?.id) return;
-
-    setSelectedNodePath([{ key: personKey.id, value: personLabel }]);
-    setFilters([{ key_id: personKey.id, value: personLabel }]);
-    setFilterRows([]);
-    setSelectedFileIds(new Set());
-    autoAppliedPersonFilterRef.current = personLabel;
-  }, [personLabel, metadataKeys]);
 
   useEffect(() => {
     fetchFiles();

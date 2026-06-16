@@ -1,50 +1,6 @@
 import { Response } from 'express';
-import { Prisma } from '@prisma/client';
 import { AuthRequest, ALL_COMPANIES } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
-import {
-  cascadeRuleConditionsOnValueRename,
-  cascadeRuleConditionsOnValueDelete,
-} from '../lib/ruleConditionSync';
-
-const PERSONNE_KEY_NAME = 'Personne';
-
-/**
- * Keeps the "Personne" FilesMetadataKey allowed_values in sync with the
- * current list of persons for a company. Creates the key if missing.
- * Pass a Prisma transaction client (tx) when calling from inside $transaction.
- */
-async function syncPersonsMetadataKey(
-  companyId: string,
-  tx: Omit<typeof prisma, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'> = prisma,
-): Promise<void> {
-  const persons = await tx.person.findMany({
-    where: { company_id: companyId },
-    orderBy: { full_name: 'asc' },
-    select: { full_name: true },
-  });
-  const allowedValues: Prisma.InputJsonValue = persons.map((p) => p.full_name);
-
-  const existing = await tx.filesMetadataKey.findFirst({
-    where: { company_id: companyId, name: PERSONNE_KEY_NAME },
-  });
-
-  if (existing) {
-    await tx.filesMetadataKey.update({
-      where: { id: existing.id },
-      data: { allowed_values: allowedValues },
-    });
-  } else {
-    await tx.filesMetadataKey.create({
-      data: {
-        company_id: companyId,
-        name: PERSONNE_KEY_NAME,
-        value_kind: 'predefined_list',
-        allowed_values: allowedValues,
-      },
-    });
-  }
-}
 
 async function ensureCompanyAccess(req: AuthRequest, companyId: string) {
   if (req.company && !req.user) {
@@ -158,7 +114,6 @@ export const personsController = {
             root_folder: { select: { id: true, name: true } },
           },
         });
-        await syncPersonsMetadataKey(companyId, tx);
         return created;
       });
 
@@ -204,10 +159,6 @@ export const personsController = {
             root_folder: { select: { id: true, name: true } },
           },
         });
-        if (nextName !== existing.full_name) {
-          await syncPersonsMetadataKey(companyId, tx);
-          await cascadeRuleConditionsOnValueRename(companyId, PERSONNE_KEY_NAME, existing.full_name, nextName, tx);
-        }
         return updated;
       });
 
@@ -245,12 +196,10 @@ export const personsController = {
       }
 
       await prisma.$transaction(async (tx) => {
-        await cascadeRuleConditionsOnValueDelete(companyId, PERSONNE_KEY_NAME, existing.full_name, tx);
         await tx.person.delete({ where: { id: personId } });
         if (existing.root_folder_id) {
           await tx.folder.deleteMany({ where: { id: existing.root_folder_id, company_id: companyId } });
         }
-        await syncPersonsMetadataKey(companyId, tx);
       });
 
       return res.status(204).send();

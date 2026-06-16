@@ -3,9 +3,6 @@ import { FilesMetadataValueKind, Prisma } from '@prisma/client';
 import { AuthRequest, ALL_COMPANIES, companyFilter } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 
-/** Keys managed automatically by their own tables (Persons, DocumentType).
- *  Hidden from the Metadata Keys UI and protected from manual edit/delete. */
-const SYSTEM_MANAGED_KEY_NAMES = ['Personne', 'Type'] as const;
 import {
   assertEnumOptionsNotRemovedWhileInUse,
   assertPredefinedListCoversExistingValues,
@@ -647,11 +644,6 @@ export const companiesController = {
         return res.status(400).json({ error: 'Missing company ID', details: 'companyId is required' });
       }
 
-      const includeSystemManaged = req.query.includeSystemManaged === 'true';
-      const systemKeyFilter = includeSystemManaged
-        ? {}
-        : { name: { notIn: [...SYSTEM_MANAGED_KEY_NAMES] } };
-
       const access = await ensureCompanyAccess(req, companyId);
       if (access.error) {
         return res.status(access.error.status).json(access.error.body);
@@ -663,13 +655,10 @@ export const companiesController = {
       // Admins see all keys; non-admins see only keys present on their accessible files
       if (isCompanyAdmin) {
         const keys = await prisma.filesMetadataKey.findMany({
-          where: { ...companyFilter(companyId), ...systemKeyFilter },
+          where: { ...companyFilter(companyId) },
           orderBy: { name: 'asc' },
         });
-        return res.json(keys.map((k) => ({
-          ...k,
-          system_managed: (SYSTEM_MANAGED_KEY_NAMES as readonly string[]).includes(k.name ?? ''),
-        })));
+        return res.json(keys);
       }
 
       const userGroupIds = userId ? await getUserGroupIdsInCompany(userId, companyId) : [];
@@ -697,14 +686,11 @@ export const companiesController = {
       }
 
       const keys = await prisma.filesMetadataKey.findMany({
-        where: { id: { in: accessibleKeyIds }, ...companyFilter(companyId), ...systemKeyFilter },
+        where: { id: { in: accessibleKeyIds }, ...companyFilter(companyId) },
         orderBy: { name: 'asc' },
       });
 
-      return res.json(keys.map((k) => ({
-        ...k,
-        system_managed: (SYSTEM_MANAGED_KEY_NAMES as readonly string[]).includes(k.name ?? ''),
-      })));
+      return res.json(keys);
     } catch (error) {
       console.error('listFilesMetadataKeys error:', error);
       return res.status(500).json({
@@ -784,10 +770,6 @@ export const companiesController = {
       });
       if (!existing) {
         return res.status(404).json({ error: 'Metadata key not found', details: 'Key not found or access denied' });
-      }
-
-      if (existing.name && (SYSTEM_MANAGED_KEY_NAMES as readonly string[]).includes(existing.name)) {
-        return res.status(403).json({ error: 'Forbidden', details: `"${existing.name}" is managed automatically and cannot be edited manually` });
       }
 
       let nextKind: FilesMetadataValueKind = existing.value_kind;
@@ -882,10 +864,6 @@ export const companiesController = {
       if (!existing) {
         return res.status(404).json({ error: 'Metadata key not found', details: 'Key not found or access denied' });
       }
-      if (existing.name && (SYSTEM_MANAGED_KEY_NAMES as readonly string[]).includes(existing.name)) {
-        return res.status(403).json({ error: 'Forbidden', details: `"${existing.name}" is managed automatically and cannot be deleted manually` });
-      }
-
       const result = await prisma.filesMetadataKey.deleteMany({
         where: { id: keyId, company_id: companyId },
       });

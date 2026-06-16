@@ -1268,7 +1268,10 @@
     "person": "Personne",
     "personPlaceholder": "Sélectionner une personne",
     "personNone": "Aucune personne",
-    "advancedOptions": "Options avancées"
+    "advancedOptions": "Options avancées",
+    "resumeBanner": "Vous avez un découpage en cours. Reprendre ?",
+    "resume": "Reprendre",
+    "discard": "Ignorer"
   },
   "metadataDocuments": {
     "treeHideKeyLabels": "Valeurs seules dans l’arborescence",

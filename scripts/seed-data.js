@@ -3,7 +3,7 @@ const { Client } = require('C:/Temp/pg-temp/node_modules/pg');
 const client = new Client({
   host: 'localhost',
   port: 5432,
-  database: 'lawyer_app_db',
+  database: 'dossier_app_db',
   user: 'postgres',
   password: 'postgres',
 });

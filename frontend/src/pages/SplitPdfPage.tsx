@@ -296,9 +296,42 @@ export default function SplitPdfPage() {
   /** When true (default), each created PDF is queued for OCR like a new upload. */
   const [ocrCreatedFiles, setOcrCreatedFiles] = useState(true);
 
+  type SavedReviewState = { fileId: string; segments: SplitPdfSegment[]; totalPages: number; savedAt: number };
+  const [savedState, setSavedState] = useState<SavedReviewState | null>(null);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("split-pdf-review-state");
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as SavedReviewState;
+      const TWO_HOURS = 2 * 60 * 60 * 1000;
+      if (parsed.savedAt && Date.now() - parsed.savedAt < TWO_HOURS && parsed.fileId && Array.isArray(parsed.segments)) {
+        setSavedState(parsed);
+      } else {
+        localStorage.removeItem("split-pdf-review-state");
+      }
+    } catch {
+      localStorage.removeItem("split-pdf-review-state");
+    }
+  }, []);
+
   const goBackToDocuments = useCallback(() => {
     navigate("/documents");
   }, [navigate]);
+
+  const handleResume = () => {
+    if (!savedState) return;
+    setFileId(savedState.fileId);
+    setSegments(savedState.segments);
+    setTotalPages(savedState.totalPages);
+    setSavedState(null);
+    setStep("review");
+  };
+
+  const handleDiscard = () => {
+    localStorage.removeItem("split-pdf-review-state");
+    setSavedState(null);
+  };
 
   const handleStripPageClick = (page: number) => {
     setExpandedPage(page);
@@ -493,13 +526,25 @@ export default function SplitPdfPage() {
           ...(nativeText ? { nativeText } : {}),
         },
       );
-      setSegments(sortSegments(res.segments));
+      const matchedSegments = sortSegments(res.segments).map((seg) => {
+        if (seg.person_id) return seg;
+        const match = (Array.isArray(personsList) ? personsList : []).find(
+          (p) => p.full_name && seg.name.toLowerCase().includes(p.full_name.toLowerCase()),
+        );
+        return match ? { ...seg, person_id: match.id } : seg;
+      });
+      setSegments(matchedSegments);
       const maxFromSegments = Math.max(
         1,
         ...res.segments.map((s) => Math.max(s.start_page, s.end_page)),
       );
-      setTotalPages(typeof res.pageCount === "number" && res.pageCount > 0 ? res.pageCount : maxFromSegments);
+      const resolvedTotalPages = typeof res.pageCount === "number" && res.pageCount > 0 ? res.pageCount : maxFromSegments;
+      setTotalPages(resolvedTotalPages);
       setExpandedPage(null);
+      localStorage.setItem(
+        "split-pdf-review-state",
+        JSON.stringify({ fileId: firstId, segments: matchedSegments, totalPages: resolvedTotalPages, savedAt: Date.now() }),
+      );
       setStep("review");
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Processing failed";
@@ -562,6 +607,7 @@ export default function SplitPdfPage() {
       } else {
         toast({ title: String(t("splitPdf.created")) });
       }
+      localStorage.removeItem("split-pdf-review-state");
       navigate("/documents");
     } catch (e) {
       toast({
@@ -621,6 +667,15 @@ export default function SplitPdfPage() {
       <div className="flex-1 min-h-0 flex flex-col gap-6">
         {step === "pick" && (
           <div className="space-y-3 max-w-2xl">
+            {savedState && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-800 p-3 flex flex-wrap items-center justify-between gap-3 text-sm">
+                <span className="text-amber-900 dark:text-amber-200">{String(t("splitPdf.resumeBanner"))}</span>
+                <div className="flex gap-2">
+                  <Button size="sm" variant="outline" onClick={handleDiscard}>{String(t("splitPdf.discard"))}</Button>
+                  <Button size="sm" onClick={handleResume}>{String(t("splitPdf.resume"))}</Button>
+                </div>
+              </div>
+            )}
             <Label>{String(t("splitPdf.selectPdf"))}</Label>
             <label className="flex flex-col items-center justify-center border-2 border-dashed rounded-lg p-10 cursor-pointer hover:bg-muted/40 transition-colors">
               <input
@@ -738,6 +793,7 @@ export default function SplitPdfPage() {
                   <Button
                     variant="outline"
                     onClick={() => {
+                      localStorage.removeItem("split-pdf-review-state");
                       setStep("pick");
                       setFileId(null);
                       setLocalFile(null);

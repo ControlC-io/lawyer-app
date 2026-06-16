@@ -13,7 +13,6 @@ import {
   Upload,
   Brain,
   Tag,
-  ArrowRight,
   Info,
   FileText,
   History,
@@ -21,6 +20,7 @@ import {
   AlertTriangle,
   Pencil,
 } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 
 interface HealthData {
@@ -141,14 +141,7 @@ function Pill({ children, color }: { children: React.ReactNode; color?: string }
   );
 }
 
-function SectionTitle({ icon: Icon, children }: { icon: React.ElementType; children: React.ReactNode }) {
-  return (
-    <div className="flex items-center gap-2 mb-3">
-      <Icon className="h-4 w-4 text-muted-foreground" />
-      <h3 className="text-sm font-semibold">{children}</h3>
-    </div>
-  );
-}
+type InfoTab = "status" | "ocr" | "metadata" | "split" | "reference";
 
 const EVENT_TYPES = [
   { key: "FILE_UPLOADED", desc: "File created and stored" },
@@ -163,6 +156,7 @@ const EVENT_TYPES = [
 ];
 
 export default function InfoPage() {
+  const [activeTab, setActiveTab] = useState<InfoTab>("status");
   const [health, setHealth] = useState<HealthData | null>(null);
   const [loading, setLoading] = useState(true);
   const [lastChecked, setLastChecked] = useState<Date | null>(null);
@@ -223,7 +217,32 @@ export default function InfoPage() {
         </button>
       </div>
 
-      {/* Service status */}
+      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as InfoTab)}>
+        <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1">
+          <TabsTrigger value="status" className="gap-1.5">
+            <CheckCircle2 className="h-3.5 w-3.5" />
+            Status
+            {!allOk && health && <span className="h-1.5 w-1.5 rounded-full bg-red-500" />}
+          </TabsTrigger>
+          <TabsTrigger value="ocr" className="gap-1.5">
+            <ScanText className="h-3.5 w-3.5" />
+            OCR
+          </TabsTrigger>
+          <TabsTrigger value="metadata" className="gap-1.5">
+            <Tag className="h-3.5 w-3.5" />
+            Metadata
+          </TabsTrigger>
+          <TabsTrigger value="split" className="gap-1.5">
+            <Scissors className="h-3.5 w-3.5" />
+            PDF Split
+          </TabsTrigger>
+          <TabsTrigger value="reference" className="gap-1.5">
+            <History className="h-3.5 w-3.5" />
+            Reference
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="status" className="mt-4">
       <Card>
         <CardHeader className="pb-3 pt-4 px-4">
           <CardTitle className="text-sm font-semibold flex items-center gap-2">
@@ -274,8 +293,10 @@ export default function InfoPage() {
           />
         </CardContent>
       </Card>
+        </TabsContent>
 
       {/* OCR Pipeline */}
+        <TabsContent value="ocr" className="mt-4">
       <Card>
         <CardHeader className="pb-2 pt-4 px-4">
           <CardTitle className="text-sm font-semibold flex items-center gap-2">
@@ -320,8 +341,10 @@ export default function InfoPage() {
           </StepCard>
         </CardContent>
       </Card>
+        </TabsContent>
 
       {/* Metadata extraction */}
+        <TabsContent value="metadata" className="mt-4">
       <Card>
         <CardHeader className="pb-2 pt-4 px-4">
           <CardTitle className="text-sm font-semibold flex items-center gap-2">
@@ -388,8 +411,10 @@ export default function InfoPage() {
           </StepCard>
         </CardContent>
       </Card>
+        </TabsContent>
 
       {/* PDF Split */}
+        <TabsContent value="split" className="mt-4">
       <Card>
         <CardHeader className="pb-2 pt-4 px-4">
           <CardTitle className="text-sm font-semibold flex items-center gap-2">
@@ -447,8 +472,10 @@ export default function InfoPage() {
           </StepCard>
         </CardContent>
       </Card>
+        </TabsContent>
 
       {/* Two columns: File History + Config */}
+        <TabsContent value="reference" className="mt-4">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
 
         {/* File history events */}
@@ -539,6 +566,8 @@ export default function InfoPage() {
         </Card>
 
       </div>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

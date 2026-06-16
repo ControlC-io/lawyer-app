@@ -23,7 +23,7 @@ Pop-Location
 # Start backend
 Write-Host "Starting backend on :3001..."
 $backendJob = Start-Process powershell -ArgumentList "-NoExit", "-Command", @"
-`$env:DATABASE_URL='postgresql://postgres:postgres@localhost:5432/lawyer_app_db'
+`$env:DATABASE_URL='postgresql://postgres:postgres@localhost:5432/dossier_app_db'
 `$env:MINIO_ENDPOINT='localhost'
 Set-Location '$ROOT\backend'
 & '$NODE' 'C:\nvm4w\nodejs\node_modules\ts-node\dist\bin.js' --transpile-only src/index.ts

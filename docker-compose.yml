@@ -15,7 +15,7 @@ services:
       - MINIO_USE_SSL=${MINIO_USE_SSL:-false}
       - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
       - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin}
-      - MINIO_BUCKET_NAME=${MINIO_BUCKET_NAME:-lawyer-app}
+      - MINIO_BUCKET_NAME=${MINIO_BUCKET_NAME:-dossier-app}
       - JWT_SECRET=${JWT_SECRET}
       - INTERNAL_API_KEY=${INTERNAL_API_KEY:-}
       - SUPER_ADMIN_API_KEY=${SUPER_ADMIN_API_KEY:-}
@@ -50,7 +50,7 @@ services:
     environment:
       - POSTGRES_USER=${POSTGRES_USER:-postgres}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
-      - POSTGRES_DB=${POSTGRES_DB:-lawyer_app_db}
+      - POSTGRES_DB=${POSTGRES_DB:-dossier_app_db}
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:

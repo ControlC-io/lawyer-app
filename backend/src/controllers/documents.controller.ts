@@ -1,12 +1,7 @@
 import { Response } from 'express';
 import { FilesMetadataValueKind, Prisma } from '@prisma/client';
 
-const SYSTEM_MANAGED_KEY_NAMES = ['Personne', 'Type'] as const;
 import { AuthRequest, ALL_COMPANIES, companyFilter } from '../middleware/auth';
-import {
-  cascadeRuleConditionsOnValueRename,
-  cascadeRuleConditionsOnValueDelete,
-} from '../lib/ruleConditionSync';
 import { prisma } from '../lib/prisma';
 import { getAccessibleFileIds, getAccessibleFileIdsWithLevels, buildVirtualTree, getAllowedMetadataValues, canUserAccessFileByMetadata } from '../lib/documentAccess';
 import { getUserGroupIdsInCompany } from '../lib/folderAccess';
@@ -161,40 +156,6 @@ function documentTypeMetadataKeyIdsFromJson(raw: Prisma.JsonValue): string[] {
   return raw.filter((id): id is string => typeof id === 'string').map((id) => id.trim()).filter(Boolean);
 }
 
-const DOCUMENT_TYPE_KEY_NAME = 'Type';
-
-/**
- * Keeps the "Type" FilesMetadataKey allowed_values in sync with the current
- * list of DocumentType names for a company. Creates the key if missing.
- */
-async function syncDocumentTypesMetadataKey(companyId: string): Promise<void> {
-  const presets = await prisma.documentType.findMany({
-    where: { company_id: companyId },
-    orderBy: { name: 'asc' },
-    select: { name: true },
-  });
-  const allowedValues: Prisma.InputJsonValue = presets.map((p) => p.name);
-
-  const existing = await prisma.filesMetadataKey.findFirst({
-    where: { company_id: companyId, name: DOCUMENT_TYPE_KEY_NAME },
-  });
-
-  if (existing) {
-    await prisma.filesMetadataKey.update({
-      where: { id: existing.id },
-      data: { allowed_values: allowedValues },
-    });
-  } else {
-    await prisma.filesMetadataKey.create({
-      data: {
-        company_id: companyId,
-        name: DOCUMENT_TYPE_KEY_NAME,
-        value_kind: 'predefined_list',
-        allowed_values: allowedValues,
-      },
-    });
-  }
-}
 
 export const documentsController = {
   // ─── Permission Rules CRUD ───
@@ -1251,8 +1212,6 @@ export const documentsController = {
       },
     });
 
-    await syncDocumentTypesMetadataKey(companyId);
-
     return res.status(201).json({
       id: created.id,
       name: created.name,
@@ -1319,11 +1278,6 @@ export const documentsController = {
       data,
     });
 
-    if (data.name !== undefined) {
-      await syncDocumentTypesMetadataKey(companyId);
-      await cascadeRuleConditionsOnValueRename(companyId, DOCUMENT_TYPE_KEY_NAME, existing.name, data.name);
-    }
-
     return res.json({
       id: updated.id,
       name: updated.name,
@@ -1346,8 +1300,6 @@ export const documentsController = {
     if (!toDelete) return res.status(404).json({ error: 'Document type not found' });
 
     await prisma.documentType.delete({ where: { id: documentTypeId } });
-    await syncDocumentTypesMetadataKey(companyId);
-    await cascadeRuleConditionsOnValueDelete(companyId, DOCUMENT_TYPE_KEY_NAME, toDelete.name);
 
     return res.status(204).send();
   },
@@ -1401,12 +1353,8 @@ export const documentsController = {
       }
 
       const allKeyIds = [...new Set(dbTypes.flatMap((t) => documentTypeMetadataKeyIdsFromJson(t.metadata_key_ids)))];
-      const [dbKeys, systemKeys] = await Promise.all([
-        prisma.filesMetadataKey.findMany({ where: { company_id: companyId, id: { in: allKeyIds } } }),
-        prisma.filesMetadataKey.findMany({ where: { company_id: companyId, name: { in: [...SYSTEM_MANAGED_KEY_NAMES] } } }),
-      ]);
-      const keysById = new Map([...dbKeys, ...systemKeys].map((k) => [k.id, k]));
-      const systemKeyIds = systemKeys.map((k) => k.id);
+      const dbKeys = await prisma.filesMetadataKey.findMany({ where: { company_id: companyId, id: { in: allKeyIds } } });
+      const keysById = new Map(dbKeys.map((k) => [k.id, k]));
 
       const { storageService } = await import('../services/storage.service');
       const bucket = storageService.getDocumentsBucket();
@@ -1421,13 +1369,11 @@ export const documentsController = {
 
       const documentTypes = dbTypes.map((t) => {
         const typeKeyIds = documentTypeMetadataKeyIdsFromJson(t.metadata_key_ids);
-        const typeKeyIdsSet = new Set(typeKeyIds);
-        const augmentedKeyIds = [...typeKeyIds, ...systemKeyIds.filter((id) => !typeKeyIdsSet.has(id))];
         return {
           id: t.id,
           name: t.name,
           namingInstructions: t.naming_instructions.trim(),
-          metadataKeys: augmentedKeyIds
+          metadataKeys: typeKeyIds
             .map((keyId) => keysById.get(keyId))
             .filter((k): k is NonNullable<typeof k> => k != null)
             .map((k) => ({
@@ -1552,22 +1498,16 @@ export const documentsController = {
     }
 
     const allKeyIds = [...new Set(dbTypes.flatMap((t) => documentTypeMetadataKeyIdsFromJson(t.metadata_key_ids)))];
-    const [dbKeys, systemKeys] = await Promise.all([
-      prisma.filesMetadataKey.findMany({ where: { company_id: companyId, id: { in: allKeyIds } } }),
-      prisma.filesMetadataKey.findMany({ where: { company_id: companyId, name: { in: [...SYSTEM_MANAGED_KEY_NAMES] } } }),
-    ]);
-    const keysById = new Map([...dbKeys, ...systemKeys].map((k) => [k.id, k]));
-    const systemKeyIds = systemKeys.map((k) => k.id);
+    const dbKeys = await prisma.filesMetadataKey.findMany({ where: { company_id: companyId, id: { in: allKeyIds } } });
+    const keysById = new Map(dbKeys.map((k) => [k.id, k]));
 
     const documentTypes = dbTypes.map((t) => {
       const typeKeyIds = documentTypeMetadataKeyIdsFromJson(t.metadata_key_ids);
-      const typeKeyIdsSet = new Set(typeKeyIds);
-      const augmentedKeyIds = [...typeKeyIds, ...systemKeyIds.filter((id) => !typeKeyIdsSet.has(id))];
       return {
         id: t.id,
         name: t.name,
         namingInstructions: t.naming_instructions.trim(),
-        metadataKeys: augmentedKeyIds
+        metadataKeys: typeKeyIds
           .map((keyId) => keysById.get(keyId))
           .filter((k): k is NonNullable<typeof k> => k != null)
           .map((k) => ({
@@ -1635,12 +1575,6 @@ export const documentsController = {
       return res.status(400).json({ error: e instanceof Error ? e.message : 'Failed to split PDF' });
     }
 
-    const typeMetaKey = await prisma.filesMetadataKey.findFirst({
-      where: { company_id: companyId, name: DOCUMENT_TYPE_KEY_NAME },
-      select: { id: true },
-    });
-    const docTypeNamesMap = new Map(dbTypes.map((t) => [t.id, t.name]));
-
     const created: Array<{ id: string; name: string }> = [];
     for (let i = 0; i < parts.length; i++) {
       const part = parts[i];
@@ -1690,23 +1624,6 @@ export const documentsController = {
             action: 'add',
             next: strVal,
           });
-        }
-      }
-
-      // Store document type as "Type" metadata value
-      if (seg?.document_type_id && typeMetaKey && docTypeNamesMap.has(seg.document_type_id)) {
-        const typeName = docTypeNamesMap.get(seg.document_type_id)!;
-        const alreadyStored = meta && typeMetaKey.id in meta;
-        if (!alreadyStored) {
-          await prisma.filesMetadataValue.create({
-            data: {
-              files_id: dbFile.id,
-              metadata_id: typeMetaKey.id,
-              value: typeName,
-              company_id: companyId,
-            },
-          });
-          metaChanges.push({ key: DOCUMENT_TYPE_KEY_NAME, keyId: typeMetaKey.id, action: 'add', next: typeName });
         }
       }
 
@@ -1836,17 +1753,6 @@ export const documentsController = {
       for (const p of personRows) personFolderMap.set(p.id, p.root_folder_id);
     }
 
-    // Pre-load document type names for segments that carry document_type_id
-    const segDocTypeIds = [...new Set(validated.filter((s) => s.document_type_id).map((s) => s.document_type_id!))];
-    const docTypeRows = segDocTypeIds.length > 0
-      ? await prisma.documentType.findMany({
-          where: { company_id: companyId, id: { in: segDocTypeIds } },
-          select: { id: true, name: true },
-        })
-      : [];
-    const docTypeNamesMap = new Map(docTypeRows.map((r) => [r.id, r.name]));
-    const typeMetaKeyApply = companyMetaKeys.find((k) => k.name === DOCUMENT_TYPE_KEY_NAME);
-
     const file = await prisma.file.findFirst({
       where: { id: fileId, company_id: companyId, is_archived: false },
       select: {
@@ -1935,23 +1841,6 @@ export const documentsController = {
             action: 'add',
             next: strVal,
           });
-        }
-      }
-
-      // Store document type as "Type" metadata value
-      if (seg?.document_type_id && typeMetaKeyApply && docTypeNamesMap.has(seg.document_type_id)) {
-        const typeName = docTypeNamesMap.get(seg.document_type_id)!;
-        const alreadyStored = meta && typeMetaKeyApply.id in meta;
-        if (!alreadyStored) {
-          await prisma.filesMetadataValue.create({
-            data: {
-              files_id: dbFile.id,
-              metadata_id: typeMetaKeyApply.id,
-              value: typeName,
-              company_id: companyId,
-            },
-          });
-          metaChanges.push({ key: DOCUMENT_TYPE_KEY_NAME, keyId: typeMetaKeyApply.id, action: 'add', next: typeName });
         }
       }
 

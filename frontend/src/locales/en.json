@@ -1269,7 +1269,10 @@
     "person": "Person",
     "personPlaceholder": "Select person",
     "personNone": "No person",
-    "advancedOptions": "Advanced options"
+    "advancedOptions": "Advanced options",
+    "resumeBanner": "You have an unfinished split. Resume?",
+    "resume": "Resume",
+    "discard": "Discard"
   },
   "metadataDocuments": {
     "treeHideKeyLabels": "Values only in the tree",

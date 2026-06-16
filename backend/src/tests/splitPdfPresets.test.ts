@@ -53,11 +53,6 @@ describe('Document Types endpoints', () => {
       }),
     );
 
-    // Defaults for syncDocumentTypesMetadataKey (runs after type create/update/delete)
-    (prismaMock.documentType.findMany as jest.Mock).mockResolvedValue([]);
-    (prismaMock.filesMetadataKey.findFirst as jest.Mock).mockResolvedValue(null);
-    (prismaMock.filesMetadataKey.create as jest.Mock).mockResolvedValue({ id: 'type-key' });
-    (prismaMock.filesMetadataKey.update as jest.Mock).mockResolvedValue({ id: 'type-key' });
   });
 
   it('lists document types for users with documents.view', async () => {

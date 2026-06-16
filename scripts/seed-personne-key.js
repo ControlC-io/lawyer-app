@@ -18,7 +18,7 @@ try {
   require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 } catch {}
 
-const dbUrl = process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/lawyer_app_db';
+const dbUrl = process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/dossier_app_db';
 
 async function main() {
   const client = new Client({ connectionString: dbUrl });

@@ -380,12 +380,12 @@ export default function SplitPdfPageStrip({
       )}
 
       <div className="space-y-6">
-        {showVisualStrip &&
-          layoutBlocks.map((block, blockIdx) => (
+        {layoutBlocks.map((block, blockIdx) => (
             <div
               key={`${block.type}-${blockIdx}-${block.type === "segment" ? block.segment.start_page : block.pages[0] ?? "g"}`}
               className="flex flex-col gap-3 lg:flex-row lg:items-stretch lg:gap-6 rounded-lg border bg-card/40 p-3 sm:p-4"
             >
+              {showVisualStrip && (
               <div
                 className="flex shrink-0 flex-col items-center gap-0 overflow-y-auto max-h-[min(70vh,560px)] rounded-md border bg-muted/20 p-2 scrollbar-thin [scrollbar-width:thin] lg:w-[min(280px,42vw)]"
                 style={{
@@ -412,6 +412,7 @@ export default function SplitPdfPageStrip({
                     ))
                   : block.pages.map((p) => <PageThumbColumnBlock key={p} page={p} />)}
               </div>
+              )}
 
               <div className="min-w-0 flex-1 flex flex-col lg:border-l lg:border-border/60 lg:pl-6 pt-1 lg:pt-0">
                 {block.type === "segment" ? (
