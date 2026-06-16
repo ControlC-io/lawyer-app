@@ -145,12 +145,12 @@ async function assertFlatDocumentWriteAccess(
   return true;
 }
 
-function normalizeSplitPresetMetadataKeyIds(raw: unknown): string[] {
+function normalizeDocumentTypeMetadataKeyIds(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
   return [...new Set(raw.map((id) => String(id ?? '').trim()).filter(Boolean))];
 }
 
-function splitPresetMetadataKeyIdsFromJson(raw: Prisma.JsonValue): string[] {
+function documentTypeMetadataKeyIdsFromJson(raw: Prisma.JsonValue): string[] {
   if (!Array.isArray(raw)) return [];
   return raw.filter((id): id is string => typeof id === 'string').map((id) => id.trim()).filter(Boolean);
 }
@@ -159,10 +159,10 @@ const DOCUMENT_TYPE_KEY_NAME = 'Type';
 
 /**
  * Keeps the "Type" FilesMetadataKey allowed_values in sync with the current
- * list of DocumentSplitPreset names for a company. Creates the key if missing.
+ * list of DocumentType names for a company. Creates the key if missing.
  */
 async function syncDocumentTypesMetadataKey(companyId: string): Promise<void> {
-  const presets = await prisma.documentSplitPreset.findMany({
+  const presets = await prisma.documentType.findMany({
     where: { company_id: companyId },
     orderBy: { name: 'asc' },
     select: { name: true },
@@ -1190,29 +1190,29 @@ export const documentsController = {
     });
   },
 
-  async listSplitPdfPresets(req: AuthRequest, res: Response) {
+  async listDocumentTypes(req: AuthRequest, res: Response) {
     const { companyId } = req.params;
     const access = await ensureCompanyAccess(req, companyId);
     if (access.error) return res.status(access.error.status).json(access.error.body);
 
-    const presets = await prisma.documentSplitPreset.findMany({
+    const types = await prisma.documentType.findMany({
       where: { company_id: companyId },
       orderBy: [{ created_at: 'desc' }],
     });
 
     return res.json({
-      presets: presets.map((preset) => ({
-        id: preset.id,
-        name: preset.name,
-        namingInstructions: preset.naming_instructions,
-        metadataKeyIds: splitPresetMetadataKeyIdsFromJson(preset.metadata_key_ids),
-        createdAt: preset.created_at,
-        updatedAt: preset.updated_at,
+      presets: types.map((t) => ({
+        id: t.id,
+        name: t.name,
+        namingInstructions: t.naming_instructions,
+        metadataKeyIds: documentTypeMetadataKeyIdsFromJson(t.metadata_key_ids),
+        createdAt: t.created_at,
+        updatedAt: t.updated_at,
       })),
     });
   },
 
-  async createSplitPdfPreset(req: AuthRequest, res: Response) {
+  async createDocumentType(req: AuthRequest, res: Response) {
     const { companyId } = req.params;
     const { name, namingInstructions, metadataKeyIds } = req.body || {};
     const access = await ensureCompanyAccess(req, companyId);
@@ -1220,7 +1220,7 @@ export const documentsController = {
 
     const trimmedName = typeof name === 'string' ? name.trim() : '';
     const trimmedInstructions = typeof namingInstructions === 'string' ? namingInstructions.trim() : '';
-    const uniqueMetadataKeyIds = normalizeSplitPresetMetadataKeyIds(metadataKeyIds);
+    const uniqueMetadataKeyIds = normalizeDocumentTypeMetadataKeyIds(metadataKeyIds);
 
     if (!trimmedName) return res.status(400).json({ error: 'name is required' });
     if (!trimmedInstructions) return res.status(400).json({ error: 'namingInstructions is required' });
@@ -1236,7 +1236,7 @@ export const documentsController = {
       return res.status(400).json({ error: 'One or more metadataKeyIds are invalid for this company' });
     }
 
-    const created = await prisma.documentSplitPreset.create({
+    const created = await prisma.documentType.create({
       data: {
         company_id: companyId,
         name: trimmedName,
@@ -1251,23 +1251,23 @@ export const documentsController = {
       id: created.id,
       name: created.name,
       namingInstructions: created.naming_instructions,
-      metadataKeyIds: splitPresetMetadataKeyIdsFromJson(created.metadata_key_ids),
+      metadataKeyIds: documentTypeMetadataKeyIdsFromJson(created.metadata_key_ids),
       createdAt: created.created_at,
       updatedAt: created.updated_at,
     });
   },
 
-  async updateSplitPdfPreset(req: AuthRequest, res: Response) {
-    const { companyId, presetId } = req.params;
+  async updateDocumentType(req: AuthRequest, res: Response) {
+    const { companyId, documentTypeId } = req.params;
     const { name, namingInstructions, metadataKeyIds } = req.body || {};
     const access = await ensureCompanyAccess(req, companyId);
     if (access.error) return res.status(access.error.status).json(access.error.body);
 
-    const existing = await prisma.documentSplitPreset.findFirst({
-      where: { id: presetId, company_id: companyId },
+    const existing = await prisma.documentType.findFirst({
+      where: { id: documentTypeId, company_id: companyId },
       select: { id: true },
     });
-    if (!existing) return res.status(404).json({ error: 'Preset not found' });
+    if (!existing) return res.status(404).json({ error: 'Document type not found' });
 
     const data: {
       name?: string;
@@ -1290,7 +1290,7 @@ export const documentsController = {
     }
 
     if (metadataKeyIds !== undefined) {
-      const uniqueMetadataKeyIds = normalizeSplitPresetMetadataKeyIds(metadataKeyIds);
+      const uniqueMetadataKeyIds = normalizeDocumentTypeMetadataKeyIds(metadataKeyIds);
       if (uniqueMetadataKeyIds.length === 0) {
         return res.status(400).json({ error: 'metadataKeyIds must be a non-empty array when provided' });
       }
@@ -1308,8 +1308,8 @@ export const documentsController = {
       return res.status(400).json({ error: 'No updates provided' });
     }
 
-    const updated = await prisma.documentSplitPreset.update({
-      where: { id: presetId },
+    const updated = await prisma.documentType.update({
+      where: { id: documentTypeId },
       data,
     });
 
@@ -1321,21 +1321,21 @@ export const documentsController = {
       id: updated.id,
       name: updated.name,
       namingInstructions: updated.naming_instructions,
-      metadataKeyIds: splitPresetMetadataKeyIdsFromJson(updated.metadata_key_ids),
+      metadataKeyIds: documentTypeMetadataKeyIdsFromJson(updated.metadata_key_ids),
       createdAt: updated.created_at,
       updatedAt: updated.updated_at,
     });
   },
 
-  async deleteSplitPdfPreset(req: AuthRequest, res: Response) {
-    const { companyId, presetId } = req.params;
+  async deleteDocumentType(req: AuthRequest, res: Response) {
+    const { companyId, documentTypeId } = req.params;
     const access = await ensureCompanyAccess(req, companyId);
     if (access.error) return res.status(access.error.status).json(access.error.body);
 
-    const deleted = await prisma.documentSplitPreset.deleteMany({
-      where: { id: presetId, company_id: companyId },
+    const deleted = await prisma.documentType.deleteMany({
+      where: { id: documentTypeId, company_id: companyId },
     });
-    if (deleted.count === 0) return res.status(404).json({ error: 'Preset not found' });
+    if (deleted.count === 0) return res.status(404).json({ error: 'Document type not found' });
 
     await syncDocumentTypesMetadataKey(companyId);
 
@@ -1344,23 +1344,12 @@ export const documentsController = {
 
   async splitPdfPropose(req: AuthRequest, res: Response) {
     const { companyId } = req.params;
-    const { fileId, metadataKeyIds, namingInstructions, currentDate } = req.body || {};
+    const { fileId, currentDate } = req.body || {};
 
     if (!(await assertFlatDocumentWriteAccess(req, companyId, res))) return;
 
     if (!fileId || typeof fileId !== 'string') {
       return res.status(400).json({ error: 'fileId is required' });
-    }
-    if (!Array.isArray(metadataKeyIds) || metadataKeyIds.length === 0) {
-      return res.status(400).json({ error: 'metadataKeyIds must be a non-empty array' });
-    }
-    if (typeof namingInstructions !== 'string' || !namingInstructions.trim()) {
-      return res.status(400).json({ error: 'namingInstructions is required' });
-    }
-
-    const requestedIds = [...new Set(metadataKeyIds.map((id: unknown) => String(id).trim()).filter(Boolean))];
-    if (requestedIds.length === 0) {
-      return res.status(400).json({ error: 'metadataKeyIds must contain at least one valid id' });
     }
 
     const file = await prisma.file.findFirst({
@@ -1387,14 +1376,19 @@ export const documentsController = {
         : new Date().toISOString().slice(0, 10);
 
     try {
-      const dbKeys = await prisma.filesMetadataKey.findMany({
-        where: { company_id: companyId, id: { in: requestedIds } },
+      const dbTypes = await prisma.documentType.findMany({
+        where: { company_id: companyId },
+        orderBy: { name: 'asc' },
       });
-      if (dbKeys.length !== requestedIds.length) {
-        return res.status(400).json({ error: 'One or more metadata keys are invalid for this company' });
+      if (dbTypes.length === 0) {
+        return res.status(400).json({ error: 'At least one document type must be configured before proposing a split' });
       }
-      const byId = new Map(dbKeys.map((k) => [k.id, k]));
-      const orderedKeys = requestedIds.map((id) => byId.get(id)!);
+
+      const allKeyIds = [...new Set(dbTypes.flatMap((t) => documentTypeMetadataKeyIdsFromJson(t.metadata_key_ids)))];
+      const dbKeys = await prisma.filesMetadataKey.findMany({
+        where: { company_id: companyId, id: { in: allKeyIds } },
+      });
+      const keysById = new Map(dbKeys.map((k) => [k.id, k]));
 
       const { storageService } = await import('../services/storage.service');
       const bucket = storageService.getDocumentsBucket();
@@ -1407,19 +1401,26 @@ export const documentsController = {
       const { proposeSplitWithGemini, getPdfPageCount } = await import('../services/pdf-split.service');
       const pageCount = await getPdfPageCount(pdfBuffer);
 
-      const metadataKeys = orderedKeys.map((k) => ({
-        id: k.id,
-        name: k.name,
-        valueKind: (k.value_kind === FilesMetadataValueKind.predefined_list
-          ? 'predefined_list'
-          : 'free_text') as 'free_text' | 'predefined_list',
-        allowedValues: parseAllowedValuesJson(k.allowed_values),
+      const documentTypes = dbTypes.map((t) => ({
+        id: t.id,
+        name: t.name,
+        namingInstructions: t.naming_instructions.trim(),
+        metadataKeys: documentTypeMetadataKeyIdsFromJson(t.metadata_key_ids)
+          .map((keyId) => keysById.get(keyId))
+          .filter((k): k is NonNullable<typeof k> => k != null)
+          .map((k) => ({
+            id: k.id,
+            name: k.name,
+            valueKind: (k.value_kind === FilesMetadataValueKind.predefined_list
+              ? 'predefined_list'
+              : 'free_text') as 'free_text' | 'predefined_list',
+            allowedValues: parseAllowedValuesJson(k.allowed_values),
+          })),
       }));
 
       const segments = await proposeSplitWithGemini({
         ocrMarkdown: file.ocr_markdown,
-        metadataKeys,
-        namingInstructions: namingInstructions.trim(),
+        documentTypes,
         currentDate: dateStr,
       });
       return res.json({ segments, pageCount });
@@ -1436,7 +1437,6 @@ export const documentsController = {
    *
    * Multipart form-data:
    * - file (PDF)
-   * - presetId (UUID)
    * - runOcr (default true)
    * - keepOriginalFile (default false)
    * - ocrCreatedFiles (default true)
@@ -1453,10 +1453,6 @@ export const documentsController = {
       return res.status(400).json({ error: 'file must be a PDF' });
     }
 
-    const presetIdRaw = (req.body as Record<string, unknown> | undefined)?.presetId;
-    const presetId = typeof presetIdRaw === 'string' ? presetIdRaw.trim() : '';
-    if (!presetId) return res.status(400).json({ error: 'presetId is required' });
-
     const keepSource = (req.body as Record<string, unknown> | undefined)?.keepOriginalFile === 'true';
     const runOcr = (req.body as Record<string, unknown> | undefined)?.runOcr !== 'false';
     const runOcrOnCreated = (req.body as Record<string, unknown> | undefined)?.ocrCreatedFiles !== 'false';
@@ -1466,15 +1462,12 @@ export const documentsController = {
         ? currentDateRaw
         : new Date().toISOString().slice(0, 10);
 
-    const preset = await prisma.documentSplitPreset.findFirst({
-      where: { id: presetId, company_id: companyId },
-      select: { id: true, naming_instructions: true, metadata_key_ids: true },
+    const dbTypes = await prisma.documentType.findMany({
+      where: { company_id: companyId },
+      orderBy: { name: 'asc' },
     });
-    if (!preset) return res.status(404).json({ error: 'Preset not found' });
-
-    const presetKeyIds = splitPresetMetadataKeyIdsFromJson(preset.metadata_key_ids);
-    if (presetKeyIds.length === 0) {
-      return res.status(400).json({ error: 'Preset must define at least one metadata key' });
+    if (dbTypes.length === 0) {
+      return res.status(400).json({ error: 'At least one document type must be configured before auto-splitting' });
     }
 
     const userId = req.user?.id ?? null;
@@ -1535,22 +1528,27 @@ export const documentsController = {
       return res.status(400).json({ error: 'runOcr=false is not supported for auto split (OCR is required)' });
     }
 
+    const allKeyIds = [...new Set(dbTypes.flatMap((t) => documentTypeMetadataKeyIdsFromJson(t.metadata_key_ids)))];
     const dbKeys = await prisma.filesMetadataKey.findMany({
-      where: { company_id: companyId, id: { in: presetKeyIds } },
+      where: { company_id: companyId, id: { in: allKeyIds } },
     });
-    if (dbKeys.length !== presetKeyIds.length) {
-      return res.status(400).json({ error: 'Preset contains invalid metadata keys for this company' });
-    }
-    const byId = new Map(dbKeys.map((k) => [k.id, k]));
-    const orderedKeys = presetKeyIds.map((id) => byId.get(id)!);
+    const keysById = new Map(dbKeys.map((k) => [k.id, k]));
 
-    const metadataKeys = orderedKeys.map((k) => ({
-      id: k.id,
-      name: k.name,
-      valueKind: (k.value_kind === FilesMetadataValueKind.predefined_list
-        ? 'predefined_list'
-        : 'free_text') as 'free_text' | 'predefined_list',
-      allowedValues: parseAllowedValuesJson(k.allowed_values),
+    const documentTypes = dbTypes.map((t) => ({
+      id: t.id,
+      name: t.name,
+      namingInstructions: t.naming_instructions.trim(),
+      metadataKeys: documentTypeMetadataKeyIdsFromJson(t.metadata_key_ids)
+        .map((keyId) => keysById.get(keyId))
+        .filter((k): k is NonNullable<typeof k> => k != null)
+        .map((k) => ({
+          id: k.id,
+          name: k.name,
+          valueKind: (k.value_kind === FilesMetadataValueKind.predefined_list
+            ? 'predefined_list'
+            : 'free_text') as 'free_text' | 'predefined_list',
+          allowedValues: parseAllowedValuesJson(k.allowed_values),
+        })),
     }));
 
     const { proposeSplitWithGemini, getPdfPageCount, validateSegments, applyPdfSplit } = await import(
@@ -1569,8 +1567,7 @@ export const documentsController = {
     try {
       proposed = await proposeSplitWithGemini({
         ocrMarkdown: ocrMarkdown ?? '',
-        metadataKeys,
-        namingInstructions: preset.naming_instructions.trim(),
+        documentTypes,
         currentDate: dateStr,
       });
     } catch (e) {
@@ -1580,17 +1577,16 @@ export const documentsController = {
 
     let validated;
     try {
-      validated = validateSegments(proposed, presetKeyIds);
+      validated = validateSegments(proposed);
     } catch (e) {
       return res.status(400).json({ error: e instanceof Error ? e.message : 'Invalid segments' });
     }
 
     // Validate extracted metadata values (predefined list enforcement, etc.)
-    const metaById = new Map(orderedKeys.map((k) => [k.id, k]));
     for (const seg of validated) {
       if (!seg.metadata) continue;
       for (const keyId of Object.keys(seg.metadata)) {
-        const row = metaById.get(keyId);
+        const row = keysById.get(keyId);
         if (!row) return res.status(400).json({ error: `Unknown metadata key in segment: ${keyId}` });
         const raw = seg.metadata[keyId];
         const val = typeof raw === 'string' ? raw.trim() : String(raw).trim();
@@ -1608,6 +1604,12 @@ export const documentsController = {
     } catch (e) {
       return res.status(400).json({ error: e instanceof Error ? e.message : 'Failed to split PDF' });
     }
+
+    const typeMetaKey = await prisma.filesMetadataKey.findFirst({
+      where: { company_id: companyId, name: DOCUMENT_TYPE_KEY_NAME },
+      select: { id: true },
+    });
+    const docTypeNamesMap = new Map(dbTypes.map((t) => [t.id, t.name]));
 
     const created: Array<{ id: string; name: string }> = [];
     for (let i = 0; i < parts.length; i++) {
@@ -1634,11 +1636,13 @@ export const documentsController = {
         actorId: normalizeFileHistoryActorId(userId),
         details: { source: 'split_pdf_auto' },
       });
-      const meta = validated[i]?.metadata;
+      const seg = validated[i];
+      const meta = seg?.metadata;
+      const metaChanges: Array<{ key: string; keyId: string; action: 'add'; next: string }> = [];
+
       if (meta) {
-        const metaChanges: Array<{ key: string; keyId: string; action: 'add'; next: string }> = [];
         for (const [keyId, rawVal] of Object.entries(meta)) {
-          if (!metaById.has(keyId)) continue;
+          if (!keysById.has(keyId)) continue;
           const strVal = typeof rawVal === 'string' ? rawVal.trim() : String(rawVal).trim();
           if (!strVal) continue;
           await prisma.filesMetadataValue.create({
@@ -1649,7 +1653,7 @@ export const documentsController = {
               company_id: companyId,
             },
           });
-          const keyRow = metaById.get(keyId);
+          const keyRow = keysById.get(keyId);
           metaChanges.push({
             key: keyRow?.name?.trim() || keyId,
             keyId,
@@ -1657,15 +1661,33 @@ export const documentsController = {
             next: strVal,
           });
         }
-        if (metaChanges.length > 0) {
-          await appendFileHistoryEvent({
-            companyId,
-            fileId: dbFile.id,
-            eventType: FILE_HISTORY_EVENT_TYPE.METADATA_CHANGED,
-            actorId: normalizeFileHistoryActorId(userId),
-            details: { source: 'split_pdf_auto', changes: metaChanges },
+      }
+
+      // Store document type as "Type" metadata value
+      if (seg?.document_type_id && typeMetaKey && docTypeNamesMap.has(seg.document_type_id)) {
+        const typeName = docTypeNamesMap.get(seg.document_type_id)!;
+        const alreadyStored = meta && typeMetaKey.id in meta;
+        if (!alreadyStored) {
+          await prisma.filesMetadataValue.create({
+            data: {
+              files_id: dbFile.id,
+              metadata_id: typeMetaKey.id,
+              value: typeName,
+              company_id: companyId,
+            },
           });
+          metaChanges.push({ key: DOCUMENT_TYPE_KEY_NAME, keyId: typeMetaKey.id, action: 'add', next: typeName });
         }
+      }
+
+      if (metaChanges.length > 0) {
+        await appendFileHistoryEvent({
+          companyId,
+          fileId: dbFile.id,
+          eventType: FILE_HISTORY_EVENT_TYPE.METADATA_CHANGED,
+          actorId: normalizeFileHistoryActorId(userId),
+          details: { source: 'split_pdf_auto', changes: metaChanges },
+        });
       }
       created.push({ id: dbFile.id, name: dbFile.name });
     }
@@ -1773,6 +1795,17 @@ export const documentsController = {
       }
     }
 
+    // Pre-load document type names for segments that carry document_type_id
+    const segDocTypeIds = [...new Set(validated.filter((s) => s.document_type_id).map((s) => s.document_type_id!))];
+    const docTypeRows = segDocTypeIds.length > 0
+      ? await prisma.documentType.findMany({
+          where: { company_id: companyId, id: { in: segDocTypeIds } },
+          select: { id: true, name: true },
+        })
+      : [];
+    const docTypeNamesMap = new Map(docTypeRows.map((r) => [r.id, r.name]));
+    const typeMetaKeyApply = companyMetaKeys.find((k) => k.name === DOCUMENT_TYPE_KEY_NAME);
+
     const file = await prisma.file.findFirst({
       where: { id: fileId, company_id: companyId, is_archived: false },
       select: {
@@ -1834,9 +1867,11 @@ export const documentsController = {
         actorId: normalizeFileHistoryActorId(userId),
         details: { source: 'split_pdf_apply' },
       });
-      const meta = validated[i]?.metadata;
+      const seg = validated[i];
+      const meta = seg?.metadata;
+      const metaChanges: Array<{ key: string; keyId: string; action: 'add'; next: string }> = [];
+
       if (meta && companyMetaById.size > 0) {
-        const metaChanges: Array<{ key: string; keyId: string; action: 'add'; next: string }> = [];
         for (const [keyId, rawVal] of Object.entries(meta)) {
           if (!companyMetaById.has(keyId)) continue;
           const strVal = typeof rawVal === 'string' ? rawVal.trim() : String(rawVal).trim();
@@ -1857,15 +1892,33 @@ export const documentsController = {
             next: strVal,
           });
         }
-        if (metaChanges.length > 0) {
-          await appendFileHistoryEvent({
-            companyId,
-            fileId: dbFile.id,
-            eventType: FILE_HISTORY_EVENT_TYPE.METADATA_CHANGED,
-            actorId: normalizeFileHistoryActorId(userId),
-            details: { source: 'split_pdf_apply', changes: metaChanges },
+      }
+
+      // Store document type as "Type" metadata value
+      if (seg?.document_type_id && typeMetaKeyApply && docTypeNamesMap.has(seg.document_type_id)) {
+        const typeName = docTypeNamesMap.get(seg.document_type_id)!;
+        const alreadyStored = meta && typeMetaKeyApply.id in meta;
+        if (!alreadyStored) {
+          await prisma.filesMetadataValue.create({
+            data: {
+              files_id: dbFile.id,
+              metadata_id: typeMetaKeyApply.id,
+              value: typeName,
+              company_id: companyId,
+            },
           });
+          metaChanges.push({ key: DOCUMENT_TYPE_KEY_NAME, keyId: typeMetaKeyApply.id, action: 'add', next: typeName });
         }
+      }
+
+      if (metaChanges.length > 0) {
+        await appendFileHistoryEvent({
+          companyId,
+          fileId: dbFile.id,
+          eventType: FILE_HISTORY_EVENT_TYPE.METADATA_CHANGED,
+          actorId: normalizeFileHistoryActorId(userId),
+          details: { source: 'split_pdf_apply', changes: metaChanges },
+        });
       }
       created.push({ id: dbFile.id, name: dbFile.name });
     }

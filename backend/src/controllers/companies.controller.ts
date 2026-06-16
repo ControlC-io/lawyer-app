@@ -3,7 +3,7 @@ import { FilesMetadataValueKind, Prisma } from '@prisma/client';
 import { AuthRequest, ALL_COMPANIES, companyFilter } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 
-/** Keys managed automatically by their own tables (Persons, DocumentSplitPreset).
+/** Keys managed automatically by their own tables (Persons, DocumentType).
  *  Hidden from the Metadata Keys UI and protected from manual edit/delete. */
 const SYSTEM_MANAGED_KEY_NAMES = ['Personne', 'Type'] as const;
 import {

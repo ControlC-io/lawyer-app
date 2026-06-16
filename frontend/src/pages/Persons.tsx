@@ -5,7 +5,6 @@ import { api } from "@/lib/api";
 import { useCompanyId } from "@/hooks/useCompanyId";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -17,6 +16,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { toast } from "sonner";
 
 interface PersonRow {
@@ -153,109 +160,149 @@ export default function Persons() {
 
   return (
     <div className="p-6 space-y-6">
+      {/* Header */}
       <div className="flex items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">{String(t("persons.title"))}</h1>
-          <p className="text-muted-foreground mt-1">{String(t("persons.subtitle"))}</p>
+          <h1 className="text-2xl font-semibold tracking-tight">{String(t("persons.title"))}</h1>
+          <p className="text-sm text-muted-foreground mt-0.5">{String(t("persons.subtitle"))}</p>
         </div>
-        <Button onClick={openCreate}>
-          <Plus className="h-4 w-4 mr-2" />
+        <Button onClick={openCreate} size="sm">
+          <Plus className="h-4 w-4 mr-1.5" />
           {String(t("persons.add"))}
         </Button>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>{String(t("persons.listTitle"))}</CardTitle>
-          <CardDescription>{String(t("persons.listDescription"))}</CardDescription>
-          <div className="relative max-w-md pt-2">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+      {/* Search + Table */}
+      <div className="rounded-lg border bg-card">
+        <div className="flex items-center gap-3 px-4 py-3 border-b">
+          <div className="relative flex-1 max-w-sm">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
             <Input
-              className="pl-9"
+              className="pl-8 h-8 text-sm"
               placeholder={String(t("persons.searchPlaceholder"))}
               value={query}
               onChange={(e) => handleSearchChange(e.target.value)}
             />
           </div>
-        </CardHeader>
-        <CardContent>
-          {loading ? (
-            <p className="text-sm text-muted-foreground">{String(t("common.loading"))}</p>
-          ) : persons.length === 0 ? (
-            <p className="text-sm text-muted-foreground">{String(t("persons.empty"))}</p>
-          ) : filteredPersons.length === 0 ? (
-            <p className="text-sm text-muted-foreground">{String(t("persons.noResults"))}</p>
-          ) : (
-            <div className="space-y-2">
-              {paginatedPersons.map((person) => (
-                <div
-                  key={person.id}
-                  className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 border rounded-md"
-                >
-                  <div className="min-w-0">
-                    <div className="font-medium truncate">{person.full_name}</div>
-                    {person.national_id && (
-                      <div className="text-xs text-muted-foreground">{person.national_id}</div>
-                    )}
-                    {person.notes && (
-                      <div className="text-sm text-muted-foreground mt-1 line-clamp-2">{person.notes}</div>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-1 shrink-0">
-                    <Button variant="outline" size="sm" onClick={() => openDocuments(person)}>
-                      <FolderOpen className="h-4 w-4 mr-1" />
-                      {String(t("persons.openDocuments"))}
-                    </Button>
-                    <Button variant="ghost" size="icon" onClick={() => openEdit(person)}>
-                      <Pencil className="h-4 w-4" />
-                    </Button>
-                    <Button variant="ghost" size="icon" onClick={() => void handleDelete(person)}>
-                      <Trash2 className="h-4 w-4 text-destructive" />
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </div>
+          {!loading && (
+            <span className="text-xs text-muted-foreground ml-auto">
+              {filteredPersons.length} {filteredPersons.length === 1 ? "person" : "persons"}
+            </span>
           )}
-          {!loading && filteredPersons.length > 0 && (
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mt-4 pt-4 border-t">
-              <p className="text-sm text-muted-foreground">
-                {String(
-                  t("persons.paginationShowing", {
-                    from: (page - 1) * itemsPerPage + 1,
-                    to: Math.min(page * itemsPerPage, filteredPersons.length),
-                    total: filteredPersons.length,
-                  }),
-                )}
-              </p>
-              {totalPages > 1 && (
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setPage((prev) => Math.max(prev - 1, 1))}
-                    disabled={page === 1}
-                  >
-                    <ChevronLeft className="h-4 w-4" />
-                  </Button>
-                  <span className="text-sm">
-                    {String(t("persons.pageOf", { page, total: totalPages }))}
-                  </span>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setPage((prev) => Math.min(prev + 1, totalPages))}
-                    disabled={page === totalPages}
-                  >
-                    <ChevronRight className="h-4 w-4" />
-                  </Button>
-                </div>
-              )}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+        </div>
 
+        <Table>
+          <TableHeader>
+            <TableRow className="hover:bg-transparent">
+              <TableHead className="w-[280px]">{String(t("persons.fullName"))}</TableHead>
+              <TableHead>{String(t("persons.nationalId"))}</TableHead>
+              <TableHead>{String(t("persons.notes"))}</TableHead>
+              <TableHead className="w-[140px]" />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {loading ? (
+              <TableRow>
+                <TableCell colSpan={4} className="h-24 text-center text-sm text-muted-foreground">
+                  {String(t("common.loading"))}
+                </TableCell>
+              </TableRow>
+            ) : persons.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={4} className="h-24 text-center text-sm text-muted-foreground">
+                  {String(t("persons.empty"))}
+                </TableCell>
+              </TableRow>
+            ) : filteredPersons.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={4} className="h-24 text-center text-sm text-muted-foreground">
+                  {String(t("persons.noResults"))}
+                </TableCell>
+              </TableRow>
+            ) : (
+              paginatedPersons.map((person) => (
+                <TableRow key={person.id}>
+                  <TableCell className="font-medium">{person.full_name}</TableCell>
+                  <TableCell className="text-sm text-muted-foreground">
+                    {person.national_id ?? <span className="text-muted-foreground/40">—</span>}
+                  </TableCell>
+                  <TableCell className="text-sm text-muted-foreground max-w-xs">
+                    {person.notes ? (
+                      <span className="line-clamp-1">{person.notes}</span>
+                    ) : (
+                      <span className="text-muted-foreground/40">—</span>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex items-center justify-end gap-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 px-2 text-xs text-muted-foreground"
+                        onClick={() => openDocuments(person)}
+                      >
+                        <FolderOpen className="h-3.5 w-3.5 mr-1" />
+                        {String(t("persons.openDocuments"))}
+                      </Button>
+                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEdit(person)}>
+                        <Pencil className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-destructive hover:text-destructive"
+                        onClick={() => void handleDelete(person)}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
+
+        {/* Pagination */}
+        {!loading && filteredPersons.length > itemsPerPage && (
+          <div className="flex items-center justify-between px-4 py-3 border-t">
+            <p className="text-xs text-muted-foreground">
+              {String(
+                t("persons.paginationShowing", {
+                  from: (page - 1) * itemsPerPage + 1,
+                  to: Math.min(page * itemsPerPage, filteredPersons.length),
+                  total: filteredPersons.length,
+                }),
+              )}
+            </p>
+            <div className="flex items-center gap-1">
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-7 w-7"
+                onClick={() => setPage((prev) => Math.max(prev - 1, 1))}
+                disabled={page === 1}
+              >
+                <ChevronLeft className="h-3.5 w-3.5" />
+              </Button>
+              <span className="text-xs px-2">
+                {String(t("persons.pageOf", { page, total: totalPages }))}
+              </span>
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-7 w-7"
+                onClick={() => setPage((prev) => Math.min(prev + 1, totalPages))}
+                disabled={page === totalPages}
+              >
+                <ChevronRight className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent>
           <DialogHeader>

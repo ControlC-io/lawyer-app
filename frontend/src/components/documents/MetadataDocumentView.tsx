@@ -533,6 +533,7 @@ export default function MetadataDocumentView({
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [searchActive, setSearchActive] = useState(false);
+  const autoAppliedPersonFilterRef = useRef<string | null>(null);
   const { toast } = useToast();
   const { t, language } = useLanguage();
   const { companyBranding } = useAuth();
@@ -692,6 +693,24 @@ export default function MetadataDocumentView({
     fetchTree();
   }, [fetchMetadataKeys, fetchTree]);
 
+  // When opened from /persons?personId=..., auto-apply the matching Personne filter once.
+  useEffect(() => {
+    if (!personLabel) {
+      autoAppliedPersonFilterRef.current = null;
+      return;
+    }
+    if (autoAppliedPersonFilterRef.current === personLabel) return;
+
+    const personKey = metadataKeys.find((k) => (k.name || "").trim().toLowerCase() === "personne");
+    if (!personKey?.id) return;
+
+    setSelectedNodePath([{ key: personKey.id, value: personLabel }]);
+    setFilters([{ key_id: personKey.id, value: personLabel }]);
+    setFilterRows([]);
+    setSelectedFileIds(new Set());
+    autoAppliedPersonFilterRef.current = personLabel;
+  }, [personLabel, metadataKeys]);
+
   useEffect(() => {
     fetchFiles();
   }, [fetchFiles]);
@@ -718,7 +737,7 @@ export default function MetadataDocumentView({
     setUploadPresetsLoading(true);
     void api
       .get<{ presets: Array<{ id: string; name: string; namingInstructions: string; metadataKeyIds: string[] }> }>(
-        `/api/companies/${companyId}/documents/split-pdf-presets`,
+        `/api/companies/${companyId}/documents/document-types`,
       )
       .then((data) => {
         if (!cancelled) setUploadPresets(Array.isArray(data?.presets) ? data.presets : []);

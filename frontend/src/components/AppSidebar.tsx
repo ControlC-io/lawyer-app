@@ -1,5 +1,5 @@
 import { Link, useLocation } from "react-router-dom";
-import { Users, Building2, FolderOpen, LogOut, Settings, Sun, Globe, User, Archive, FileType, Tag } from "lucide-react";
+import { Users, Building2, FolderOpen, LogOut, Settings, Sun, Globe, Archive, FileType, Tag } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -46,8 +46,7 @@ const menuSections: { groupLabelKey: string; items: MenuItem[] }[] = [
     groupLabelKey: "sidebar.groupAdministration",
     items: [
       { titleKey: "sidebar.usersGroups", url: "/users-groups", icon: Users, permission: "users_groups.manage" },
-      { titleKey: "sidebar.userSettings", url: "/user-settings", icon: User },
-      { titleKey: "sidebar.organizationSettings", url: "/organization-settings", icon: Settings, permission: "org_settings.manage" },
+      { titleKey: "sidebar.settings", url: "/settings", icon: Settings },
     ],
   },
 ];

@@ -1,16 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { Plus, Pencil, Trash2 } from "lucide-react";
+import { Plus, Pencil, Trash2, Tag } from "lucide-react";
 import { api } from "@/lib/api";
 import { useCompanyId } from "@/hooks/useCompanyId";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
   DialogContent,
@@ -19,6 +19,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { toast } from "sonner";
 
 interface MetadataKey {
@@ -27,7 +35,7 @@ interface MetadataKey {
   value_kind: "free_text" | "predefined_list";
 }
 
-interface DocumentTypePreset {
+interface DocumentType {
   id: string;
   name: string;
   namingInstructions: string;
@@ -40,11 +48,11 @@ export default function DocumentTypes() {
   const { t } = useLanguage();
   const canManage = hasPermission("documents.manage");
 
-  const [presets, setPresets] = useState<DocumentTypePreset[]>([]);
+  const [presets, setPresets] = useState<DocumentType[]>([]);
   const [metadataKeys, setMetadataKeys] = useState<MetadataKey[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [editing, setEditing] = useState<DocumentTypePreset | null>(null);
+  const [editing, setEditing] = useState<DocumentType | null>(null);
   const [name, setName] = useState("");
   const [instructions, setInstructions] = useState("");
   const [selectedKeyIds, setSelectedKeyIds] = useState<string[]>([]);
@@ -63,7 +71,7 @@ export default function DocumentTypes() {
     setLoading(true);
     try {
       const [presetRes, keys] = await Promise.all([
-        api.get<{ presets: DocumentTypePreset[] }>(`/api/companies/${companyId}/documents/split-pdf-presets`),
+        api.get<{ presets: DocumentType[] }>(`/api/companies/${companyId}/documents/document-types`),
         api.get<MetadataKey[]>(
           `/api/companies/${companyId}/files-metadata-keys?includeSystemManaged=true`,
         ),
@@ -89,7 +97,7 @@ export default function DocumentTypes() {
     setDialogOpen(true);
   };
 
-  const openEdit = (preset: DocumentTypePreset) => {
+  const openEdit = (preset: DocumentType) => {
     setEditing(preset);
     setName(preset.name);
     setInstructions(preset.namingInstructions);
@@ -117,10 +125,10 @@ export default function DocumentTypes() {
         metadataKeyIds: selectedKeyIds,
       };
       if (editing) {
-        await api.patch(`/api/companies/${companyId}/documents/split-pdf-presets/${editing.id}`, payload);
+        await api.patch(`/api/companies/${companyId}/documents/document-types/${editing.id}`, payload);
         toast.success(String(t("documentTypes.updated")));
       } else {
-        await api.post(`/api/companies/${companyId}/documents/split-pdf-presets`, payload);
+        await api.post(`/api/companies/${companyId}/documents/document-types`, payload);
         toast.success(String(t("documentTypes.created")));
       }
       setDialogOpen(false);
@@ -132,11 +140,11 @@ export default function DocumentTypes() {
     }
   };
 
-  const handleDelete = async (preset: DocumentTypePreset) => {
+  const handleDelete = async (preset: DocumentType) => {
     if (!companyId || !canManage) return;
     if (!window.confirm(String(t("documentTypes.deleteConfirm", { name: preset.name })))) return;
     try {
-      await api.delete(`/api/companies/${companyId}/documents/split-pdf-presets/${preset.id}`);
+      await api.delete(`/api/companies/${companyId}/documents/document-types/${preset.id}`);
       toast.success(String(t("documentTypes.deleted")));
       await loadData();
     } catch (e) {
@@ -150,90 +158,117 @@ export default function DocumentTypes() {
 
   return (
     <div className="p-6 space-y-6">
+      {/* Header */}
       <div className="flex items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">{String(t("documentTypes.title"))}</h1>
-          <p className="text-muted-foreground mt-1">{String(t("documentTypes.subtitle"))}</p>
+          <h1 className="text-2xl font-semibold tracking-tight">{String(t("documentTypes.title"))}</h1>
+          <p className="text-sm text-muted-foreground mt-0.5">{String(t("documentTypes.subtitle"))}</p>
         </div>
         {canManage && (
-          <Button onClick={openCreate}>
-            <Plus className="h-4 w-4 mr-2" />
+          <Button onClick={openCreate} size="sm">
+            <Plus className="h-4 w-4 mr-1.5" />
             {String(t("documentTypes.add"))}
           </Button>
         )}
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>{String(t("documentTypes.metadataFieldsTitle"))}</CardTitle>
-          <CardDescription>
-            {String(t("documentTypes.metadataFieldsDescription"))}{" "}
-            <Link to="/metadata-keys" className="underline">
+      {/* Available metadata fields info */}
+      {metadataKeys.length > 0 && (
+        <div className="flex items-start gap-3 rounded-lg border bg-muted/30 px-4 py-3">
+          <Tag className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+          <div className="flex flex-wrap items-center gap-1.5 text-sm">
+            <span className="text-muted-foreground shrink-0">
+              {String(t("documentTypes.metadataFieldsTitle"))}:
+            </span>
+            {metadataKeys.map((key) => (
+              <Badge key={key.id} variant="secondary" className="text-xs font-normal">
+                {key.name?.trim() || key.id}
+              </Badge>
+            ))}
+            <Link to="/metadata-keys" className="text-xs text-primary underline-offset-4 hover:underline ml-1">
               {String(t("documentTypes.metadataFieldsLink"))}
             </Link>
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {metadataKeys.length === 0 ? (
-            <p className="text-sm text-muted-foreground">{String(t("documentTypes.noMetadataKeys"))}</p>
-          ) : (
-            <div className="flex flex-wrap gap-2">
-              {metadataKeys.map((key) => (
-                <span key={key.id} className="text-xs border rounded-full px-2 py-1 bg-muted/50">
-                  {key.name?.trim() || key.id}
-                </span>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+          </div>
+        </div>
+      )}
 
-      <Card>
-        <CardHeader>
-          <CardTitle>{String(t("documentTypes.listTitle"))}</CardTitle>
-          <CardDescription>{String(t("documentTypes.listDescription"))}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {loading ? (
-            <p className="text-sm text-muted-foreground">{String(t("common.loading"))}</p>
-          ) : presets.length === 0 ? (
-            <p className="text-sm text-muted-foreground">{String(t("documentTypes.empty"))}</p>
-          ) : (
-            <div className="space-y-3">
-              {presets.map((preset) => (
-                <div key={preset.id} className="border rounded-md p-4 space-y-2">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <div className="font-medium">{preset.name}</div>
-                      <p className="text-sm text-muted-foreground whitespace-pre-wrap mt-1">
-                        {preset.namingInstructions}
-                      </p>
+      {/* Table */}
+      <div className="rounded-lg border bg-card">
+        <div className="flex items-center justify-between px-4 py-3 border-b">
+          <div>
+            <p className="text-sm font-medium">{String(t("documentTypes.listTitle"))}</p>
+            <p className="text-xs text-muted-foreground">{String(t("documentTypes.listDescription"))}</p>
+          </div>
+          {!loading && (
+            <span className="text-xs text-muted-foreground">
+              {presets.length} {presets.length === 1 ? "type" : "types"}
+            </span>
+          )}
+        </div>
+
+        <Table>
+          <TableHeader>
+            <TableRow className="hover:bg-transparent">
+              <TableHead className="w-[200px]">{String(t("documentTypes.name"))}</TableHead>
+              <TableHead>{String(t("documentTypes.instructions"))}</TableHead>
+              <TableHead className="w-[240px]">{String(t("documentTypes.fieldsToExtract"))}</TableHead>
+              {canManage && <TableHead className="w-[80px]" />}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {loading ? (
+              <TableRow>
+                <TableCell colSpan={canManage ? 4 : 3} className="h-24 text-center text-sm text-muted-foreground">
+                  {String(t("common.loading"))}
+                </TableCell>
+              </TableRow>
+            ) : presets.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={canManage ? 4 : 3} className="h-24 text-center text-sm text-muted-foreground">
+                  {String(t("documentTypes.empty"))}
+                </TableCell>
+              </TableRow>
+            ) : (
+              presets.map((preset) => (
+                <TableRow key={preset.id}>
+                  <TableCell className="font-medium align-top py-3">{preset.name}</TableCell>
+                  <TableCell className="text-sm text-muted-foreground align-top py-3 max-w-xs">
+                    <span className="line-clamp-2">{preset.namingInstructions}</span>
+                  </TableCell>
+                  <TableCell className="align-top py-3">
+                    <div className="flex flex-wrap gap-1">
+                      {preset.metadataKeyIds.map((keyId) => (
+                        <Badge key={keyId} variant="outline" className="text-xs font-normal">
+                          {keyLabelById.get(keyId) ?? keyId}
+                        </Badge>
+                      ))}
                     </div>
-                    {canManage && (
-                      <div className="flex gap-1 shrink-0">
-                        <Button variant="ghost" size="icon" onClick={() => openEdit(preset)}>
-                          <Pencil className="h-4 w-4" />
+                  </TableCell>
+                  {canManage && (
+                    <TableCell className="align-top py-3">
+                      <div className="flex items-center justify-end gap-1">
+                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEdit(preset)}>
+                          <Pencil className="h-3.5 w-3.5" />
                         </Button>
-                        <Button variant="ghost" size="icon" onClick={() => void handleDelete(preset)}>
-                          <Trash2 className="h-4 w-4 text-destructive" />
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 text-destructive hover:text-destructive"
+                          onClick={() => void handleDelete(preset)}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
                         </Button>
                       </div>
-                    )}
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {preset.metadataKeyIds.map((keyId) => (
-                      <span key={keyId} className="text-xs border rounded px-2 py-0.5">
-                        {keyLabelById.get(keyId) ?? keyId}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+                    </TableCell>
+                  )}
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
+      </div>
 
+      {/* Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
@@ -258,7 +293,7 @@ export default function DocumentTypes() {
               ) : (
                 <div className="space-y-2 border rounded-md p-3 max-h-56 overflow-y-auto">
                   {metadataKeys.map((key) => (
-                    <label key={key.id} className="flex items-center gap-2 text-sm">
+                    <label key={key.id} className="flex items-center gap-2 text-sm cursor-pointer">
                       <Checkbox
                         checked={selectedKeyIds.includes(key.id)}
                         onCheckedChange={(checked) => toggleKey(key.id, checked === true)}

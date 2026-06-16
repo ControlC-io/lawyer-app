@@ -7,7 +7,7 @@ jest.mock('../lib/prisma', () => ({
   prisma: {
     user: { findUnique: jest.fn() },
     userCompany: { findFirst: jest.fn() },
-    documentSplitPreset: {
+    documentType: {
       findMany: jest.fn(),
       create: jest.fn(),
       findFirst: jest.fn(),
@@ -23,7 +23,7 @@ jest.mock('../lib/prisma', () => ({
   },
 }));
 
-describe('Split PDF Presets endpoints', () => {
+describe('Document Types endpoints', () => {
   const companyId = 'company-123';
   const userId = 'user-123';
   const prismaMock = prisma as any;
@@ -53,18 +53,18 @@ describe('Split PDF Presets endpoints', () => {
       }),
     );
 
-    // Defaults for syncDocumentTypesMetadataKey (runs after preset create/update/delete)
-    (prismaMock.documentSplitPreset.findMany as jest.Mock).mockResolvedValue([]);
+    // Defaults for syncDocumentTypesMetadataKey (runs after type create/update/delete)
+    (prismaMock.documentType.findMany as jest.Mock).mockResolvedValue([]);
     (prismaMock.filesMetadataKey.findFirst as jest.Mock).mockResolvedValue(null);
     (prismaMock.filesMetadataKey.create as jest.Mock).mockResolvedValue({ id: 'type-key' });
     (prismaMock.filesMetadataKey.update as jest.Mock).mockResolvedValue({ id: 'type-key' });
   });
 
-  it('lists presets for users with documents.view', async () => {
+  it('lists document types for users with documents.view', async () => {
     permissionKeys = ['documents.view'];
-    (prismaMock.documentSplitPreset.findMany as jest.Mock).mockResolvedValue([
+    (prismaMock.documentType.findMany as jest.Mock).mockResolvedValue([
       {
-        id: 'preset-1',
+        id: 'type-1',
         name: 'Invoices',
         naming_instructions: 'Use invoice number in filename',
         metadata_key_ids: ['meta-a', 'meta-b'],
@@ -74,24 +74,24 @@ describe('Split PDF Presets endpoints', () => {
     ]);
 
     const response = await request(app)
-      .get(`/api/companies/${companyId}/documents/split-pdf-presets`)
+      .get(`/api/companies/${companyId}/documents/document-types`)
       .set('Authorization', `Bearer ${token}`);
 
     expect(response.status).toBe(200);
     expect(response.body.presets).toHaveLength(1);
     expect(response.body.presets[0]).toMatchObject({
-      id: 'preset-1',
+      id: 'type-1',
       name: 'Invoices',
       namingInstructions: 'Use invoice number in filename',
       metadataKeyIds: ['meta-a', 'meta-b'],
     });
   });
 
-  it('rejects preset creation without documents.manage', async () => {
+  it('rejects document type creation without documents.manage', async () => {
     permissionKeys = ['documents.view'];
 
     const response = await request(app)
-      .post(`/api/companies/${companyId}/documents/split-pdf-presets`)
+      .post(`/api/companies/${companyId}/documents/document-types`)
       .set('Authorization', `Bearer ${token}`)
       .send({
         name: 'Invoices',
@@ -100,14 +100,14 @@ describe('Split PDF Presets endpoints', () => {
       });
 
     expect(response.status).toBe(403);
-    expect(prismaMock.documentSplitPreset.create).not.toHaveBeenCalled();
+    expect(prismaMock.documentType.create).not.toHaveBeenCalled();
   });
 
-  it('creates preset with documents.manage', async () => {
+  it('creates document type with documents.manage', async () => {
     permissionKeys = ['documents.manage'];
     (prismaMock.filesMetadataKey.findMany as jest.Mock).mockResolvedValue([{ id: 'meta-a' }]);
-    (prismaMock.documentSplitPreset.create as jest.Mock).mockResolvedValue({
-      id: 'preset-2',
+    (prismaMock.documentType.create as jest.Mock).mockResolvedValue({
+      id: 'type-2',
       name: 'Invoices',
       naming_instructions: 'Use invoice number in filename',
       metadata_key_ids: ['meta-a'],
@@ -116,7 +116,7 @@ describe('Split PDF Presets endpoints', () => {
     });
 
     const response = await request(app)
-      .post(`/api/companies/${companyId}/documents/split-pdf-presets`)
+      .post(`/api/companies/${companyId}/documents/document-types`)
       .set('Authorization', `Bearer ${token}`)
       .send({
         name: 'Invoices',
@@ -130,7 +130,7 @@ describe('Split PDF Presets endpoints', () => {
       select: { id: true },
     });
     expect(response.body).toMatchObject({
-      id: 'preset-2',
+      id: 'type-2',
       name: 'Invoices',
       namingInstructions: 'Use invoice number in filename',
       metadataKeyIds: ['meta-a'],
@@ -139,30 +139,30 @@ describe('Split PDF Presets endpoints', () => {
 
   it('rejects update when metadata keys do not belong to company', async () => {
     permissionKeys = ['documents.manage'];
-    (prismaMock.documentSplitPreset.findFirst as jest.Mock).mockResolvedValue({ id: 'preset-2' });
+    (prismaMock.documentType.findFirst as jest.Mock).mockResolvedValue({ id: 'type-2' });
     (prismaMock.filesMetadataKey.findMany as jest.Mock).mockResolvedValue([{ id: 'meta-a' }]);
 
     const response = await request(app)
-      .patch(`/api/companies/${companyId}/documents/split-pdf-presets/preset-2`)
+      .patch(`/api/companies/${companyId}/documents/document-types/type-2`)
       .set('Authorization', `Bearer ${token}`)
       .send({ metadataKeyIds: ['meta-a', 'meta-b'] });
 
     expect(response.status).toBe(400);
     expect(response.body.error).toContain('invalid for this company');
-    expect(prismaMock.documentSplitPreset.update).not.toHaveBeenCalled();
+    expect(prismaMock.documentType.update).not.toHaveBeenCalled();
   });
 
-  it('deletes preset with documents.manage', async () => {
+  it('deletes document type with documents.manage', async () => {
     permissionKeys = ['documents.manage'];
-    (prismaMock.documentSplitPreset.deleteMany as jest.Mock).mockResolvedValue({ count: 1 });
+    (prismaMock.documentType.deleteMany as jest.Mock).mockResolvedValue({ count: 1 });
 
     const response = await request(app)
-      .delete(`/api/companies/${companyId}/documents/split-pdf-presets/preset-2`)
+      .delete(`/api/companies/${companyId}/documents/document-types/type-2`)
       .set('Authorization', `Bearer ${token}`);
 
     expect(response.status).toBe(204);
-    expect(prismaMock.documentSplitPreset.deleteMany).toHaveBeenCalledWith({
-      where: { id: 'preset-2', company_id: companyId },
+    expect(prismaMock.documentType.deleteMany).toHaveBeenCalledWith({
+      where: { id: 'type-2', company_id: companyId },
     });
   });
 });

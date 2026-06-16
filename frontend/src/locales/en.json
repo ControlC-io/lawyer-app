@@ -150,6 +150,7 @@
     "organizationSettings": "Organization Settings",
     "companies": "Companies",
     "archivedRecords": "Archived Records",
+    "systemInfo": "System Info",
     "signOut": "Sign Out",
     "darkMode": "Dark Mode",
     "lightMode": "Light Mode",
@@ -217,7 +218,7 @@
     "editTitle": "Edit document type",
     "formDescription": "Choose which fields the AI should extract from documents of this type.",
     "name": "Type name",
-    "instructions": "Extraction instructions",
+    "instructions": "Renaming instructions",
     "fieldsToExtract": "Fields to extract",
     "validationError": "Name, instructions, and at least one field are required."
   },

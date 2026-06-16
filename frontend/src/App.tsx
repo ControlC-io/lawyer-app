@@ -2,7 +2,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/AppSidebar";
 import { Header } from "@/components/Header";
@@ -20,13 +20,13 @@ import Persons from "./pages/Persons";
 import DocumentTypes from "./pages/DocumentTypes";
 import NotFound from "./pages/NotFound";
 import UsersGroups from "./pages/UsersGroups";
-import OrganizationSettings from "./pages/OrganizationSettings";
-import UserSettings from "./pages/UserSettings";
+import Settings from "./pages/Settings";
 import AcceptInvitation from "./pages/AcceptInvitation";
 import Companies from "./pages/Companies";
 import ArchivedRecords from "./pages/ArchivedRecords";
 import NoOrganization from "./pages/NoOrganization";
 import MetadataKeys from "./pages/MetadataKeys";
+import InfoPage from "./pages/InfoPage";
 
 const queryClient = new QueryClient();
 
@@ -180,10 +180,12 @@ const App = () => (
                             <Route path="/document-types" element={<PermissionRoute permission="documents.view"><DocumentTypes /></PermissionRoute>} />
                             <Route path="/metadata-keys" element={<PermissionRoute permission="org_settings.manage"><MetadataKeys /></PermissionRoute>} />
                             <Route path="/users-groups" element={<UsersGroups />} />
-                            <Route path="/organization-settings" element={<OrganizationSettings />} />
-                            <Route path="/user-settings" element={<UserSettings />} />
+                            <Route path="/settings" element={<Settings />} />
+                            <Route path="/organization-settings" element={<Navigate to="/settings" replace />} />
+                            <Route path="/user-settings" element={<Navigate to="/settings" replace />} />
                             <Route path="/companies" element={<SuperAdminRoute><Companies /></SuperAdminRoute>} />
                             <Route path="/archived-records" element={<SuperAdminRoute><ArchivedRecords /></SuperAdminRoute>} />
+                            <Route path="/info" element={<InfoPage />} />
                             <Route path="*" element={<NotFound />} />
                           </Routes>
                         </main>

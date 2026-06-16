@@ -162,24 +162,24 @@ router.post(
   asyncHandler(documentsController.splitPdfAuto),
 );
 router.get(
-  '/:companyId/documents/split-pdf-presets',
+  '/:companyId/documents/document-types',
   requirePermission('documents.view'),
-  asyncHandler(documentsController.listSplitPdfPresets),
+  asyncHandler(documentsController.listDocumentTypes),
 );
 router.post(
-  '/:companyId/documents/split-pdf-presets',
+  '/:companyId/documents/document-types',
   requirePermission('documents.manage'),
-  asyncHandler(documentsController.createSplitPdfPreset),
+  asyncHandler(documentsController.createDocumentType),
 );
 router.patch(
-  '/:companyId/documents/split-pdf-presets/:presetId',
+  '/:companyId/documents/document-types/:documentTypeId',
   requirePermission('documents.manage'),
-  asyncHandler(documentsController.updateSplitPdfPreset),
+  asyncHandler(documentsController.updateDocumentType),
 );
 router.delete(
-  '/:companyId/documents/split-pdf-presets/:presetId',
+  '/:companyId/documents/document-types/:documentTypeId',
   requirePermission('documents.manage'),
-  asyncHandler(documentsController.deleteSplitPdfPreset),
+  asyncHandler(documentsController.deleteDocumentType),
 );
 router.post(
   '/:companyId/documents/split-pdf/apply',

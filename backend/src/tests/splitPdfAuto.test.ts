@@ -7,10 +7,11 @@ jest.mock('../lib/prisma', () => ({
   prisma: {
     user: { findUnique: jest.fn() },
     userCompany: { findFirst: jest.fn() },
-    documentSplitPreset: { findFirst: jest.fn() },
-    filesMetadataKey: { findMany: jest.fn() },
+    documentType: { findMany: jest.fn() },
+    filesMetadataKey: { findMany: jest.fn(), findFirst: jest.fn() },
     file: { create: jest.fn(), update: jest.fn(), delete: jest.fn() },
     filesMetadataValue: { create: jest.fn(), deleteMany: jest.fn() },
+    fileHistoryEvent: { create: jest.fn() },
   },
 }));
 
@@ -32,12 +33,14 @@ jest.mock('../services/pdf-split.service', () => ({
   proposeSplitWithGemini: jest.fn(async () => [
     {
       name: 'Part A',
+      document_type_id: 'type-1',
       metadata: { 'meta-1': 'x' },
       start_page: 1,
       end_page: 1,
     },
     {
       name: 'Part B',
+      document_type_id: 'type-1',
       metadata: { 'meta-1': 'y' },
       start_page: 2,
       end_page: 2,
@@ -57,18 +60,24 @@ describe('Split PDF Auto endpoint', () => {
   let permissionKeys: string[] = [];
   let token = '';
 
+  const mockDocumentType = {
+    id: 'type-1',
+    name: 'Invoices',
+    naming_instructions: 'Use invoice number',
+    metadata_key_ids: ['meta-1'],
+  };
+
   beforeEach(() => {
     jest.clearAllMocks();
     process.env.JWT_SECRET = 'test-secret';
     permissionKeys = [];
     token = jwt.sign({ userId }, process.env.JWT_SECRET);
 
-    // Some Jest configs reset mock implementations; re-apply defaults here.
     const pdfSplit = require('../services/pdf-split.service');
     (pdfSplit.getPdfPageCount as jest.Mock).mockResolvedValue(2);
     (pdfSplit.proposeSplitWithGemini as jest.Mock).mockResolvedValue([
-      { name: 'Part A', metadata: { 'meta-1': 'x' }, start_page: 1, end_page: 1 },
-      { name: 'Part B', metadata: { 'meta-1': 'y' }, start_page: 2, end_page: 2 },
+      { name: 'Part A', document_type_id: 'type-1', metadata: { 'meta-1': 'x' }, start_page: 1, end_page: 1 },
+      { name: 'Part B', document_type_id: 'type-1', metadata: { 'meta-1': 'y' }, start_page: 2, end_page: 2 },
     ]);
     (pdfSplit.validateSegments as jest.Mock).mockImplementation((segments: any) => segments);
     (pdfSplit.applyPdfSplit as jest.Mock).mockResolvedValue([
@@ -86,7 +95,6 @@ describe('Split PDF Auto endpoint', () => {
       profile: { admin_role: { super_admin: false } },
     });
 
-    // Company admin to pass write access checks.
     (prismaMock.userCompany.findFirst as jest.Mock).mockImplementation(() =>
       Promise.resolve({
         user_id: userId,
@@ -97,47 +105,41 @@ describe('Split PDF Auto endpoint', () => {
         },
       }),
     );
+
+    (prismaMock.fileHistoryEvent.create as jest.Mock).mockResolvedValue({});
+    (prismaMock.filesMetadataKey.findFirst as jest.Mock).mockResolvedValue(null);
   });
 
   it('rejects non-PDF upload', async () => {
     permissionKeys = ['documents.view'];
-    (prismaMock.documentSplitPreset.findFirst as jest.Mock).mockResolvedValue({
-      id: 'preset-1',
-      naming_instructions: 'x',
-      metadata_key_ids: ['meta-1'],
-    });
+    (prismaMock.documentType.findMany as jest.Mock).mockResolvedValue([mockDocumentType]);
+    (prismaMock.filesMetadataKey.findMany as jest.Mock).mockResolvedValue([]);
 
     const response = await request(app)
       .post(`/api/companies/${companyId}/documents/split-pdf/auto`)
       .set('Authorization', `Bearer ${token}`)
-      .field('presetId', 'preset-1')
       .attach('file', Buffer.from('not a pdf'), { filename: 'file.txt' });
 
     expect(response.status).toBe(400);
     expect(response.body.error).toContain('PDF');
   });
 
-  it('returns 404 when preset is missing', async () => {
+  it('returns 400 when no document types are configured', async () => {
     permissionKeys = ['documents.view'];
-    (prismaMock.documentSplitPreset.findFirst as jest.Mock).mockResolvedValue(null);
+    (prismaMock.documentType.findMany as jest.Mock).mockResolvedValue([]);
 
     const response = await request(app)
       .post(`/api/companies/${companyId}/documents/split-pdf/auto`)
       .set('Authorization', `Bearer ${token}`)
-      .field('presetId', 'missing')
       .attach('file', Buffer.from('%PDF-1.4'), { filename: 'file.pdf' });
 
-    expect(response.status).toBe(404);
-    expect(response.body.error).toContain('Preset');
+    expect(response.status).toBe(400);
+    expect(response.body.error).toContain('document type');
   });
 
   it('creates split files and deletes original by default', async () => {
     permissionKeys = ['documents.view'];
-    (prismaMock.documentSplitPreset.findFirst as jest.Mock).mockResolvedValue({
-      id: 'preset-1',
-      naming_instructions: 'Use invoice number',
-      metadata_key_ids: ['meta-1'],
-    });
+    (prismaMock.documentType.findMany as jest.Mock).mockResolvedValue([mockDocumentType]);
     (prismaMock.filesMetadataKey.findMany as jest.Mock).mockResolvedValue([
       { id: 'meta-1', name: 'Kind', value_kind: 'free_text', allowed_values: null },
     ]);
@@ -150,7 +152,6 @@ describe('Split PDF Auto endpoint', () => {
     const response = await request(app)
       .post(`/api/companies/${companyId}/documents/split-pdf/auto`)
       .set('Authorization', `Bearer ${token}`)
-      .field('presetId', 'preset-1')
       .attach('file', Buffer.from('%PDF-1.4'), { filename: 'file.pdf' });
 
     expect(response.status).toBe(201);
@@ -164,4 +165,3 @@ describe('Split PDF Auto endpoint', () => {
     expect(prismaMock.filesMetadataValue.create).toHaveBeenCalled();
   });
 });
-

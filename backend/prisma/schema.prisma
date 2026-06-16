@@ -69,7 +69,7 @@ model Company {
   document_permission_rules  DocumentPermissionRule[]
   document_permission_assignments DocumentPermissionAssignment[]
   user_document_tree_configs UserDocumentTreeConfig[]
-  document_split_presets     DocumentSplitPreset[]
+  document_types             DocumentType[]
   file_history_events        FileHistoryEvent[]
   persons                    Person[]
 
@@ -420,7 +420,7 @@ model UserDocumentTreeConfig {
   @@schema("public")
 }
 
-model DocumentSplitPreset {
+model DocumentType {
   id                  String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   company_id          String   @db.Uuid
   name                String
@@ -430,7 +430,7 @@ model DocumentSplitPreset {
   updated_at          DateTime @default(now()) @updatedAt @db.Timestamptz(6)
   company             Company  @relation(fields: [company_id], references: [id])
 
-  @@index([company_id, created_at], map: "idx_document_split_presets_company_created_at")
-  @@map("document_split_presets")
+  @@index([company_id, created_at], map: "idx_document_types_company_created_at")
+  @@map("document_types")
   @@schema("public")
 }

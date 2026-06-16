@@ -46,6 +46,8 @@ async function generateContentWithRetry(model: GenerativeModel, prompt: string):
 
 export interface SplitSegment {
   name: string;
+  /** Id of the DocumentType this segment was classified as (UUID). */
+  document_type_id?: string;
   /** Values keyed by `files_metadata_keys.id` (UUID strings). */
   metadata?: Record<string, string>;
   start_page: number;
@@ -132,8 +134,10 @@ export function validateSegments(segments: unknown, requiredMetadataKeyIds?: str
     const metadata = parseMetadataObject(o.metadata, requiredMetadataKeyIds);
     const requireMeta = Boolean(requiredMetadataKeyIds?.length);
     const hasMeta = requireMeta || Object.keys(metadata).length > 0;
+    const docTypeId = typeof o.document_type_id === 'string' && o.document_type_id.trim() ? o.document_type_id.trim() : undefined;
     out.push({
       name: o.name.trim(),
+      ...(docTypeId ? { document_type_id: docTypeId } : {}),
       ...(hasMeta ? { metadata } : {}),
       start_page: start,
       end_page: end,
@@ -164,29 +168,83 @@ export type ProposeMetadataKeySpec = {
   allowedValues: string[];
 };
 
+export interface DocumentTypeSpec {
+  id: string;
+  name: string;
+  namingInstructions: string;
+  metadataKeys: ProposeMetadataKeySpec[];
+}
+
+/**
+ * Validate segments returned by Gemini when document types are known.
+ * Requires document_type_id on each segment and validates metadata keys per type.
+ */
+function validateSegmentsWithTypes(
+  segments: unknown,
+  documentTypes: DocumentTypeSpec[],
+): SplitSegment[] {
+  if (!Array.isArray(segments)) throw new Error('Expected JSON array');
+  const typeMap = new Map(documentTypes.map((dt) => [dt.id, dt]));
+  const out: SplitSegment[] = [];
+  for (const item of segments) {
+    if (!item || typeof item !== 'object') throw new Error('Invalid segment');
+    const o = item as Record<string, unknown>;
+    if (typeof o.name !== 'string' || !o.name.trim()) throw new Error('Each segment needs a non-empty name');
+
+    const document_type_id = typeof o.document_type_id === 'string' ? o.document_type_id.trim() : '';
+    if (!document_type_id) throw new Error('Each segment must include a document_type_id');
+    const docType = typeMap.get(document_type_id);
+    if (!docType) throw new Error(`Unknown document_type_id in segment “${String(o.name)}”: ${document_type_id}`);
+
+    const startRaw = o.start_page;
+    const endRaw = o.end_page;
+    const start = typeof startRaw === 'number' ? startRaw : typeof startRaw === 'string' ? Number(startRaw) : NaN;
+    const end = typeof endRaw === 'number' ? endRaw : typeof endRaw === 'string' ? Number(endRaw) : NaN;
+    if (!Number.isFinite(start) || !Number.isFinite(end)) {
+      throw new Error('start_page and end_page must be numbers');
+    }
+    if (!Number.isInteger(start) || !Number.isInteger(end)) {
+      throw new Error('Page numbers must be integers');
+    }
+
+    const requiredKeyIds = docType.metadataKeys.map((k) => k.id);
+    const metadata = parseMetadataObject(o.metadata, requiredKeyIds.length > 0 ? requiredKeyIds : undefined);
+    const hasMeta = requiredKeyIds.length > 0 || Object.keys(metadata).length > 0;
+
+    out.push({
+      name: o.name.trim(),
+      document_type_id,
+      ...(hasMeta ? { metadata } : {}),
+      start_page: start,
+      end_page: end,
+    });
+  }
+  if (out.length === 0) throw new Error('At least one segment is required');
+  return out;
+}
+
 /**
  * Blank out predefined_list values Gemini proposed that are not in the allowed set,
- * so the review UI never shows an invalid value that would later be rejected on apply.
+ * using per-segment document type metadata keys.
  */
-function sanitizePredefinedMetadata(
+function sanitizePredefinedMetadataWithTypes(
   segments: SplitSegment[],
-  metadataKeys: ProposeMetadataKeySpec[],
+  documentTypes: DocumentTypeSpec[],
 ): SplitSegment[] {
-  const allowedByKey = new Map(
-    metadataKeys
-      .filter((k) => k.valueKind === 'predefined_list' && k.allowedValues.length > 0)
-      .map((k) => [k.id, new Set(k.allowedValues)] as const),
-  );
-  if (allowedByKey.size === 0) return segments;
+  const typeMap = new Map(documentTypes.map((dt) => [dt.id, dt]));
   for (const seg of segments) {
-    if (!seg.metadata) continue;
-    for (const [keyId, allowed] of allowedByKey) {
-      const v = seg.metadata[keyId];
+    if (!seg.metadata || !seg.document_type_id) continue;
+    const docType = typeMap.get(seg.document_type_id);
+    if (!docType) continue;
+    for (const key of docType.metadataKeys) {
+      if (key.valueKind !== 'predefined_list' || key.allowedValues.length === 0) continue;
+      const allowed = new Set(key.allowedValues);
+      const v = seg.metadata[key.id];
       if (v && !allowed.has(v)) {
         console.warn(
-          `[pdf-split] Gemini returned out-of-list value for key ${keyId} in segment "${seg.name}": ${JSON.stringify(v)} -> cleared`,
+          `[pdf-split] Gemini returned out-of-list value for key ${key.id} in segment “${seg.name}”: ${JSON.stringify(v)} -> cleared`,
         );
-        seg.metadata[keyId] = '';
+        seg.metadata[key.id] = '';
       }
     }
   }
@@ -195,47 +253,51 @@ function sanitizePredefinedMetadata(
 
 export async function proposeSplitWithGemini(params: {
   ocrMarkdown: string;
-  metadataKeys: ProposeMetadataKeySpec[];
-  namingInstructions: string;
+  documentTypes: DocumentTypeSpec[];
   currentDate: string;
 }): Promise<SplitSegment[]> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error('GEMINI_API_KEY is not configured');
   const modelName = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 
-  if (!params.metadataKeys.length) throw new Error('At least one metadata key is required');
+  if (!params.documentTypes.length) throw new Error('At least one document type is required');
 
   const ocrBody = truncateOcr(params.ocrMarkdown);
 
-  const keyLines = params.metadataKeys.map((k) => {
-    const label = (k.name && k.name.trim()) || 'Unnamed field';
-    if (k.valueKind === 'predefined_list' && k.allowedValues.length > 0) {
-      const opts = k.allowedValues.map((v) => JSON.stringify(v)).join(', ');
-      return `- JSON key ${JSON.stringify(k.id)} (${label}, predefined_list): value MUST be exactly one of: ${opts}`;
-    }
-    return `- JSON key ${JSON.stringify(k.id)} (${label}, free_text): short extracted string (empty if unknown)`;
-  });
+  const typeBlocks = params.documentTypes.map((dt) => {
+    const keyLines = dt.metadataKeys.map((k) => {
+      const label = (k.name && k.name.trim()) || 'Unnamed field';
+      if (k.valueKind === 'predefined_list' && k.allowedValues.length > 0) {
+        const opts = k.allowedValues.map((v) => JSON.stringify(v)).join(', ');
+        return `  - JSON key ${JSON.stringify(k.id)} (${label}, predefined_list): value MUST be exactly one of: ${opts}`;
+      }
+      return `  - JSON key ${JSON.stringify(k.id)} (${label}, free_text): short extracted string (empty if unknown)`;
+    });
 
-  const idsJson = JSON.stringify(params.metadataKeys.map((k) => k.id));
+    const lines = [
+      `TYPE: ${JSON.stringify(dt.name)} (id: ${JSON.stringify(dt.id)})`,
+      `  Renaming instructions: ${dt.namingInstructions}`,
+      keyLines.length > 0 ? `  Metadata fields:\n${keyLines.join('\n')}` : '  Metadata fields: (none)',
+    ];
+    return lines.join('\n');
+  });
 
   const prompt = `You are a data extraction agent. You analyze OCR text from a multi-page PDF and propose how to split it into separate logical documents.
 
-For EACH output segment you MUST fill a "metadata" object. Use these keys exactly (UUID strings as JSON keys):
-${keyLines.join('\n')}
+Available document types:
 
-The set of metadata key ids is: ${idsJson}
-
-Additional instructions for file naming and extraction (follow as much as the OCR allows):
-${params.namingInstructions}
+${typeBlocks.join('\n\n')}
 
 Rules:
 - Answer with ONLY a JSON array. No markdown fences, no commentary.
-- Each element MUST have this shape: {"name":"string","metadata":{...},"start_page":number,"end_page":number}
-- "name" is the suggested output PDF base name (no path; .pdf will be added later). Use metadata where helpful.
-- "metadata" MUST include every id listed above. Values are strings.
+- Each element MUST have this shape: {“name”:”string”,”document_type_id”:”uuid”,”metadata”:{...},”start_page”:number,”end_page”:number}
+- “document_type_id” MUST be the id of one of the document types listed above.
+- “name” is the suggested output PDF base name (no path; .pdf will be added). Follow the renaming instructions of the identified type, substituting extracted values into the placeholders.
+- “metadata” MUST include every field key listed for the identified type. Values are strings. Use empty string “” when a value cannot be determined.
+- “metadata” must NOT include keys belonging to other types.
 - start_page and end_page are 1-based inclusive page indices in the original PDF.
-- The OCR uses headings like "#Page N over M" â€” use these to determine boundaries.
-- Segments must not overlap and should cover all relevant pages (gaps are allowed if the user instructions imply skipping).
+- The OCR uses headings like “#Page N over M” — use these to determine boundaries.
+- Segments must not overlap and should cover all relevant pages (gaps are allowed when the content is not a recognisable document).
 - Reference date (yyyy-mm-dd): ${params.currentDate}
 
 OCR text:
@@ -245,9 +307,8 @@ ${ocrBody}`;
   const model = genAI.getGenerativeModel({ model: modelName });
   const text = await generateContentWithRetry(model, prompt);
   const parsed = parseGeminiJsonArray(text);
-  const ids = params.metadataKeys.map((k) => k.id);
-  const segments = validateSegments(parsed, ids);
-  return sanitizePredefinedMetadata(segments, params.metadataKeys);
+  const segments = validateSegmentsWithTypes(parsed, params.documentTypes);
+  return sanitizePredefinedMetadataWithTypes(segments, params.documentTypes);
 }
 
 /**

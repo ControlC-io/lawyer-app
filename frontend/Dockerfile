@@ -14,11 +14,8 @@ RUN rm -f package-lock.json && npm install
 
 COPY . .
 
-# Build shared first
+# Build shared (needed by both dev and prod)
 RUN npm run build -w shared
-# Build frontend with empty VITE_API_URL so production uses relative /api (same origin via nginx)
-ENV VITE_API_URL=
-RUN npm run build -w frontend
 
 EXPOSE 3000
 

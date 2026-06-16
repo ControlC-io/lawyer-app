@@ -149,6 +149,7 @@
     "organizationSettings": "Paramètres de l'organisation",
     "companies": "Sociétés",
     "archivedRecords": "Archives",
+    "systemInfo": "System Info",
     "signOut": "Déconnexion",
     "darkMode": "Mode sombre",
     "lightMode": "Mode clair",
@@ -216,7 +217,7 @@
     "editTitle": "Modifier le type",
     "formDescription": "Choisissez les champs que l'IA doit extraire pour ce type.",
     "name": "Nom du type",
-    "instructions": "Instructions d'extraction",
+    "instructions": "Instructions de nommage",
     "fieldsToExtract": "Champs à extraire",
     "validationError": "Le nom, les instructions et au moins un champ sont requis."
   },

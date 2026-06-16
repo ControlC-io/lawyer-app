@@ -33,6 +33,8 @@ import { pollOcrUntilDone } from "@/lib/ocrPoll";
 
 export interface SplitPdfSegment {
   name: string;
+  /** Id of the DocumentType this segment was classified as. */
+  document_type_id?: string;
   /** Values keyed by `files_metadata_keys.id`. */
   metadata?: Record<string, string>;
   start_page: number;
@@ -46,7 +48,7 @@ interface CompanyMetadataKeyRow {
   allowed_values?: unknown;
 }
 
-interface SplitPdfPreset {
+interface DocumentType {
   id: string;
   name: string;
   namingInstructions: string;
@@ -272,6 +274,7 @@ export default function SplitPdfPage() {
   const [companyMetadataKeys, setCompanyMetadataKeys] = useState<CompanyMetadataKeyRow[]>([]);
   const [selectedMetadataKeyIds, setSelectedMetadataKeyIds] = useState<string[]>([]);
   const [namingInstructions, setNamingInstructions] = useState("");
+  const [documentTypes, setDocumentTypes] = useState<DocumentType[]>([]);
   const [segments, setSegments] = useState<SplitPdfSegment[]>([]);
   const [busy, setBusy] = useState(false);
   const [loadingStage, setLoadingStage] = useState("");
@@ -438,16 +441,16 @@ export default function SplitPdfPage() {
       setLoadingStage(String(t("splitPdf.stageOcr")));
       await pollOcrUntilDone(firstId, { timeoutMessage: String(t("splitPdf.ocrTimeout")) });
 
-      // 3. Load config: all company metadata keys, naming instructions (from document types), person folder
+      // 3. Load config: all company metadata keys, document types, person folder
       setLoadingStage(String(t("splitPdf.stageLoadingConfig")));
       const personId = searchParams.get("personId");
-      const [keys, presetData, personsList] = await Promise.all([
+      const [keys, typeData, personsList] = await Promise.all([
         api.get<CompanyMetadataKeyRow[]>(
           `/api/companies/${companyId}/files-metadata-keys?includeSystemManaged=true`,
         ),
         api
-          .get<{ presets: SplitPdfPreset[] }>(`/api/companies/${companyId}/documents/split-pdf-presets`)
-          .catch(() => ({ presets: [] as SplitPdfPreset[] })),
+          .get<{ presets: DocumentType[] }>(`/api/companies/${companyId}/documents/document-types`)
+          .catch(() => ({ presets: [] as DocumentType[] })),
         personId
           ? api.get<PersonOption[]>(`/api/companies/${companyId}/persons`).catch(() => [] as PersonOption[])
           : Promise.resolve([] as PersonOption[]),
@@ -457,29 +460,21 @@ export default function SplitPdfPage() {
       setCompanyMetadataKeys(allKeys);
       const allKeyIds = allKeys.map((k) => k.id);
       setSelectedMetadataKeyIds(allKeyIds);
-      if (allKeyIds.length === 0) {
-        throw new Error(String(t("splitPdf.metadataKeysEmpty")));
-      }
 
-      // Naming instructions come from the document types (uniform across types).
-      const presetList = Array.isArray(presetData?.presets) ? presetData.presets : [];
-      const sortedPresets = [...presetList].sort((a, b) => a.name.localeCompare(b.name));
-      const naming = sortedPresets[0]?.namingInstructions?.trim() || DEFAULT_NAMING_INSTRUCTIONS;
-      setNamingInstructions(naming);
+      const loadedTypes = Array.isArray(typeData?.presets) ? typeData.presets : [];
+      setDocumentTypes(loadedTypes);
 
       // Person folder strictly from URL context
       const personRow = personId ? personsList.find((p) => p.id === personId) : undefined;
       const folderId = personRow?.root_folder_id ?? null;
       setPersonFolderId(folderId);
 
-      // 4. Propose split with AI
+      // 4. Propose split with AI (backend loads all document types automatically)
       setLoadingStage(String(t("splitPdf.stageProposing")));
       const res = await api.post<{ segments: SplitPdfSegment[]; pageCount?: number }>(
         `/api/companies/${companyId}/documents/split-pdf/propose`,
         {
           fileId: firstId,
-          metadataKeyIds: allKeyIds,
-          namingInstructions: naming,
         },
       );
       setSegments(sortSegments(res.segments));
