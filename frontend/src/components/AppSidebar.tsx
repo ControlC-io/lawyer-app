@@ -29,6 +29,7 @@ import { Label } from "@/components/ui/label";
 import { LanguageSelector } from "@/components/LanguageSelector";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { cn } from "@/lib/utils";
+import { DossierLogo } from "@/components/DossierLogo";
 
 type MenuItem = { titleKey: string; url: string; icon: typeof FolderOpen; permission?: string };
 
@@ -79,15 +80,13 @@ export function AppSidebar() {
   const customLogoUrl = companyBranding?.internal_logo_url ?? "";
   const shouldUseFallbackLogo = logoLoadFailed || !customLogoUrl;
   const isExpanded = open || isMobile;
-  const sidebarLogoSrc = isExpanded
-    ? (shouldUseFallbackLogo ? "/logo.png" : customLogoUrl)
-    : (shouldUseFallbackLogo ? "/favicon.png" : customLogoUrl);
+  const customLogoSrc = customLogoUrl;
   const brandTitle =
     !shouldUseFallbackLogo &&
     companyBranding?.companyId === selectedCompanyId &&
     companyBranding.name
       ? companyBranding.name
-      : "Lawyer App";
+      : "Dossier";
   const brandSubtitle = shouldUseFallbackLogo ? t("sidebar.brandTagline") : null;
 
   const handleLogoError = () => {
@@ -111,19 +110,16 @@ export function AppSidebar() {
           )}
           title={brandTitle}
         >
-          <div
-            className={cn(
-              "flex shrink-0 items-center justify-center overflow-hidden rounded-md border border-primary/10 bg-gradient-to-br from-primary/10 to-[hsl(var(--brand-secondary)/0.12)]",
-              isExpanded ? "h-9 w-9" : "h-8 w-8",
-            )}
-          >
+          {shouldUseFallbackLogo ? (
+            <DossierLogo className={cn(isExpanded ? "h-8 w-8" : "h-6 w-6")} />
+          ) : (
             <img
-              src={sidebarLogoSrc}
+              src={customLogoSrc}
               alt={brandTitle}
-              className={cn("object-contain", isExpanded ? "h-7 w-7" : "h-5 w-5")}
+              className={cn("shrink-0 object-contain", isExpanded ? "h-8 w-8" : "h-6 w-6")}
               onError={handleLogoError}
             />
-          </div>
+          )}
           {isExpanded && (
             <div className="flex min-w-0 flex-col gap-0.5">
               <span className="truncate text-sm font-semibold leading-none tracking-tight text-sidebar-foreground">

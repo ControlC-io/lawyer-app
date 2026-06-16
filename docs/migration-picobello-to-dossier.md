@@ -1,8 +1,8 @@
-# Migración: PicoBello → Lawyer App
+# Migración: PicoBello → Dossier
 
 ## Contexto
 
-**Lawyer App** es un fork de **PicoBello** (plataforma genérica de gestión documental con OCR y workflows) recortado y reenfocado exclusivamente en gestión documental para despachos de abogados.
+**Dossier** es un fork de **PicoBello** (plataforma genérica de gestión documental con OCR y workflows) recortado y reenfocado exclusivamente en gestión documental para despachos de abogados.
 
 El tenant de referencia es **ControlC** (`company_id: d2b1b417-7748-43e3-828b-678f572f488b`).
 

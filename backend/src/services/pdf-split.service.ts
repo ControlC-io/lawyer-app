@@ -48,6 +48,8 @@ export interface SplitSegment {
   name: string;
   /** Id of the DocumentType this segment was classified as (UUID). */
   document_type_id?: string;
+  /** Id of the Person this segment should be saved to (optional). */
+  person_id?: string;
   /** Values keyed by `files_metadata_keys.id` (UUID strings). */
   metadata?: Record<string, string>;
   start_page: number;

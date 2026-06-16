@@ -10,6 +10,7 @@ import { Progress } from "@/components/ui/progress";
 import { Slider } from "@/components/ui/slider";
 import {
   Dialog,
+  DialogClose,
   DialogContent,
   DialogDescription,
   DialogHeader,
@@ -24,6 +25,7 @@ import {
   RotateCcw,
   RotateCw,
   Maximize2,
+  X,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useLanguage } from "@/contexts/LanguageContext";
@@ -35,6 +37,8 @@ export interface SplitPdfSegment {
   name: string;
   /** Id of the DocumentType this segment was classified as. */
   document_type_id?: string;
+  /** Id of the Person this segment should be saved to. */
+  person_id?: string;
   /** Values keyed by `files_metadata_keys.id`. */
   metadata?: Record<string, string>;
   start_page: number;
@@ -275,6 +279,7 @@ export default function SplitPdfPage() {
   const [selectedMetadataKeyIds, setSelectedMetadataKeyIds] = useState<string[]>([]);
   const [namingInstructions, setNamingInstructions] = useState("");
   const [documentTypes, setDocumentTypes] = useState<DocumentType[]>([]);
+  const [persons, setPersons] = useState<PersonOption[]>([]);
   const [segments, setSegments] = useState<SplitPdfSegment[]>([]);
   const [busy, setBusy] = useState(false);
   const [loadingStage, setLoadingStage] = useState("");
@@ -290,8 +295,6 @@ export default function SplitPdfPage() {
   const [keepOriginalFile, setKeepOriginalFile] = useState(false);
   /** When true (default), each created PDF is queued for OCR like a new upload. */
   const [ocrCreatedFiles, setOcrCreatedFiles] = useState(true);
-  /** Destination folder derived from the ?personId= URL context (null = no person folder). */
-  const [personFolderId, setPersonFolderId] = useState<string | null>(null);
 
   const goBackToDocuments = useCallback(() => {
     navigate("/documents");
@@ -335,6 +338,22 @@ export default function SplitPdfPage() {
       meta[keyId] = value;
       row.metadata = Object.keys(meta).length > 0 ? meta : undefined;
       next[index] = row;
+      return next;
+    });
+  };
+
+  const handleSegmentDocTypeChange = (index: number, docTypeId: string) => {
+    setSegments((prev) => {
+      const next = [...prev];
+      next[index] = { ...next[index], document_type_id: docTypeId };
+      return next;
+    });
+  };
+
+  const handleSegmentPersonChange = (index: number, personId: string | null) => {
+    setSegments((prev) => {
+      const next = [...prev];
+      next[index] = { ...next[index], person_id: personId ?? undefined };
       return next;
     });
   };
@@ -413,22 +432,23 @@ export default function SplitPdfPage() {
     };
   }, [step, fileId]);
 
-  /**
-   * Full automatic pipeline (replaces the old upload → OCR → manual Configure → propose).
-   * Upload → OCR → load all metadata keys + naming instructions + person folder → propose → Review.
-   * Progress messages are shown via `loadingStage`.
-   */
   const handleStart = async () => {
     if (!localFile || !companyId) return;
     setBusy(true);
     setOcrError(null);
     setStep("processing");
     try {
-      // 1. Upload (with OCR requested)
+      // 1. Try to extract embedded text from the PDF (native/digital PDFs only)
+      setLoadingStage(String(t("splitPdf.stageCheckingText")));
+      const { extractNativePdfText } = await import("@/lib/pdfTextExtract");
+      const nativeText = await extractNativePdfText(localFile).catch(() => null);
+      setOcrCreatedFiles(!nativeText);
+
+      // 2. Upload (OCR only needed for scanned PDFs without embedded text)
       setLoadingStage(String(t("splitPdf.stageUploading")));
       const formData = new FormData();
       formData.append("file", localFile);
-      formData.append("ocr", "true");
+      if (!nativeText) formData.append("ocr", "true");
       const result = await api.postFormData<{ files: Array<{ id: string }> }>(
         `/api/companies/${companyId}/documents/upload`,
         formData,
@@ -437,23 +457,22 @@ export default function SplitPdfPage() {
       if (!firstId) throw new Error("Upload failed");
       setFileId(firstId);
 
-      // 2. OCR
-      setLoadingStage(String(t("splitPdf.stageOcr")));
-      await pollOcrUntilDone(firstId, { timeoutMessage: String(t("splitPdf.ocrTimeout")) });
+      // 3. OCR — only for scanned PDFs (skipped when native text was extracted)
+      if (!nativeText) {
+        setLoadingStage(String(t("splitPdf.stageOcr")));
+        await pollOcrUntilDone(firstId, { timeoutMessage: String(t("splitPdf.ocrTimeout")) });
+      }
 
-      // 3. Load config: all company metadata keys, document types, person folder
+      // 4. Load config: all company metadata keys, document types, persons list
       setLoadingStage(String(t("splitPdf.stageLoadingConfig")));
-      const personId = searchParams.get("personId");
       const [keys, typeData, personsList] = await Promise.all([
         api.get<CompanyMetadataKeyRow[]>(
-          `/api/companies/${companyId}/files-metadata-keys?includeSystemManaged=true`,
+          `/api/companies/${companyId}/files-metadata-keys`,
         ),
         api
           .get<{ presets: DocumentType[] }>(`/api/companies/${companyId}/documents/document-types`)
           .catch(() => ({ presets: [] as DocumentType[] })),
-        personId
-          ? api.get<PersonOption[]>(`/api/companies/${companyId}/persons`).catch(() => [] as PersonOption[])
-          : Promise.resolve([] as PersonOption[]),
+        api.get<PersonOption[]>(`/api/companies/${companyId}/persons`).catch(() => [] as PersonOption[]),
       ]);
 
       const allKeys = Array.isArray(keys) ? keys : [];
@@ -463,18 +482,15 @@ export default function SplitPdfPage() {
 
       const loadedTypes = Array.isArray(typeData?.presets) ? typeData.presets : [];
       setDocumentTypes(loadedTypes);
+      setPersons(Array.isArray(personsList) ? personsList : []);
 
-      // Person folder strictly from URL context
-      const personRow = personId ? personsList.find((p) => p.id === personId) : undefined;
-      const folderId = personRow?.root_folder_id ?? null;
-      setPersonFolderId(folderId);
-
-      // 4. Propose split with AI (backend loads all document types automatically)
+      // 5. Propose split with AI
       setLoadingStage(String(t("splitPdf.stageProposing")));
       const res = await api.post<{ segments: SplitPdfSegment[]; pageCount?: number }>(
         `/api/companies/${companyId}/documents/split-pdf/propose`,
         {
           fileId: firstId,
+          ...(nativeText ? { nativeText } : {}),
         },
       );
       setSegments(sortSegments(res.segments));
@@ -532,7 +548,6 @@ export default function SplitPdfPage() {
           segments: normalized.segments,
           keepOriginalFile,
           ocrCreatedFiles,
-          ...(personFolderId ? { folderId: personFolderId } : {}),
         },
       );
       const ocrNote =
@@ -665,8 +680,12 @@ export default function SplitPdfPage() {
                   pdfUrl={!pdfUrlLoading && !pdfUrlError ? pdfUrlForThumbs : null}
                   selectedPage={expandedPage}
                   metadataKeys={selectedMetadataKeysOrdered}
+                  documentTypes={documentTypes}
+                  persons={persons}
                   onSegmentNameChange={handleSegmentNameChange}
                   onSegmentMetadataChange={handleSegmentMetadataChange}
+                  onSegmentDocTypeChange={handleSegmentDocTypeChange}
+                  onSegmentPersonChange={handleSegmentPersonChange}
                   onRemoveSegment={handleRemoveSegment}
                   onSplitAfterPage={handleSplitAfterPage}
                   onMergeCutAfterPage={handleMergeCutAfterPage}
@@ -674,42 +693,47 @@ export default function SplitPdfPage() {
                 />
               </div>
               <div className="flex flex-wrap items-start gap-x-6 gap-y-3 pt-2 border-t shrink-0">
-                <div className="flex flex-col gap-3 min-w-0 flex-1 basis-[min(100%,20rem)]">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <Switch
-                      id="split-pdf-keep-original"
-                      checked={keepOriginalFile}
-                      onCheckedChange={(c) => setKeepOriginalFile(c === true)}
-                      disabled={busy}
-                      aria-describedby="split-pdf-keep-original-desc"
-                    />
-                    <div className="min-w-0">
-                      <Label htmlFor="split-pdf-keep-original" className="text-sm font-normal cursor-pointer">
-                        {String(t("splitPdf.keepOriginalFile"))}
-                      </Label>
-                      <p id="split-pdf-keep-original-desc" className="text-xs text-muted-foreground">
-                        {String(t("splitPdf.keepOriginalFileHint"))}
-                      </p>
+                <details className="min-w-0 flex-1 basis-[min(100%,20rem)]">
+                  <summary className="cursor-pointer text-sm text-muted-foreground select-none list-none flex items-center gap-1">
+                    <span>{String(t("splitPdf.advancedOptions"))}</span>
+                  </summary>
+                  <div className="flex flex-col gap-3 mt-3">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <Switch
+                        id="split-pdf-keep-original"
+                        checked={keepOriginalFile}
+                        onCheckedChange={(c) => setKeepOriginalFile(c === true)}
+                        disabled={busy}
+                        aria-describedby="split-pdf-keep-original-desc"
+                      />
+                      <div className="min-w-0">
+                        <Label htmlFor="split-pdf-keep-original" className="text-sm font-normal cursor-pointer">
+                          {String(t("splitPdf.keepOriginalFile"))}
+                        </Label>
+                        <p id="split-pdf-keep-original-desc" className="text-xs text-muted-foreground">
+                          {String(t("splitPdf.keepOriginalFileHint"))}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 min-w-0">
+                      <Switch
+                        id="split-pdf-ocr-created"
+                        checked={ocrCreatedFiles}
+                        onCheckedChange={(c) => setOcrCreatedFiles(c === true)}
+                        disabled={busy}
+                        aria-describedby="split-pdf-ocr-created-desc"
+                      />
+                      <div className="min-w-0">
+                        <Label htmlFor="split-pdf-ocr-created" className="text-sm font-normal cursor-pointer">
+                          {String(t("splitPdf.ocrCreatedFiles"))}
+                        </Label>
+                        <p id="split-pdf-ocr-created-desc" className="text-xs text-muted-foreground">
+                          {String(t("splitPdf.ocrCreatedFilesHint"))}
+                        </p>
+                      </div>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2 min-w-0">
-                    <Switch
-                      id="split-pdf-ocr-created"
-                      checked={ocrCreatedFiles}
-                      onCheckedChange={(c) => setOcrCreatedFiles(c === true)}
-                      disabled={busy}
-                      aria-describedby="split-pdf-ocr-created-desc"
-                    />
-                    <div className="min-w-0">
-                      <Label htmlFor="split-pdf-ocr-created" className="text-sm font-normal cursor-pointer">
-                        {String(t("splitPdf.ocrCreatedFiles"))}
-                      </Label>
-                      <p id="split-pdf-ocr-created-desc" className="text-xs text-muted-foreground">
-                        {String(t("splitPdf.ocrCreatedFilesHint"))}
-                      </p>
-                    </div>
-                  </div>
-                </div>
+                </details>
                 <div className="flex flex-wrap gap-2 shrink-0 min-w-[12rem] sm:ml-auto sm:justify-end">
                   <Button
                     variant="outline"
@@ -732,7 +756,7 @@ export default function SplitPdfPage() {
             </div>
 
             <Dialog open={expandedPage != null} onOpenChange={(open) => !open && setExpandedPage(null)}>
-              <DialogContent className="max-w-[min(96vw,calc(100vw-1rem))] w-full max-h-[min(96vh,900px)] h-[min(96vh,900px)] p-0 gap-0 flex flex-col overflow-hidden">
+              <DialogContent className="max-w-[min(96vw,calc(100vw-1rem))] w-full max-h-[min(96vh,900px)] h-[min(96vh,900px)] p-0 gap-0 flex flex-col overflow-hidden [&>button]:hidden">
                 <DialogHeader className="sr-only">
                   <DialogTitle>
                     {expandedPage != null
@@ -828,6 +852,18 @@ export default function SplitPdfPage() {
                           >
                             <Maximize2 className="h-4 w-4" />
                           </Button>
+                          <DialogClose asChild>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="icon"
+                              className="h-8 w-8"
+                              title={String(t("common.close"))}
+                              aria-label={String(t("common.close"))}
+                            >
+                              <X className="h-4 w-4" />
+                            </Button>
+                          </DialogClose>
                         </div>
                       </div>
                     </div>

@@ -3,6 +3,10 @@ import { FilesMetadataValueKind, Prisma } from '@prisma/client';
 
 const SYSTEM_MANAGED_KEY_NAMES = ['Personne', 'Type'] as const;
 import { AuthRequest, ALL_COMPANIES, companyFilter } from '../middleware/auth';
+import {
+  cascadeRuleConditionsOnValueRename,
+  cascadeRuleConditionsOnValueDelete,
+} from '../lib/ruleConditionSync';
 import { prisma } from '../lib/prisma';
 import { getAccessibleFileIds, getAccessibleFileIdsWithLevels, buildVirtualTree, getAllowedMetadataValues, canUserAccessFileByMetadata } from '../lib/documentAccess';
 import { getUserGroupIdsInCompany } from '../lib/folderAccess';
@@ -1267,7 +1271,7 @@ export const documentsController = {
 
     const existing = await prisma.documentType.findFirst({
       where: { id: documentTypeId, company_id: companyId },
-      select: { id: true },
+      select: { id: true, name: true },
     });
     if (!existing) return res.status(404).json({ error: 'Document type not found' });
 
@@ -1317,6 +1321,7 @@ export const documentsController = {
 
     if (data.name !== undefined) {
       await syncDocumentTypesMetadataKey(companyId);
+      await cascadeRuleConditionsOnValueRename(companyId, DOCUMENT_TYPE_KEY_NAME, existing.name, data.name);
     }
 
     return res.json({
@@ -1334,19 +1339,22 @@ export const documentsController = {
     const access = await ensureCompanyAccess(req, companyId);
     if (access.error) return res.status(access.error.status).json(access.error.body);
 
-    const deleted = await prisma.documentType.deleteMany({
+    const toDelete = await prisma.documentType.findFirst({
       where: { id: documentTypeId, company_id: companyId },
+      select: { name: true },
     });
-    if (deleted.count === 0) return res.status(404).json({ error: 'Document type not found' });
+    if (!toDelete) return res.status(404).json({ error: 'Document type not found' });
 
+    await prisma.documentType.delete({ where: { id: documentTypeId } });
     await syncDocumentTypesMetadataKey(companyId);
+    await cascadeRuleConditionsOnValueDelete(companyId, DOCUMENT_TYPE_KEY_NAME, toDelete.name);
 
     return res.status(204).send();
   },
 
   async splitPdfPropose(req: AuthRequest, res: Response) {
     const { companyId } = req.params;
-    const { fileId, currentDate } = req.body || {};
+    const { fileId, currentDate, nativeText } = req.body || {};
 
     if (!(await assertFlatDocumentWriteAccess(req, companyId, res))) return;
 
@@ -1368,8 +1376,14 @@ export const documentsController = {
     if (file.mime_type !== 'application/pdf') {
       return res.status(400).json({ error: 'file must be a PDF' });
     }
-    if (file.ocr_status !== 'completed' || !file.ocr_markdown?.trim()) {
-      return res.status(400).json({ error: 'OCR must be completed before proposing a split' });
+
+    // Use client-provided native text (native/digital PDF) or fall back to stored OCR markdown
+    const ocrMarkdown = (typeof nativeText === 'string' && nativeText.trim())
+      ? nativeText.trim()
+      : file.ocr_markdown;
+
+    if (!ocrMarkdown?.trim()) {
+      return res.status(400).json({ error: 'OCR must be completed before proposing a split (or provide nativeText for native PDFs)' });
     }
 
     const dateStr =
@@ -1428,7 +1442,7 @@ export const documentsController = {
       });
 
       const segments = await proposeSplitWithGemini({
-        ocrMarkdown: file.ocr_markdown,
+        ocrMarkdown,
         documentTypes,
         currentDate: dateStr,
       });
@@ -1777,7 +1791,7 @@ export const documentsController = {
     if ('error' in resolvedFolder) {
       return res.status(resolvedFolder.status).json({ error: resolvedFolder.error });
     }
-    const targetFolderId = resolvedFolder.folderId;
+    const globalFolderId = resolvedFolder.folderId;
 
     const userId = req.user?.id ?? null;
 
@@ -1809,6 +1823,17 @@ export const documentsController = {
           return res.status(check.status).json({ error: check.error, details: check.details });
         }
       }
+    }
+
+    // Batch-resolve person_id → root_folder_id for segments that carry a person
+    const segPersonIds = [...new Set(validated.filter((s) => s.person_id).map((s) => s.person_id!))];
+    const personFolderMap = new Map<string, string | null>();
+    if (segPersonIds.length > 0) {
+      const personRows = await prisma.person.findMany({
+        where: { id: { in: segPersonIds }, company_id: companyId },
+        select: { id: true, root_folder_id: true },
+      });
+      for (const p of personRows) personFolderMap.set(p.id, p.root_folder_id);
     }
 
     // Pre-load document type names for segments that carry document_type_id
@@ -1865,6 +1890,10 @@ export const documentsController = {
       const storagePath = `companies/${companyId}/flat/${Date.now()}_${i}_${storageBase}.pdf`;
       const size = part.buffer.length;
       await storageService.uploadFile(bucket, storagePath, part.buffer, 'application/pdf');
+      const seg = validated[i];
+      const segFolderId = seg?.person_id
+        ? (personFolderMap.get(seg.person_id) ?? globalFolderId)
+        : globalFolderId;
       const dbFile = await prisma.file.create({
         data: {
           company_id: companyId,
@@ -1873,7 +1902,7 @@ export const documentsController = {
           mime_type: 'application/pdf',
           size_bytes: BigInt(size),
           uploaded_by: userId,
-          folder_id: targetFolderId,
+          folder_id: segFolderId,
         },
       });
       await appendFileHistoryEvent({
@@ -1883,7 +1912,6 @@ export const documentsController = {
         actorId: normalizeFileHistoryActorId(userId),
         details: { source: 'split_pdf_apply' },
       });
-      const seg = validated[i];
       const meta = seg?.metadata;
       const metaChanges: Array<{ key: string; keyId: string; action: 'add'; next: string }> = [];
 

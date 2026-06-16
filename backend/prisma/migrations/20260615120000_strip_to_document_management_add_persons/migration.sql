@@ -1,5 +1,5 @@
 -- Strip workflow, execution, data, variables, API config, and agent tables.
--- Add persons table for Lawyer App vertical.
+-- Add persons table for Dossier vertical.
 
 DROP TABLE IF EXISTS "public"."step_reminder_jobs" CASCADE;
 DROP TABLE IF EXISTS "public"."workflow_execution_log" CASCADE;

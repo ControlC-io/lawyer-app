@@ -1,7 +1,7 @@
 {
-  "name": "lawyer-app",
+  "name": "dossier",
   "version": "1.0.0",
-  "description": "Lawyer App — document management vertical",
+  "description": "Dossier — document management vertical",
   "private": true,
   "workspaces": [
     "frontend",

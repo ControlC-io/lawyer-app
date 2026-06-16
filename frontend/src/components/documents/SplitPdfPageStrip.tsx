@@ -4,6 +4,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Ban, Loader2, RotateCcw, Scissors } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useLanguage } from "@/contexts/LanguageContext";
@@ -14,6 +21,8 @@ import {
 
 export interface SplitPdfSegmentRow {
   name: string;
+  document_type_id?: string;
+  person_id?: string;
   metadata?: Record<string, string>;
   start_page: number;
   end_page: number;
@@ -120,6 +129,16 @@ function buildLayoutBlocks(segments: SplitPdfSegmentRow[], totalPages: number): 
   return blocks;
 }
 
+export interface SplitPdfDocumentTypeOption {
+  id: string;
+  name: string;
+}
+
+export interface SplitPdfPersonOption {
+  id: string;
+  full_name: string;
+}
+
 interface Props {
   totalPages: number;
   segments: SplitPdfSegmentRow[];
@@ -128,8 +147,12 @@ interface Props {
   pdfUrl?: string | null;
   selectedPage?: number | null;
   metadataKeys: SplitPdfMetadataKeyRow[];
+  documentTypes?: SplitPdfDocumentTypeOption[];
+  persons?: SplitPdfPersonOption[];
   onSegmentNameChange: (index: number, value: string) => void;
   onSegmentMetadataChange: (index: number, keyId: string, value: string) => void;
+  onSegmentDocTypeChange?: (index: number, docTypeId: string) => void;
+  onSegmentPersonChange?: (index: number, personId: string | null) => void;
   onRemoveSegment: (index: number) => void;
   onSplitAfterPage: (page: number) => void;
   onMergeCutAfterPage: (page: number) => void;
@@ -144,8 +167,12 @@ export default function SplitPdfPageStrip({
   pdfUrl = null,
   selectedPage = null,
   metadataKeys,
+  documentTypes = [],
+  persons = [],
   onSegmentNameChange,
   onSegmentMetadataChange,
+  onSegmentDocTypeChange,
+  onSegmentPersonChange,
   onRemoveSegment,
   onSplitAfterPage,
   onMergeCutAfterPage,
@@ -400,6 +427,55 @@ export default function SplitPdfPageStrip({
                         onChange={(e) => onSegmentNameChange(block.segIndex, e.target.value)}
                       />
                     </div>
+                    {documentTypes.length > 0 && onSegmentDocTypeChange && (
+                      <div>
+                        <Label className="text-xs text-muted-foreground">
+                          {String(t("splitPdf.documentType"))}
+                        </Label>
+                        <Select
+                          value={block.segment.document_type_id ?? ""}
+                          onValueChange={(v) => onSegmentDocTypeChange(block.segIndex, v)}
+                        >
+                          <SelectTrigger className="h-9 text-sm mt-1">
+                            <SelectValue placeholder={String(t("splitPdf.documentTypePlaceholder"))} />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {documentTypes.map((dt) => (
+                              <SelectItem key={dt.id} value={dt.id}>
+                                {dt.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
+                    {onSegmentPersonChange && (
+                      <div>
+                        <Label className="text-xs text-muted-foreground">
+                          {String(t("splitPdf.person"))}
+                        </Label>
+                        <Select
+                          value={block.segment.person_id ?? "__none__"}
+                          onValueChange={(v) =>
+                            onSegmentPersonChange(block.segIndex, v === "__none__" ? null : v)
+                          }
+                        >
+                          <SelectTrigger className="h-9 text-sm mt-1">
+                            <SelectValue placeholder={String(t("splitPdf.personPlaceholder"))} />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__none__">
+                              {String(t("splitPdf.personNone"))}
+                            </SelectItem>
+                            {persons.map((p) => (
+                              <SelectItem key={p.id} value={p.id}>
+                                {p.full_name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
                     {extractedMetadataEntries(
                       block.segment,
                       metadataKeys,

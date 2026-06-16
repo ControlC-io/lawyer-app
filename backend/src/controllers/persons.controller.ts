@@ -2,6 +2,10 @@ import { Response } from 'express';
 import { Prisma } from '@prisma/client';
 import { AuthRequest, ALL_COMPANIES } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
+import {
+  cascadeRuleConditionsOnValueRename,
+  cascadeRuleConditionsOnValueDelete,
+} from '../lib/ruleConditionSync';
 
 const PERSONNE_KEY_NAME = 'Personne';
 
@@ -202,6 +206,7 @@ export const personsController = {
         });
         if (nextName !== existing.full_name) {
           await syncPersonsMetadataKey(companyId, tx);
+          await cascadeRuleConditionsOnValueRename(companyId, PERSONNE_KEY_NAME, existing.full_name, nextName, tx);
         }
         return updated;
       });
@@ -240,6 +245,7 @@ export const personsController = {
       }
 
       await prisma.$transaction(async (tx) => {
+        await cascadeRuleConditionsOnValueDelete(companyId, PERSONNE_KEY_NAME, existing.full_name, tx);
         await tx.person.delete({ where: { id: personId } });
         if (existing.root_folder_id) {
           await tx.folder.deleteMany({ where: { id: existing.root_folder_id, company_id: companyId } });

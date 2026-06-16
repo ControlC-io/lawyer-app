@@ -85,7 +85,7 @@ async function run() {
        VALUES ($1, $2, $3, $4::jsonb, $5, now(), now())`,
       [uuid(), dtype, COMPANY_ID,
        JSON.stringify([anneeId, moisId, typeId]),
-       'Nommer: [Personne]_[Année]_[Mois]_[Jour]_[Type]_[Description courte]']
+       'Name: [Personne]_[Année]_[Mois]_[Jour]_[Type]_[Description courte]']
     );
   }
   console.log(`✓ ${DOC_TYPES.length} document types created`);

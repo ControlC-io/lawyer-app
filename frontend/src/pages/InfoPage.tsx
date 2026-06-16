@@ -330,17 +330,17 @@ export default function InfoPage() {
           </CardTitle>
         </CardHeader>
         <CardContent className="px-4 pb-2">
-          <StepCard icon={Settings2} step={1} title="Configuration — Document Types & Metadata Keys" accent="bg-violet-500/15 text-violet-600 dark:text-violet-400">
+          <StepCard icon={Settings2} step={1} title="Configuration — Document Types & Document Fields" accent="bg-violet-500/15 text-violet-600 dark:text-violet-400">
             <p>
-              Each <strong>Document Type</strong> defines which <strong>Metadata Keys</strong> to
+              Each <strong>Document Type</strong> defines which <strong>Document Fields</strong> to
               extract and an optional <strong>Naming Instruction</strong> (a template string with
               placeholders, e.g.{" "}
               <Pill className="bg-violet-500/10">{"{{date}} - {{client}} - Invoice"}</Pill>).
             </p>
             <p>
-              Each <strong>Metadata Key</strong> has a <em>value kind</em>:{" "}
+              Each <strong>Document Field</strong> has a <em>value kind</em>:{" "}
               <Pill>free_text</Pill> (any string) or <Pill>predefined_list</Pill> (fixed set of
-              allowed values). Only keys belonging to the document's type are extracted.
+              allowed values). Only fields belonging to the document's type are extracted.
             </p>
           </StepCard>
 
@@ -350,7 +350,7 @@ export default function InfoPage() {
               Gemini receives:
             </p>
             <ul className="list-disc list-inside space-y-0.5 mt-1">
-              <li>A list of metadata key UUIDs with their label and value constraints</li>
+              <li>A list of document field UUIDs with their label and value constraints</li>
               <li>A reference date (<Pill>yyyy-mm-dd</Pill>) for interpreting relative dates</li>
               <li>Instruction to return a single flat JSON object keyed by UUID</li>
             </ul>
@@ -398,14 +398,17 @@ export default function InfoPage() {
           </CardTitle>
         </CardHeader>
         <CardContent className="px-4 pb-2">
-          <StepCard icon={FileText} step={1} title="Select source PDF" accent="bg-orange-500/15 text-orange-600 dark:text-orange-400">
+          <StepCard icon={FileText} step={1} title="Native text detection" accent="bg-orange-500/15 text-orange-600 dark:text-orange-400">
             <p>
-              User picks an existing document. Its OCR markdown is loaded (same{" "}
-              <Pill>900 000 char</Pill> cap, tail preserved).
+              Before uploading, the browser extracts embedded text from the PDF using{" "}
+              <Pill>pdfjs-dist</Pill>. If the PDF averages ≥ 30 chars/page (native/digital PDF —
+              Word export, digital invoice, etc.) the text is used directly and{" "}
+              <strong>OCR is skipped</strong>, reducing total time from ~3–5 min to ~30–60 sec.
+              Scanned PDFs (avg &lt; 30 chars/page) fall back to the standard OCR pipeline.
             </p>
           </StepCard>
 
-          <StepCard icon={Brain} step={2} title="Gemini suggests segments" accent="bg-orange-500/15 text-orange-600 dark:text-orange-400">
+          <StepCard icon={Brain} step={2} title="OCR (scanned PDFs only) → Gemini suggests segments" accent="bg-orange-500/15 text-orange-600 dark:text-orange-400">
             <p>
               Prompt includes all available <strong>Document Types</strong> with their metadata
               key constraints and naming instructions. Gemini returns a JSON array, one entry per

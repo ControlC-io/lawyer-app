@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
-import { Plus, Pencil, Trash2, Tag } from "lucide-react";
+import { Plus, Pencil, Trash2 } from "lucide-react";
 import { api } from "@/lib/api";
 import { useCompanyId } from "@/hooks/useCompanyId";
 import { useAuth } from "@/contexts/AuthContext";
@@ -175,26 +174,6 @@ export default function DocumentTypes() {
           </Button>
         )}
       </div>
-
-      {/* Available metadata fields info */}
-      {regularKeys.length > 0 && (
-        <div className="flex items-start gap-3 rounded-lg border bg-muted/30 px-4 py-3">
-          <Tag className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
-          <div className="flex flex-wrap items-center gap-1.5 text-sm">
-            <span className="text-muted-foreground shrink-0">
-              {String(t("documentTypes.metadataFieldsTitle"))}:
-            </span>
-            {regularKeys.map((key) => (
-              <Badge key={key.id} variant="secondary" className="text-xs font-normal">
-                {key.name?.trim() || key.id}
-              </Badge>
-            ))}
-            <Link to="/metadata-keys" className="text-xs text-primary underline-offset-4 hover:underline ml-1">
-              {String(t("documentTypes.metadataFieldsLink"))}
-            </Link>
-          </div>
-        </div>
-      )}
 
       {/* Table */}
       <div className="rounded-lg border bg-card">

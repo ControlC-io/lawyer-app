@@ -1,5 +1,5 @@
 -- ============================================================
--- Seed data for Lawyer App tenant (ControlC)
+-- Seed data for Dossier tenant (ControlC)
 -- Company ID: d2b1b417-7748-43e3-828b-678f572f488b
 -- ============================================================
 
@@ -42,7 +42,7 @@ SELECT
   dtype,
   cid,
   jsonb_build_array(key_annee::text, key_mois::text, key_type::text),
-  'Nommer le fichier: [Personne]_[Année]_[Mois]_[Jour]_[Type]_[Description courte]',
+  'Name: [Personne]_[Année]_[Mois]_[Jour]_[Type]_[Description courte]',
   now(),
   now()
 FROM unnest(ARRAY[

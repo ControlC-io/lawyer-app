@@ -2,7 +2,7 @@ import sgMail from '@sendgrid/mail';
 
 const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY || '';
 const FROM_EMAIL = process.env.FROM_EMAIL || 'noreply@example.com';
-const APP_NAME = process.env.APP_NAME || 'Lawyer App';
+const APP_NAME = process.env.APP_NAME || 'Dossier';
 const APP_URL = process.env.APP_URL || 'http://localhost';
 let configuredApiKeyLength = 0;
 

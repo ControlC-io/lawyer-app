@@ -303,7 +303,7 @@ export default function DocumentPermissionRules({ companyId }: Props) {
                       next[i].key_id = v;
                       setFormConditions(next);
                     }}>
-                      <SelectTrigger className="h-9 flex-1"><SelectValue placeholder="Metadata key" /></SelectTrigger>
+                      <SelectTrigger className="h-9 flex-1"><SelectValue placeholder="Document field" /></SelectTrigger>
                       <SelectContent>
                         {metadataKeys.map((k) => <SelectItem key={k.id} value={k.id}>{k.name}</SelectItem>)}
                       </SelectContent>

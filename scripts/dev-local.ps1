@@ -1,4 +1,4 @@
-# Start lawyer-app in local dev mode (backend + frontend directly on host, DB+MinIO via Docker)
+# Start dossier in local dev mode (backend + frontend directly on host, DB+MinIO via Docker)
 # Usage: .\scripts\dev-local.ps1
 
 $NODE = "C:\nvm4w\nodejs\node.exe"

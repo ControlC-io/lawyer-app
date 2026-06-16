@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useLayoutEffect, useCallback, useRef, useMemo, Children } from "react";
 import { api } from "@/lib/api";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -1985,7 +1986,7 @@ export default function MetadataDocumentView({
                     }}
                   >
                     <SelectTrigger className="h-7 w-[140px] text-xs">
-                      <SelectValue placeholder="Select key" />
+                      <SelectValue placeholder={String(t("documentManagement.selectKey"))} />
                     </SelectTrigger>
                     <SelectContent>
                       {metadataKeys.map((k) => (
@@ -2389,11 +2390,11 @@ export default function MetadataDocumentView({
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>Configure Tree View</DialogTitle>
-            <DialogDescription>Choose and order metadata keys to create your virtual folder hierarchy.</DialogDescription>
+            <DialogDescription>Choose and order document fields to create your virtual folder hierarchy.</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div>
-              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Active keys (drag to reorder)</Label>
+              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Active fields (drag to reorder)</Label>
               <div className="mt-2 space-y-1">
                 {configKeyOrder.map((keyId, index) => {
                   const key = metadataKeys.find((k) => k.id === keyId);
@@ -2582,19 +2583,17 @@ export default function MetadataDocumentView({
                     {String(t("splitPdf.personsLoading"))}
                   </p>
                 ) : (
-                  <select
-                    className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm"
+                  <SearchableSelect
+                    options={uploadPersons.map((p) => ({ value: p.id, label: p.full_name }))}
                     value={selectedUploadPersonId}
-                    onChange={(e) => setSelectedUploadPersonId(e.target.value)}
+                    onValueChange={setSelectedUploadPersonId}
+                    placeholder={String(t("splitPdf.personSelectPlaceholder"))}
+                    searchPlaceholder={String(t("common.search"))}
+                    emptyText={String(t("persons.noResults"))}
                     disabled={isImportBusy || uploadPersons.length === 0}
-                  >
-                    <option value="">{String(t("splitPdf.personSelectPlaceholder"))}</option>
-                    {uploadPersons.map((person) => (
-                      <option key={person.id} value={person.id}>
-                        {person.full_name}
-                      </option>
-                    ))}
-                  </select>
+                    allowClear
+                    clearLabel={String(t("splitPdf.personSelectPlaceholder"))}
+                  />
                 )}
               </div>
             )}
@@ -2609,26 +2608,23 @@ export default function MetadataDocumentView({
                     {String(t("splitPdf.presetsLoading"))}
                   </p>
                 ) : (
-                  <select
-                    className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm"
+                  <SearchableSelect
+                    options={uploadPresets.map((p) => ({ value: p.id, label: p.name }))}
                     value={selectedUploadPresetId}
-                    onChange={(e) => {
-                      const nextId = e.target.value;
+                    onValueChange={(nextId) => {
                       if (!nextId) {
                         setSelectedUploadPresetId("");
                         return;
                       }
                       applyUploadPreset(nextId);
                     }}
+                    placeholder={String(t("splitPdf.presetSelectPlaceholder"))}
+                    searchPlaceholder={String(t("common.search"))}
+                    emptyText={String(t("documentTypes.empty"))}
                     disabled={isImportBusy || uploadPresets.length === 0}
-                  >
-                    <option value="">{String(t("splitPdf.presetSelectPlaceholder"))}</option>
-                    {uploadPresets.map((preset) => (
-                      <option key={preset.id} value={preset.id}>
-                        {preset.name}
-                      </option>
-                    ))}
-                  </select>
+                    allowClear
+                    clearLabel={String(t("splitPdf.presetSelectPlaceholder"))}
+                  />
                 )}
               </div>
             )}
@@ -2644,7 +2640,7 @@ export default function MetadataDocumentView({
                       next[i].key_id = v;
                       setUploadMetadata(next);
                     }}>
-                      <SelectTrigger className="h-8 flex-1"><SelectValue placeholder="Key" /></SelectTrigger>
+                      <SelectTrigger className="h-8 flex-1"><SelectValue placeholder={String(t("documentManagement.selectKey"))} /></SelectTrigger>
                       <SelectContent>
                         {metadataKeys.map((k) => <SelectItem key={k.id} value={k.id}>{k.name}</SelectItem>)}
                       </SelectContent>
@@ -2906,7 +2902,7 @@ export default function MetadataDocumentView({
                   next[i].key = v;
                   setMetadataEntries(next);
                 }}>
-                  <SelectTrigger className="h-9 flex-1 min-w-0 focus:ring-offset-0"><SelectValue placeholder="Key" /></SelectTrigger>
+                  <SelectTrigger className="h-9 flex-1 min-w-0 focus:ring-offset-0"><SelectValue placeholder={String(t("documentManagement.selectKey"))} /></SelectTrigger>
                   <SelectContent>
                     {metadataKeys.map((k) => <SelectItem key={k.id} value={k.name}>{k.name}</SelectItem>)}
                   </SelectContent>
@@ -2943,7 +2939,7 @@ export default function MetadataDocumentView({
           <DialogHeader>
             <DialogTitle>Bulk Assign Metadata</DialogTitle>
             <DialogDescription>
-              Apply metadata updates to {selectedFileIds.size} selected files. Any metadata keys not listed below will remain unchanged.
+              Apply metadata updates to {selectedFileIds.size} selected files. Any document fields not listed below will remain unchanged.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
@@ -2955,7 +2951,7 @@ export default function MetadataDocumentView({
                     next[i].key = v;
                     setBulkEntries(next);
                   }}>
-                    <SelectTrigger className="h-9 flex-1"><SelectValue placeholder="Key" /></SelectTrigger>
+                    <SelectTrigger className="h-9 flex-1"><SelectValue placeholder={String(t("documentManagement.selectKey"))} /></SelectTrigger>
                     <SelectContent>
                       {metadataKeys.map((k) => <SelectItem key={k.id} value={k.name}>{k.name}</SelectItem>)}
                     </SelectContent>
