@@ -64,7 +64,9 @@ export default function DocumentTypes() {
     try {
       const [presetRes, keys] = await Promise.all([
         api.get<{ presets: DocumentTypePreset[] }>(`/api/companies/${companyId}/documents/split-pdf-presets`),
-        api.get<MetadataKey[]>(`/api/companies/${companyId}/files-metadata-keys`),
+        api.get<MetadataKey[]>(
+          `/api/companies/${companyId}/files-metadata-keys?includeSystemManaged=true`,
+        ),
       ]);
       setPresets(Array.isArray(presetRes?.presets) ? presetRes.presets : []);
       setMetadataKeys(Array.isArray(keys) ? keys : []);

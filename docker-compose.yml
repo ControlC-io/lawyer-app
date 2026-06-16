@@ -1,4 +1,5 @@
 services:
+  # Windows host dev: docker compose up -d db minio backend && .\scripts\dev-local.ps1
   backend:
     build:
       context: .
@@ -29,7 +30,7 @@ services:
       - OCR_API_URL=${OCR_API_URL:-https://api.mistral.ai/v1/ocr}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.0-flash}
-    command: sh -c "npm install && npm run dev -w backend"
+    command: npm run dev -w backend
     volumes:
       - .:/usr/src/app
       - /usr/src/app/node_modules

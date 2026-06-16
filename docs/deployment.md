@@ -45,14 +45,9 @@ NODE_ENV=production
 PORT=3001
 
 # AI Services (Optional)
-OPENAI_API_KEY=your-openai-key
-LOVABLE_API_KEY=your-lovable-key
-FLOOWLY_AI_VALIDATION_API_KEY=your-ai-validation-key
-AI_FORM_VALIDATION_URL=https://automation.floowly.app/webhook/7604f736-0ea8-4ec1-9b03-082256e42e0c
-
-# Demo/Feedback (Optional)
-DEMO_REQUEST_EMAIL=contact@controlc.io
-FEEDBACK_EMAIL=contact@controlc.io
+OCR_API_KEY=your-mistral-api-key
+GEMINI_API_KEY=your-gemini-api-key
+GEMINI_MODEL=gemini-2.0-flash
 ```
 
 ### Build and Run

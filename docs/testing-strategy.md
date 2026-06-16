@@ -61,7 +61,7 @@ Current suites (19 files, all under `backend/src/tests/`):
 | `files-metadata-validation.test.ts` | `validateMetadataValueForKey` / `parseAllowedValuesJson` (free_text vs predefined_list). |
 | `fileHistory.test.ts` | `appendFileHistoryEvent` event recording. |
 | `notifications.test.ts` | Notification endpoints (JWT): missing/invalid input, not found, success with recipients, 401 unauthorized. |
-| `public.test.ts` | `POST /api/public/feedback` and `/demo-request`: 400 missing fields, 200 success, 500 when email service throws. |
+| `public.test.ts` | `GET /api/public/config` (signup flag) and `GET /api/health` (DB connectivity). |
 | `validation.middleware.test.ts` | express-validator wrapper middleware behaviour. |
 | `email.service.test.ts` | Smoke test that `emailService` is mocked in test env and exposes the expected interface. |
 

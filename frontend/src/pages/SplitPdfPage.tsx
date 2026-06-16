@@ -4,11 +4,8 @@ import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import SplitPdfPageStrip from "@/components/documents/SplitPdfPageStrip";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { Textarea } from "@/components/ui/textarea";
-import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { Slider } from "@/components/ui/slider";
 import {
@@ -31,7 +28,6 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useCompanyId } from "@/hooks/useCompanyId";
-import { useAuth } from "@/contexts/AuthContext";
 import { usePdfPageLargePreview } from "@/hooks/usePdfPageLargePreview";
 import { pollOcrUntilDone } from "@/lib/ocrPoll";
 
@@ -73,7 +69,7 @@ function mergeSegmentMetadata(
   return Object.keys(merged).length > 0 ? merged : undefined;
 }
 
-type Step = "pick" | "ocr" | "configure" | "review";
+type Step = "pick" | "processing" | "review";
 
 function sortSegments(segments: SplitPdfSegment[]): SplitPdfSegment[] {
   return [...segments].sort((a, b) => a.start_page - b.start_page);
@@ -243,11 +239,9 @@ function removeSegmentAt(segments: SplitPdfSegment[], index: number): SplitPdfSe
 function stepProgress(step: Step): number {
   switch (step) {
     case "pick":
-      return 25;
-    case "ocr":
-      return 50;
-    case "configure":
-      return 75;
+      return 33;
+    case "processing":
+      return 66;
     case "review":
       return 100;
     default:
@@ -255,9 +249,12 @@ function stepProgress(step: Step): number {
   }
 }
 
-const STEP_ORDER: Step[] = ["pick", "ocr", "configure", "review"];
+const STEP_ORDER: Step[] = ["pick", "processing", "review"];
 
-const PROGRESS_STEP_KEYS = ["progressStep1", "progressStep2", "progressStep3", "progressStep4"] as const;
+const PROGRESS_STEP_KEYS = ["progressStep1", "progressStep2", "progressStep3"] as const;
+
+/** Default naming template used when the company has no document-type presets yet. */
+const DEFAULT_NAMING_INSTRUCTIONS = "[Personne]_[Année]_[Mois]_[Jour]_[Type]_[Description courte]";
 
 function stepIndex(step: Step): number {
   return STEP_ORDER.indexOf(step);
@@ -268,22 +265,16 @@ export default function SplitPdfPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { t } = useLanguage();
-  const { hasPermission } = useAuth();
   const { toast } = useToast();
   const [step, setStep] = useState<Step>("pick");
   const [localFile, setLocalFile] = useState<File | null>(null);
   const [fileId, setFileId] = useState<string | null>(null);
   const [companyMetadataKeys, setCompanyMetadataKeys] = useState<CompanyMetadataKeyRow[]>([]);
-  const [metadataKeysLoading, setMetadataKeysLoading] = useState(false);
-  const [presets, setPresets] = useState<SplitPdfPreset[]>([]);
-  const [presetsLoading, setPresetsLoading] = useState(false);
-  const [presetBusy, setPresetBusy] = useState(false);
-  const [selectedPresetId, setSelectedPresetId] = useState("");
-  const [presetName, setPresetName] = useState("");
   const [selectedMetadataKeyIds, setSelectedMetadataKeyIds] = useState<string[]>([]);
   const [namingInstructions, setNamingInstructions] = useState("");
   const [segments, setSegments] = useState<SplitPdfSegment[]>([]);
   const [busy, setBusy] = useState(false);
+  const [loadingStage, setLoadingStage] = useState("");
   const [ocrError, setOcrError] = useState<string | null>(null);
   const [totalPages, setTotalPages] = useState(0);
   const [pdfUrlForThumbs, setPdfUrlForThumbs] = useState<string | null>(null);
@@ -296,10 +287,8 @@ export default function SplitPdfPage() {
   const [keepOriginalFile, setKeepOriginalFile] = useState(false);
   /** When true (default), each created PDF is queued for OCR like a new upload. */
   const [ocrCreatedFiles, setOcrCreatedFiles] = useState(true);
-  const [persons, setPersons] = useState<PersonOption[]>([]);
-  const [personsLoading, setPersonsLoading] = useState(false);
-  const [selectedPersonId, setSelectedPersonId] = useState("");
-  const canManagePresets = hasPermission("documents.manage");
+  /** Destination folder derived from the ?personId= URL context (null = no person folder). */
+  const [personFolderId, setPersonFolderId] = useState<string | null>(null);
 
   const goBackToDocuments = useCallback(() => {
     navigate("/documents");
@@ -352,215 +341,6 @@ export default function SplitPdfPage() {
       .map((id) => companyMetadataKeys.find((k) => k.id === id))
       .filter((k): k is CompanyMetadataKeyRow => Boolean(k));
   }, [selectedMetadataKeyIds, companyMetadataKeys]);
-
-  useEffect(() => {
-    if (!companyId || step !== "configure") return;
-    let cancelled = false;
-    setMetadataKeysLoading(true);
-    (async () => {
-      try {
-        const data = await api.get<CompanyMetadataKeyRow[]>(
-          `/api/companies/${companyId}/files-metadata-keys`,
-        );
-        if (!cancelled) setCompanyMetadataKeys(data || []);
-      } catch {
-        if (!cancelled) setCompanyMetadataKeys([]);
-      } finally {
-        if (!cancelled) setMetadataKeysLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [companyId, step]);
-
-  useEffect(() => {
-    if (!companyId || step !== "configure") return;
-    let cancelled = false;
-    setPersonsLoading(true);
-    void api
-      .get<PersonOption[]>(`/api/companies/${companyId}/persons`)
-      .then((data) => {
-        if (cancelled) return;
-        const rows = Array.isArray(data) ? data : [];
-        setPersons(rows);
-        const fromUrl = searchParams.get("personId");
-        if (fromUrl && rows.some((p) => p.id === fromUrl)) {
-          setSelectedPersonId(fromUrl);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setPersons([]);
-      })
-      .finally(() => {
-        if (!cancelled) setPersonsLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [companyId, step, searchParams]);
-
-  const selectedPersonFolderId = useMemo(() => {
-    const person = persons.find((p) => p.id === selectedPersonId);
-    return person?.root_folder_id ?? null;
-  }, [persons, selectedPersonId]);
-
-  const fetchPresets = useCallback(async () => {
-    if (!companyId) return;
-    setPresetsLoading(true);
-    try {
-      const data = await api.get<{ presets: SplitPdfPreset[] }>(
-        `/api/companies/${companyId}/documents/split-pdf-presets`,
-      );
-      setPresets(Array.isArray(data?.presets) ? data.presets : []);
-    } catch {
-      setPresets([]);
-    } finally {
-      setPresetsLoading(false);
-    }
-  }, [companyId]);
-
-  useEffect(() => {
-    if (!companyId || step !== "configure") return;
-    void fetchPresets();
-  }, [companyId, step, fetchPresets]);
-
-  const applyPresetById = (presetId: string) => {
-    const preset = presets.find((p) => p.id === presetId);
-    if (!preset) return;
-    const validKeySet = new Set(companyMetadataKeys.map((k) => k.id));
-    const validIds = preset.metadataKeyIds.filter((id) => validKeySet.has(id));
-    const missingCount = preset.metadataKeyIds.length - validIds.length;
-    setSelectedMetadataKeyIds(validIds);
-    setNamingInstructions(preset.namingInstructions);
-    setSelectedPresetId(preset.id);
-    setPresetName(preset.name);
-    if (missingCount > 0) {
-      toast({
-        title: String(t("splitPdf.presetAppliedWithMissingKeysTitle")),
-        description: String(
-          t("splitPdf.presetAppliedWithMissingKeysDescription", {
-            count: String(missingCount),
-          }),
-        ),
-        variant: "destructive",
-      });
-    } else {
-      toast({ title: String(t("splitPdf.presetApplied")) });
-    }
-  };
-
-  const resetPresetEditor = () => {
-    setSelectedPresetId("");
-    setPresetName("");
-  };
-
-  const handleCreatePreset = async () => {
-    if (!companyId || !canManagePresets || presetBusy) return;
-    if (!presetName.trim()) {
-      toast({
-        title: String(t("splitPdf.error")),
-        description: String(t("splitPdf.presetNameRequired")),
-        variant: "destructive",
-      });
-      return;
-    }
-    if (selectedMetadataKeyIds.length === 0 || !namingInstructions.trim()) {
-      toast({
-        title: String(t("splitPdf.error")),
-        description: String(t("splitPdf.presetConfigRequired")),
-        variant: "destructive",
-      });
-      return;
-    }
-    setPresetBusy(true);
-    try {
-      const created = await api.post<SplitPdfPreset>(`/api/companies/${companyId}/documents/split-pdf-presets`, {
-        name: presetName.trim(),
-        namingInstructions: namingInstructions.trim(),
-        metadataKeyIds: selectedMetadataKeyIds,
-      });
-      await fetchPresets();
-      setSelectedPresetId(created.id);
-      toast({ title: String(t("splitPdf.presetCreated")) });
-    } catch (e) {
-      toast({
-        title: String(t("splitPdf.error")),
-        description: e instanceof Error ? e.message : String(t("splitPdf.presetSaveFailed")),
-        variant: "destructive",
-      });
-    } finally {
-      setPresetBusy(false);
-    }
-  };
-
-  const handleUpdatePreset = async () => {
-    if (!companyId || !canManagePresets || presetBusy || !selectedPresetId) return;
-    if (!presetName.trim()) {
-      toast({
-        title: String(t("splitPdf.error")),
-        description: String(t("splitPdf.presetNameRequired")),
-        variant: "destructive",
-      });
-      return;
-    }
-    if (selectedMetadataKeyIds.length === 0 || !namingInstructions.trim()) {
-      toast({
-        title: String(t("splitPdf.error")),
-        description: String(t("splitPdf.presetConfigRequired")),
-        variant: "destructive",
-      });
-      return;
-    }
-    setPresetBusy(true);
-    try {
-      await api.patch<SplitPdfPreset>(
-        `/api/companies/${companyId}/documents/split-pdf-presets/${selectedPresetId}`,
-        {
-          name: presetName.trim(),
-          namingInstructions: namingInstructions.trim(),
-          metadataKeyIds: selectedMetadataKeyIds,
-        },
-      );
-      await fetchPresets();
-      toast({ title: String(t("splitPdf.presetUpdated")) });
-    } catch (e) {
-      toast({
-        title: String(t("splitPdf.error")),
-        description: e instanceof Error ? e.message : String(t("splitPdf.presetSaveFailed")),
-        variant: "destructive",
-      });
-    } finally {
-      setPresetBusy(false);
-    }
-  };
-
-  const handleDeletePreset = async () => {
-    if (!companyId || !canManagePresets || presetBusy || !selectedPresetId) return;
-    if (!window.confirm(String(t("splitPdf.presetDeleteConfirm")))) return;
-    setPresetBusy(true);
-    try {
-      await api.delete(`/api/companies/${companyId}/documents/split-pdf-presets/${selectedPresetId}`);
-      await fetchPresets();
-      resetPresetEditor();
-      toast({ title: String(t("splitPdf.presetDeleted")) });
-    } catch (e) {
-      toast({
-        title: String(t("splitPdf.error")),
-        description: e instanceof Error ? e.message : String(t("splitPdf.presetDeleteFailed")),
-        variant: "destructive",
-      });
-    } finally {
-      setPresetBusy(false);
-    }
-  };
-
-  const toggleMetadataKey = (id: string, checked: boolean) => {
-    setSelectedMetadataKeyIds((prev) => {
-      if (checked) return prev.includes(id) ? prev : [...prev, id];
-      return prev.filter((x) => x !== id);
-    });
-  };
 
   const handleRemoveSegment = (index: number) => {
     setSegments((prev) => removeSegmentAt(prev, index));
@@ -630,11 +410,19 @@ export default function SplitPdfPage() {
     };
   }, [step, fileId]);
 
-  const handleUploadAndOcr = async () => {
+  /**
+   * Full automatic pipeline (replaces the old upload → OCR → manual Configure → propose).
+   * Upload → OCR → load all metadata keys + naming instructions + person folder → propose → Review.
+   * Progress messages are shown via `loadingStage`.
+   */
+  const handleStart = async () => {
     if (!localFile || !companyId) return;
     setBusy(true);
     setOcrError(null);
+    setStep("processing");
     try {
+      // 1. Upload (with OCR requested)
+      setLoadingStage(String(t("splitPdf.stageUploading")));
       const formData = new FormData();
       formData.append("file", localFile);
       formData.append("ocr", "true");
@@ -645,46 +433,53 @@ export default function SplitPdfPage() {
       const firstId = result.files?.[0]?.id;
       if (!firstId) throw new Error("Upload failed");
       setFileId(firstId);
-      setStep("ocr");
-      await pollOcrUntilDone(firstId, { timeoutMessage: String(t("splitPdf.ocrTimeout")) });
-      setStep("configure");
-      toast({ title: String(t("splitPdf.ocrDone")) });
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : "Upload or OCR failed";
-      setOcrError(msg);
-      toast({ title: String(t("splitPdf.error")), description: msg, variant: "destructive" });
-      setStep("pick");
-    } finally {
-      setBusy(false);
-    }
-  };
 
-  const handlePropose = async () => {
-    if (!fileId || !companyId) return;
-    if (selectedMetadataKeyIds.length === 0) {
-      toast({
-        title: String(t("splitPdf.error")),
-        description: String(t("splitPdf.metadataKeysRequired")),
-        variant: "destructive",
-      });
-      return;
-    }
-    if (!namingInstructions.trim()) {
-      toast({
-        title: String(t("splitPdf.error")),
-        description: String(t("splitPdf.namingRequired")),
-        variant: "destructive",
-      });
-      return;
-    }
-    setBusy(true);
-    try {
+      // 2. OCR
+      setLoadingStage(String(t("splitPdf.stageOcr")));
+      await pollOcrUntilDone(firstId, { timeoutMessage: String(t("splitPdf.ocrTimeout")) });
+
+      // 3. Load config: all company metadata keys, naming instructions (from document types), person folder
+      setLoadingStage(String(t("splitPdf.stageLoadingConfig")));
+      const personId = searchParams.get("personId");
+      const [keys, presetData, personsList] = await Promise.all([
+        api.get<CompanyMetadataKeyRow[]>(
+          `/api/companies/${companyId}/files-metadata-keys?includeSystemManaged=true`,
+        ),
+        api
+          .get<{ presets: SplitPdfPreset[] }>(`/api/companies/${companyId}/documents/split-pdf-presets`)
+          .catch(() => ({ presets: [] as SplitPdfPreset[] })),
+        personId
+          ? api.get<PersonOption[]>(`/api/companies/${companyId}/persons`).catch(() => [] as PersonOption[])
+          : Promise.resolve([] as PersonOption[]),
+      ]);
+
+      const allKeys = Array.isArray(keys) ? keys : [];
+      setCompanyMetadataKeys(allKeys);
+      const allKeyIds = allKeys.map((k) => k.id);
+      setSelectedMetadataKeyIds(allKeyIds);
+      if (allKeyIds.length === 0) {
+        throw new Error(String(t("splitPdf.metadataKeysEmpty")));
+      }
+
+      // Naming instructions come from the document types (uniform across types).
+      const presetList = Array.isArray(presetData?.presets) ? presetData.presets : [];
+      const sortedPresets = [...presetList].sort((a, b) => a.name.localeCompare(b.name));
+      const naming = sortedPresets[0]?.namingInstructions?.trim() || DEFAULT_NAMING_INSTRUCTIONS;
+      setNamingInstructions(naming);
+
+      // Person folder strictly from URL context
+      const personRow = personId ? personsList.find((p) => p.id === personId) : undefined;
+      const folderId = personRow?.root_folder_id ?? null;
+      setPersonFolderId(folderId);
+
+      // 4. Propose split with AI
+      setLoadingStage(String(t("splitPdf.stageProposing")));
       const res = await api.post<{ segments: SplitPdfSegment[]; pageCount?: number }>(
         `/api/companies/${companyId}/documents/split-pdf/propose`,
         {
-          fileId,
-          metadataKeyIds: selectedMetadataKeyIds,
-          namingInstructions: namingInstructions.trim(),
+          fileId: firstId,
+          metadataKeyIds: allKeyIds,
+          namingInstructions: naming,
         },
       );
       setSegments(sortSegments(res.segments));
@@ -696,13 +491,14 @@ export default function SplitPdfPage() {
       setExpandedPage(null);
       setStep("review");
     } catch (e) {
-      toast({
-        title: String(t("splitPdf.proposeFailed")),
-        description: e instanceof Error ? e.message : undefined,
-        variant: "destructive",
-      });
+      const msg = e instanceof Error ? e.message : "Processing failed";
+      setOcrError(msg);
+      toast({ title: String(t("splitPdf.error")), description: msg, variant: "destructive" });
+      setStep("pick");
+      setFileId(null);
     } finally {
       setBusy(false);
+      setLoadingStage("");
     }
   };
 
@@ -741,7 +537,7 @@ export default function SplitPdfPage() {
           segments: normalized.segments,
           keepOriginalFile,
           ocrCreatedFiles,
-          ...(selectedPersonFolderId ? { folderId: selectedPersonFolderId } : {}),
+          ...(personFolderId ? { folderId: personFolderId } : {}),
         },
       );
       const ocrNote =
@@ -836,217 +632,19 @@ export default function SplitPdfPage() {
               <Button variant="outline" onClick={goBackToDocuments} disabled={busy}>
                 {String(t("splitPdf.cancel"))}
               </Button>
-              <Button onClick={handleUploadAndOcr} disabled={!localFile || busy}>
+              <Button onClick={handleStart} disabled={!localFile || busy}>
                 {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : String(t("splitPdf.continue"))}
               </Button>
             </div>
           </div>
         )}
 
-        {step === "ocr" && (
+        {step === "processing" && (
           <div className="flex flex-col items-center justify-center py-16 gap-4 flex-1">
             <Loader2 className="h-12 w-12 animate-spin text-primary" />
-            <p className="text-sm text-muted-foreground">{String(t("splitPdf.runningOcr"))}</p>
-          </div>
-        )}
-
-        {step === "configure" && (
-          <div className="space-y-6 max-w-3xl flex-1 flex flex-col">
-            <div>
-              <Label>{String(t("splitPdf.personLabel"))}</Label>
-              <p className="text-sm text-muted-foreground mt-1">{String(t("splitPdf.personHint"))}</p>
-              {personsLoading ? (
-                <p className="text-sm text-muted-foreground mt-2 flex items-center gap-2">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  {String(t("splitPdf.personsLoading"))}
-                </p>
-              ) : (
-                <select
-                  value={selectedPersonId}
-                  onChange={(e) => setSelectedPersonId(e.target.value)}
-                  className="mt-2 h-10 w-full rounded-md border bg-background px-3 text-sm"
-                  disabled={busy || persons.length === 0}
-                >
-                  <option value="">{String(t("splitPdf.personSelectPlaceholder"))}</option>
-                  {persons.map((person) => (
-                    <option key={person.id} value={person.id}>
-                      {person.full_name}
-                    </option>
-                  ))}
-                </select>
-              )}
-            </div>
-            <div>
-              <Label>{String(t("splitPdf.presetsLabel"))}</Label>
-              <p className="text-sm text-muted-foreground mt-1">{String(t("splitPdf.presetsHint"))}</p>
-              {presetsLoading && (
-                <p className="text-sm text-muted-foreground mt-2 flex items-center gap-2">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  {String(t("splitPdf.presetsLoading"))}
-                </p>
-              )}
-              {!presetsLoading && (
-                <div className="mt-3 space-y-3 rounded-lg border bg-muted/20 p-3">
-                  <div className="flex flex-wrap gap-2">
-                    <select
-                      value={selectedPresetId}
-                      onChange={(e) => {
-                        const nextId = e.target.value;
-                        setSelectedPresetId(nextId);
-                        const selected = presets.find((p) => p.id === nextId);
-                        setPresetName(selected?.name ?? "");
-                      }}
-                      className="h-10 rounded-md border bg-background px-3 text-sm min-w-[14rem] flex-1"
-                      disabled={busy || presets.length === 0}
-                    >
-                      <option value="">{String(t("splitPdf.presetSelectPlaceholder"))}</option>
-                      {presets.map((preset) => (
-                        <option key={preset.id} value={preset.id}>
-                          {preset.name}
-                        </option>
-                      ))}
-                    </select>
-                    <Button
-                      variant="outline"
-                      type="button"
-                      onClick={() => applyPresetById(selectedPresetId)}
-                      disabled={busy || !selectedPresetId}
-                    >
-                      {String(t("splitPdf.presetApply"))}
-                    </Button>
-                  </div>
-                  {!presetsLoading && presets.length === 0 && (
-                    <p className="text-xs text-muted-foreground">{String(t("splitPdf.presetsEmpty"))}</p>
-                  )}
-                  {canManagePresets && (
-                    <div className="space-y-2">
-                      <Input
-                        value={presetName}
-                        onChange={(e) => setPresetName(e.target.value)}
-                        placeholder={String(t("splitPdf.presetNamePlaceholder"))}
-                        disabled={busy || presetBusy}
-                      />
-                      <div className="flex flex-wrap gap-2">
-                        <Button
-                          variant="outline"
-                          type="button"
-                          onClick={handleCreatePreset}
-                          disabled={busy || presetBusy}
-                        >
-                          {presetBusy ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
-                            String(t("splitPdf.presetSaveNew"))
-                          )}
-                        </Button>
-                        <Button
-                          variant="outline"
-                          type="button"
-                          onClick={handleUpdatePreset}
-                          disabled={busy || presetBusy || !selectedPresetId}
-                        >
-                          {String(t("splitPdf.presetUpdate"))}
-                        </Button>
-                        <Button
-                          variant="outline"
-                          type="button"
-                          onClick={handleDeletePreset}
-                          disabled={busy || presetBusy || !selectedPresetId}
-                        >
-                          {String(t("splitPdf.presetDelete"))}
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          type="button"
-                          onClick={resetPresetEditor}
-                          disabled={busy || presetBusy}
-                        >
-                          {String(t("splitPdf.presetClearSelection"))}
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-            <div>
-              <Label>{String(t("splitPdf.metadataKeysLabel"))}</Label>
-              <p className="text-sm text-muted-foreground mt-1">{String(t("splitPdf.metadataKeysHint"))}</p>
-              {metadataKeysLoading && (
-                <p className="text-sm text-muted-foreground mt-2 flex items-center gap-2">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  {String(t("splitPdf.metadataKeysLoading"))}
-                </p>
-              )}
-              {!metadataKeysLoading && companyMetadataKeys.length === 0 && (
-                <p className="text-sm text-muted-foreground mt-2">{String(t("splitPdf.metadataKeysEmpty"))}</p>
-              )}
-              {!metadataKeysLoading && companyMetadataKeys.length > 0 && (
-                <div className="mt-3 space-y-2 rounded-lg border bg-muted/20 p-3 max-h-[min(280px,50vh)] overflow-y-auto">
-                  {companyMetadataKeys.map((k) => {
-                    const label = (k.name && k.name.trim()) || String(t("splitPdf.metadataKeyUnnamed"));
-                    const predefined =
-                      k.value_kind === "predefined_list" && Array.isArray(k.allowed_values)
-                        ? (k.allowed_values as unknown[]).filter((x): x is string => typeof x === "string")
-                        : [];
-                    return (
-                      <label
-                        key={k.id}
-                        className="flex cursor-pointer items-start gap-3 rounded-md p-2 hover:bg-muted/40"
-                      >
-                        <Checkbox
-                          checked={selectedMetadataKeyIds.includes(k.id)}
-                          onCheckedChange={(c) => toggleMetadataKey(k.id, c === true)}
-                          className="mt-0.5"
-                        />
-                        <span className="min-w-0 flex-1">
-                          <span className="text-sm font-medium leading-tight block">{label}</span>
-                          {predefined.length > 0 && (
-                            <span className="text-xs text-muted-foreground block mt-0.5">
-                              {String(t("splitPdf.metadataPredefinedOptions"))}: {predefined.join(", ")}
-                            </span>
-                          )}
-                        </span>
-                      </label>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-            <div>
-              <Label>{String(t("splitPdf.namingRules"))}</Label>
-              <Textarea
-                className="mt-1.5 min-h-[160px] font-mono text-sm"
-                placeholder={String(t("splitPdf.namingRulesPlaceholder"))}
-                value={namingInstructions}
-                onChange={(e) => setNamingInstructions(e.target.value)}
-              />
-            </div>
-            <div className="flex flex-wrap gap-2 mt-auto pt-4">
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setStep("pick");
-                  setFileId(null);
-                  setLocalFile(null);
-                  setOcrError(null);
-                }}
-                disabled={busy}
-              >
-                {String(t("splitPdf.back"))}
-              </Button>
-              <Button
-                onClick={handlePropose}
-                disabled={
-                  busy ||
-                  metadataKeysLoading ||
-                  companyMetadataKeys.length === 0 ||
-                  selectedMetadataKeyIds.length === 0
-                }
-              >
-                {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : String(t("splitPdf.suggest"))}
-              </Button>
-            </div>
+            <p className="text-sm text-muted-foreground">
+              {loadingStage || String(t("splitPdf.runningOcr"))}
+            </p>
           </div>
         )}
 
@@ -1118,7 +716,17 @@ export default function SplitPdfPage() {
                   </div>
                 </div>
                 <div className="flex flex-wrap gap-2 shrink-0 min-w-[12rem] sm:ml-auto sm:justify-end">
-                  <Button variant="outline" onClick={() => setStep("configure")} disabled={busy}>
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setStep("pick");
+                      setFileId(null);
+                      setLocalFile(null);
+                      setSegments([]);
+                      setOcrError(null);
+                    }}
+                    disabled={busy}
+                  >
                     {String(t("splitPdf.back"))}
                   </Button>
                   <Button onClick={handleApply} disabled={busy || segments.length === 0}>

@@ -28,7 +28,6 @@ import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { LanguageSelector } from "@/components/LanguageSelector";
 import { useLanguage } from "@/contexts/LanguageContext";
-import { FeedbackDialog } from "@/components/FeedbackDialog";
 import { cn } from "@/lib/utils";
 
 type MenuItem = { titleKey: string; url: string; icon: typeof FolderOpen; permission?: string };
@@ -68,8 +67,8 @@ export function AppSidebar() {
   } = useAuth();
   const location = useLocation();
   const [logoLoadFailed, setLogoLoadFailed] = useState(false);
-  const { theme, setTheme } = useTheme();
-  const isDark = theme === "dark";
+  const { resolvedTheme, setTheme } = useTheme();
+  const isDark = resolvedTheme === "dark";
   const { t, language } = useLanguage();
 
   const isItemActive = (item: MenuItem) => {
@@ -205,7 +204,6 @@ export function AppSidebar() {
       </SidebarContent>
       <SidebarFooter className="border-t p-2">
         <div className="flex items-center justify-center gap-1">
-          <FeedbackDialog isCollapsed />
           <Popover>
             <PopoverTrigger asChild>
               <Button variant="ghost" size="icon" className="h-9 w-9" title={t("sidebar.settings")}>

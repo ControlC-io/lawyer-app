@@ -24,7 +24,8 @@ El tenant de referencia es **ControlC** (`company_id: d2b1b417-7748-43e3-828b-67
 | Eliminado / Simplificado | Motivo |
 |---|---|
 | Tab "API" en Organization Settings | Sin API keys públicas |
-| Lógica "Request a Demo" en `NoOrganization.tsx` | No aplica para uso interno |
+| Lógica "Request a Demo" en `NoOrganization.tsx` y `Auth.tsx` | No aplica para uso interno |
+| Feedback en sidebar (`FeedbackDialog`) y API pública `/feedback`, `/demo-request` | No aplica para uso interno |
 | Páginas/rutas de workflow | Fuera de scope |
 
 ---

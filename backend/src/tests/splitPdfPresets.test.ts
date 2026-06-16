@@ -14,7 +14,12 @@ jest.mock('../lib/prisma', () => ({
       update: jest.fn(),
       deleteMany: jest.fn(),
     },
-    filesMetadataKey: { findMany: jest.fn() },
+    filesMetadataKey: {
+      findMany: jest.fn(),
+      findFirst: jest.fn(),
+      create: jest.fn(),
+      update: jest.fn(),
+    },
   },
 }));
 
@@ -47,6 +52,12 @@ describe('Split PDF Presets endpoints', () => {
         },
       }),
     );
+
+    // Defaults for syncDocumentTypesMetadataKey (runs after preset create/update/delete)
+    (prismaMock.documentSplitPreset.findMany as jest.Mock).mockResolvedValue([]);
+    (prismaMock.filesMetadataKey.findFirst as jest.Mock).mockResolvedValue(null);
+    (prismaMock.filesMetadataKey.create as jest.Mock).mockResolvedValue({ id: 'type-key' });
+    (prismaMock.filesMetadataKey.update as jest.Mock).mockResolvedValue({ id: 'type-key' });
   });
 
   it('lists presets for users with documents.view', async () => {

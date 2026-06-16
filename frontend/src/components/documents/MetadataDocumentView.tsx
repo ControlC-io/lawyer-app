@@ -643,7 +643,9 @@ export default function MetadataDocumentView({
   }, [ocrPolling]);
 
   const fetchMetadataKeys = useCallback(async () => {
-    const data = await api.get<MetadataKey[]>(`/api/companies/${companyId}/files-metadata-keys`);
+    const data = await api.get<MetadataKey[]>(
+      `/api/companies/${companyId}/files-metadata-keys?includeSystemManaged=true`,
+    );
     setMetadataKeys(data || []);
   }, [companyId]);
 
