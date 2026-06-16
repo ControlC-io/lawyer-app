@@ -12,6 +12,7 @@ export function usePdfPageThumbnails(
   pdfUrl: string | null,
   pageCount: number,
   thumbWidth: number = THUMB_WIDTH_DEFAULT,
+  retryKey: number = 0,
 ) {
   const [thumbnails, setThumbnails] = useState<Record<number, string>>({});
   const [loading, setLoading] = useState(false);
@@ -57,8 +58,9 @@ export function usePdfPageThumbnails(
           }
         }
         if (!cancelled) setLoading(false);
-      } catch {
+      } catch (err) {
         if (!cancelled) {
+          console.error("[usePdfPageThumbnails] Failed to load PDF thumbnails:", err, { url: pdfUrl });
           setError(true);
           setLoading(false);
         }
@@ -68,7 +70,7 @@ export function usePdfPageThumbnails(
     return () => {
       cancelled = true;
     };
-  }, [pdfUrl, pageCount, w]);
+  }, [pdfUrl, pageCount, w, retryKey]);
 
   return { thumbnails, loading, error, thumbWidth: w };
 }

@@ -155,7 +155,8 @@
     "darkMode": "Dark Mode",
     "lightMode": "Light Mode",
     "feedback": "Feedback",
-    "settings": "Settings"
+    "settings": "Settings",
+    "processes": "Processes"
   },
   "documents": {
     "title": "Document Management",
@@ -1272,7 +1273,24 @@
     "advancedOptions": "Advanced options",
     "resumeBanner": "You have an unfinished split. Resume?",
     "resume": "Resume",
-    "discard": "Discard"
+    "discard": "Discard",
+    "thumbsLoadError": "Thumbnails could not be loaded.",
+    "thumbsRetry": "Retry"
+  },
+  "processHistory": {
+    "title": "Processes",
+    "description": "History of PDF splits and uploads. Resume unfinished splits.",
+    "statusProcessing": "Processing",
+    "statusReview": "Pending review",
+    "statusCompleted": "Completed",
+    "statusFailed": "Failed",
+    "segmentCount": "{{n}} segment(s)",
+    "pageCount": "{{n}} page(s)",
+    "resume": "Continue",
+    "remove": "Remove",
+    "clearFinished": "Clear completed",
+    "empty": "No processes yet.",
+    "startSplit": "Start a split"
   },
   "metadataDocuments": {
     "treeHideKeyLabels": "Values only in the tree",

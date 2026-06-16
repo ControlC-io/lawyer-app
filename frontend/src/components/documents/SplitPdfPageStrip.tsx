@@ -183,6 +183,7 @@ export default function SplitPdfPageStrip({
   type ThumbPreset = "small" | "medium" | "large";
   const [thumbPreset, setThumbPreset] = useState<ThumbPreset>("medium");
   const [thumbSize, setThumbSize] = useState<number>(THUMB_WIDTH_DEFAULT);
+  const [thumbRetryKey, setThumbRetryKey] = useState(0);
   const stripRef = useRef<HTMLDivElement | null>(null);
   const [stripWidth, setStripWidth] = useState<number>(0);
 
@@ -217,6 +218,7 @@ export default function SplitPdfPageStrip({
     pdfUrl && totalPages > 0 ? pdfUrl : null,
     pdfUrl && totalPages > 0 ? totalPages : 0,
     thumbSize,
+    thumbRetryKey,
   );
 
   const layoutBlocks = useMemo(
@@ -375,6 +377,21 @@ export default function SplitPdfPageStrip({
               </ToggleGroupItem>
             </ToggleGroup>
             {thumbsLoading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground shrink-0" />}
+            {thumbsError && pdfUrl && (
+              <div className="flex items-center gap-2 text-xs text-destructive shrink-0">
+                <span>{String(t("splitPdf.thumbsLoadError"))}</span>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 px-2 text-xs"
+                  onClick={() => setThumbRetryKey((k) => k + 1)}
+                >
+                  <RotateCcw className="h-3 w-3 mr-1" />
+                  {String(t("splitPdf.thumbsRetry"))}
+                </Button>
+              </div>
+            )}
           </div>
         </div>
       )}

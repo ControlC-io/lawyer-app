@@ -109,7 +109,7 @@ function parseMetadataObject(
   }
   for (const k of Object.keys(parsed)) {
     if (!allowed.has(k)) {
-      throw new Error(`Unknown metadata key in segment: ${k}`);
+      continue;
     }
   }
   return normalized;

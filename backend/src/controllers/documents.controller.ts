@@ -1557,7 +1557,7 @@ export const documentsController = {
       if (!seg.metadata) continue;
       for (const keyId of Object.keys(seg.metadata)) {
         const row = keysById.get(keyId);
-        if (!row) return res.status(400).json({ error: `Unknown metadata key in segment: ${keyId}` });
+        if (!row) { delete seg.metadata![keyId]; continue; }
         const raw = seg.metadata[keyId];
         const val = typeof raw === 'string' ? raw.trim() : String(raw).trim();
         if (!val) continue;
@@ -1729,9 +1729,7 @@ export const documentsController = {
       if (!seg.metadata) continue;
       for (const keyId of Object.keys(seg.metadata)) {
         const row = companyMetaById.get(keyId);
-        if (!row) {
-          return res.status(400).json({ error: `Unknown metadata key in segment: ${keyId}` });
-        }
+        if (!row) { delete seg.metadata![keyId]; continue; }
         const raw = seg.metadata[keyId];
         const val = typeof raw === 'string' ? raw.trim() : String(raw).trim();
         if (!val) continue;

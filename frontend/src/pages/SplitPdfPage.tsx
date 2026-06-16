@@ -32,6 +32,12 @@ import { useLanguage } from "@/contexts/LanguageContext";
 import { useCompanyId } from "@/hooks/useCompanyId";
 import { usePdfPageLargePreview } from "@/hooks/usePdfPageLargePreview";
 import { pollOcrUntilDone } from "@/lib/ocrPoll";
+import {
+  generateProcessId,
+  upsertProcessRecord,
+  updateProcessRecord,
+  updateProcessRecordByFileId,
+} from "@/lib/processHistory";
 
 export interface SplitPdfSegment {
   name: string;
@@ -298,6 +304,7 @@ export default function SplitPdfPage() {
 
   type SavedReviewState = { fileId: string; segments: SplitPdfSegment[]; totalPages: number; savedAt: number };
   const [savedState, setSavedState] = useState<SavedReviewState | null>(null);
+  const currentProcessIdRef = React.useRef<string | null>(null);
 
   useEffect(() => {
     try {
@@ -470,6 +477,10 @@ export default function SplitPdfPage() {
     setBusy(true);
     setOcrError(null);
     setStep("processing");
+    const processId = generateProcessId();
+    currentProcessIdRef.current = processId;
+    const filename = localFile.name;
+    upsertProcessRecord({ id: processId, fileId: null, type: "split", status: "processing", filename, createdAt: Date.now(), updatedAt: Date.now() });
     try {
       // 1. Try to extract embedded text from the PDF (native/digital PDFs only)
       setLoadingStage(String(t("splitPdf.stageCheckingText")));
@@ -489,6 +500,7 @@ export default function SplitPdfPage() {
       const firstId = result.files?.[0]?.id;
       if (!firstId) throw new Error("Upload failed");
       setFileId(firstId);
+      updateProcessRecord(processId, { fileId: firstId });
 
       // 3. OCR — only for scanned PDFs (skipped when native text was extracted)
       if (!nativeText) {
@@ -541,15 +553,15 @@ export default function SplitPdfPage() {
       const resolvedTotalPages = typeof res.pageCount === "number" && res.pageCount > 0 ? res.pageCount : maxFromSegments;
       setTotalPages(resolvedTotalPages);
       setExpandedPage(null);
-      localStorage.setItem(
-        "split-pdf-review-state",
-        JSON.stringify({ fileId: firstId, segments: matchedSegments, totalPages: resolvedTotalPages, savedAt: Date.now() }),
-      );
+      const reviewStatePayload = { fileId: firstId, segments: matchedSegments, totalPages: resolvedTotalPages, savedAt: Date.now() };
+      localStorage.setItem("split-pdf-review-state", JSON.stringify(reviewStatePayload));
+      updateProcessRecord(processId, { status: "review", reviewState: reviewStatePayload });
       setStep("review");
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Processing failed";
       setOcrError(msg);
       toast({ title: String(t("splitPdf.error")), description: msg, variant: "destructive" });
+      updateProcessRecord(processId, { status: "failed", error: msg });
       setStep("pick");
       setFileId(null);
     } finally {
@@ -608,6 +620,7 @@ export default function SplitPdfPage() {
         toast({ title: String(t("splitPdf.created")) });
       }
       localStorage.removeItem("split-pdf-review-state");
+      if (fileId) updateProcessRecordByFileId(fileId, { status: "completed" });
       navigate("/documents");
     } catch (e) {
       toast({

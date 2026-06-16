@@ -8,7 +8,8 @@ import { useLanguage } from "@/contexts/LanguageContext";
 import MetadataDocumentView from "@/components/documents/MetadataDocumentView";
 import DocumentPermissionRules from "@/components/documents/DocumentPermissionRules";
 import { api } from "@/lib/api";
-import { FileText, Shield } from "lucide-react";
+import { FileText, Shield, Clock } from "lucide-react";
+import ProcessHistory from "@/pages/ProcessHistory";
 
 interface PersonSummary {
   id: string;
@@ -75,6 +76,10 @@ export default function DocumentManagement() {
             <FileText className="h-4 w-4" />
             {String(t("sidebar.documents"))}
           </TabsTrigger>
+          <TabsTrigger value="processes" className="gap-1.5">
+            <Clock className="h-4 w-4" />
+            {String(t("sidebar.processes"))}
+          </TabsTrigger>
           {canManage && (
             <TabsTrigger value="access-rules" className="gap-1.5">
               <Shield className="h-4 w-4" />
@@ -90,6 +95,10 @@ export default function DocumentManagement() {
             defaultFolderId={activePerson?.root_folder_id ?? null}
             personLabel={activePerson?.full_name ?? null}
           />
+        </TabsContent>
+
+        <TabsContent value="processes" className="flex-1 min-h-0 mt-0 overflow-y-auto">
+          <ProcessHistory />
         </TabsContent>
 
         {canManage && (

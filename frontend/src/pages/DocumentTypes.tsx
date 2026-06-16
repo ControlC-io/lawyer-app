@@ -214,11 +214,15 @@ export default function DocumentTypes() {
                   </TableCell>
                   <TableCell className="align-top py-3">
                     <div className="flex flex-wrap gap-1">
-                      {preset.metadataKeyIds.map((keyId) => (
-                        <Badge key={keyId} variant="outline" className="text-xs font-normal">
-                          {keyLabelById.get(keyId) ?? keyId}
-                        </Badge>
-                      ))}
+                      {preset.metadataKeyIds.map((keyId) => {
+                        const label = keyLabelById.get(keyId);
+                        if (label === undefined) return null;
+                        return (
+                          <Badge key={keyId} variant="outline" className="text-xs font-normal">
+                            {label}
+                          </Badge>
+                        );
+                      })}
                     </div>
                   </TableCell>
                   {canManage && (

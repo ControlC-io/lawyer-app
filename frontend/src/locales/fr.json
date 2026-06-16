@@ -154,7 +154,8 @@
     "darkMode": "Mode sombre",
     "lightMode": "Mode clair",
     "feedback": "Retour d'expérience",
-    "settings": "Paramètres"
+    "settings": "Paramètres",
+    "processes": "Processus"
   },
   "documents": {
     "title": "Gestion documentaire",
@@ -1271,7 +1272,24 @@
     "advancedOptions": "Options avancées",
     "resumeBanner": "Vous avez un découpage en cours. Reprendre ?",
     "resume": "Reprendre",
-    "discard": "Ignorer"
+    "discard": "Ignorer",
+    "thumbsLoadError": "Impossible de charger les aperçus.",
+    "thumbsRetry": "Réessayer"
+  },
+  "processHistory": {
+    "title": "Processus",
+    "description": "Historique des découpages PDF et des imports. Reprenez les découpages en attente.",
+    "statusProcessing": "En cours",
+    "statusReview": "En attente de validation",
+    "statusCompleted": "Terminé",
+    "statusFailed": "Échoué",
+    "segmentCount": "{{n}} segment(s)",
+    "pageCount": "{{n}} page(s)",
+    "resume": "Continuer",
+    "remove": "Supprimer",
+    "clearFinished": "Effacer les terminés",
+    "empty": "Aucun processus pour le moment.",
+    "startSplit": "Démarrer un découpage"
   },
   "metadataDocuments": {
     "treeHideKeyLabels": "Valeurs seules dans l’arborescence",
