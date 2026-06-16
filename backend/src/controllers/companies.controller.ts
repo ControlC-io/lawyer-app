@@ -666,7 +666,10 @@ export const companiesController = {
           where: { ...companyFilter(companyId), ...systemKeyFilter },
           orderBy: { name: 'asc' },
         });
-        return res.json(keys);
+        return res.json(keys.map((k) => ({
+          ...k,
+          system_managed: (SYSTEM_MANAGED_KEY_NAMES as readonly string[]).includes(k.name ?? ''),
+        })));
       }
 
       const userGroupIds = userId ? await getUserGroupIdsInCompany(userId, companyId) : [];
@@ -698,7 +701,10 @@ export const companiesController = {
         orderBy: { name: 'asc' },
       });
 
-      return res.json(keys);
+      return res.json(keys.map((k) => ({
+        ...k,
+        system_managed: (SYSTEM_MANAGED_KEY_NAMES as readonly string[]).includes(k.name ?? ''),
+      })));
     } catch (error) {
       console.error('listFilesMetadataKeys error:', error);
       return res.status(500).json({

@@ -33,6 +33,7 @@ interface MetadataKey {
   id: string;
   name: string | null;
   value_kind: "free_text" | "predefined_list";
+  system_managed?: boolean;
 }
 
 interface DocumentType {
@@ -65,6 +66,9 @@ export default function DocumentTypes() {
     }
     return map;
   }, [metadataKeys]);
+
+  const systemManagedKeys = useMemo(() => metadataKeys.filter((k) => k.system_managed), [metadataKeys]);
+  const regularKeys = useMemo(() => metadataKeys.filter((k) => !k.system_managed), [metadataKeys]);
 
   const loadData = async () => {
     if (!companyId) return;
@@ -113,7 +117,7 @@ export default function DocumentTypes() {
 
   const handleSave = async () => {
     if (!companyId || !canManage) return;
-    if (!name.trim() || !instructions.trim() || selectedKeyIds.length === 0) {
+    if (!name.trim() || !instructions.trim()) {
       toast.error(String(t("documentTypes.validationError")));
       return;
     }
@@ -173,14 +177,14 @@ export default function DocumentTypes() {
       </div>
 
       {/* Available metadata fields info */}
-      {metadataKeys.length > 0 && (
+      {regularKeys.length > 0 && (
         <div className="flex items-start gap-3 rounded-lg border bg-muted/30 px-4 py-3">
           <Tag className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
           <div className="flex flex-wrap items-center gap-1.5 text-sm">
             <span className="text-muted-foreground shrink-0">
               {String(t("documentTypes.metadataFieldsTitle"))}:
             </span>
-            {metadataKeys.map((key) => (
+            {regularKeys.map((key) => (
               <Badge key={key.id} variant="secondary" className="text-xs font-normal">
                 {key.name?.trim() || key.id}
               </Badge>
@@ -288,11 +292,17 @@ export default function DocumentTypes() {
             </div>
             <div className="space-y-2">
               <Label>{String(t("documentTypes.fieldsToExtract"))}</Label>
-              {metadataKeys.length === 0 ? (
+              {systemManagedKeys.length > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  <span className="font-medium">{systemManagedKeys.map((k) => k.name).join(", ")}</span>{" "}
+                  {String(t("documentTypes.alwaysExtracted"))}
+                </p>
+              )}
+              {regularKeys.length === 0 ? (
                 <p className="text-sm text-muted-foreground">{String(t("documentTypes.noMetadataKeys"))}</p>
               ) : (
                 <div className="space-y-2 border rounded-md p-3 max-h-56 overflow-y-auto">
-                  {metadataKeys.map((key) => (
+                  {regularKeys.map((key) => (
                     <label key={key.id} className="flex items-center gap-2 text-sm cursor-pointer">
                       <Checkbox
                         checked={selectedKeyIds.includes(key.id)}

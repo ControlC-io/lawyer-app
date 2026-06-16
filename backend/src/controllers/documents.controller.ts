@@ -1,5 +1,7 @@
 import { Response } from 'express';
 import { FilesMetadataValueKind, Prisma } from '@prisma/client';
+
+const SYSTEM_MANAGED_KEY_NAMES = ['Personne', 'Type'] as const;
 import { AuthRequest, ALL_COMPANIES, companyFilter } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 import { getAccessibleFileIds, getAccessibleFileIdsWithLevels, buildVirtualTree, getAllowedMetadataValues, canUserAccessFileByMetadata } from '../lib/documentAccess';
@@ -1385,10 +1387,12 @@ export const documentsController = {
       }
 
       const allKeyIds = [...new Set(dbTypes.flatMap((t) => documentTypeMetadataKeyIdsFromJson(t.metadata_key_ids)))];
-      const dbKeys = await prisma.filesMetadataKey.findMany({
-        where: { company_id: companyId, id: { in: allKeyIds } },
-      });
-      const keysById = new Map(dbKeys.map((k) => [k.id, k]));
+      const [dbKeys, systemKeys] = await Promise.all([
+        prisma.filesMetadataKey.findMany({ where: { company_id: companyId, id: { in: allKeyIds } } }),
+        prisma.filesMetadataKey.findMany({ where: { company_id: companyId, name: { in: [...SYSTEM_MANAGED_KEY_NAMES] } } }),
+      ]);
+      const keysById = new Map([...dbKeys, ...systemKeys].map((k) => [k.id, k]));
+      const systemKeyIds = systemKeys.map((k) => k.id);
 
       const { storageService } = await import('../services/storage.service');
       const bucket = storageService.getDocumentsBucket();
@@ -1401,22 +1405,27 @@ export const documentsController = {
       const { proposeSplitWithGemini, getPdfPageCount } = await import('../services/pdf-split.service');
       const pageCount = await getPdfPageCount(pdfBuffer);
 
-      const documentTypes = dbTypes.map((t) => ({
-        id: t.id,
-        name: t.name,
-        namingInstructions: t.naming_instructions.trim(),
-        metadataKeys: documentTypeMetadataKeyIdsFromJson(t.metadata_key_ids)
-          .map((keyId) => keysById.get(keyId))
-          .filter((k): k is NonNullable<typeof k> => k != null)
-          .map((k) => ({
-            id: k.id,
-            name: k.name,
-            valueKind: (k.value_kind === FilesMetadataValueKind.predefined_list
-              ? 'predefined_list'
-              : 'free_text') as 'free_text' | 'predefined_list',
-            allowedValues: parseAllowedValuesJson(k.allowed_values),
-          })),
-      }));
+      const documentTypes = dbTypes.map((t) => {
+        const typeKeyIds = documentTypeMetadataKeyIdsFromJson(t.metadata_key_ids);
+        const typeKeyIdsSet = new Set(typeKeyIds);
+        const augmentedKeyIds = [...typeKeyIds, ...systemKeyIds.filter((id) => !typeKeyIdsSet.has(id))];
+        return {
+          id: t.id,
+          name: t.name,
+          namingInstructions: t.naming_instructions.trim(),
+          metadataKeys: augmentedKeyIds
+            .map((keyId) => keysById.get(keyId))
+            .filter((k): k is NonNullable<typeof k> => k != null)
+            .map((k) => ({
+              id: k.id,
+              name: k.name,
+              valueKind: (k.value_kind === FilesMetadataValueKind.predefined_list
+                ? 'predefined_list'
+                : 'free_text') as 'free_text' | 'predefined_list',
+              allowedValues: parseAllowedValuesJson(k.allowed_values),
+            })),
+        };
+      });
 
       const segments = await proposeSplitWithGemini({
         ocrMarkdown: file.ocr_markdown,
@@ -1529,27 +1538,34 @@ export const documentsController = {
     }
 
     const allKeyIds = [...new Set(dbTypes.flatMap((t) => documentTypeMetadataKeyIdsFromJson(t.metadata_key_ids)))];
-    const dbKeys = await prisma.filesMetadataKey.findMany({
-      where: { company_id: companyId, id: { in: allKeyIds } },
-    });
-    const keysById = new Map(dbKeys.map((k) => [k.id, k]));
+    const [dbKeys, systemKeys] = await Promise.all([
+      prisma.filesMetadataKey.findMany({ where: { company_id: companyId, id: { in: allKeyIds } } }),
+      prisma.filesMetadataKey.findMany({ where: { company_id: companyId, name: { in: [...SYSTEM_MANAGED_KEY_NAMES] } } }),
+    ]);
+    const keysById = new Map([...dbKeys, ...systemKeys].map((k) => [k.id, k]));
+    const systemKeyIds = systemKeys.map((k) => k.id);
 
-    const documentTypes = dbTypes.map((t) => ({
-      id: t.id,
-      name: t.name,
-      namingInstructions: t.naming_instructions.trim(),
-      metadataKeys: documentTypeMetadataKeyIdsFromJson(t.metadata_key_ids)
-        .map((keyId) => keysById.get(keyId))
-        .filter((k): k is NonNullable<typeof k> => k != null)
-        .map((k) => ({
-          id: k.id,
-          name: k.name,
-          valueKind: (k.value_kind === FilesMetadataValueKind.predefined_list
-            ? 'predefined_list'
-            : 'free_text') as 'free_text' | 'predefined_list',
-          allowedValues: parseAllowedValuesJson(k.allowed_values),
-        })),
-    }));
+    const documentTypes = dbTypes.map((t) => {
+      const typeKeyIds = documentTypeMetadataKeyIdsFromJson(t.metadata_key_ids);
+      const typeKeyIdsSet = new Set(typeKeyIds);
+      const augmentedKeyIds = [...typeKeyIds, ...systemKeyIds.filter((id) => !typeKeyIdsSet.has(id))];
+      return {
+        id: t.id,
+        name: t.name,
+        namingInstructions: t.naming_instructions.trim(),
+        metadataKeys: augmentedKeyIds
+          .map((keyId) => keysById.get(keyId))
+          .filter((k): k is NonNullable<typeof k> => k != null)
+          .map((k) => ({
+            id: k.id,
+            name: k.name,
+            valueKind: (k.value_kind === FilesMetadataValueKind.predefined_list
+              ? 'predefined_list'
+              : 'free_text') as 'free_text' | 'predefined_list',
+            allowedValues: parseAllowedValuesJson(k.allowed_values),
+          })),
+      };
+    });
 
     const { proposeSplitWithGemini, getPdfPageCount, validateSegments, applyPdfSplit } = await import(
       '../services/pdf-split.service'

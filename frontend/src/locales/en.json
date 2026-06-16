@@ -220,7 +220,8 @@
     "name": "Type name",
     "instructions": "Renaming instructions",
     "fieldsToExtract": "Fields to extract",
-    "validationError": "Name, instructions, and at least one field are required."
+    "alwaysExtracted": "are always extracted automatically",
+    "validationError": "Name and instructions are required."
   },
   "superAdmin": {
     "archivedRecords": {

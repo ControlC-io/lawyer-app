@@ -219,7 +219,8 @@
     "name": "Nom du type",
     "instructions": "Instructions de nommage",
     "fieldsToExtract": "Champs à extraire",
-    "validationError": "Le nom, les instructions et au moins un champ sont requis."
+    "alwaysExtracted": "sont toujours extraits automatiquement",
+    "validationError": "Le nom et les instructions sont requis."
   },
   "superAdmin": {
     "archivedRecords": {
