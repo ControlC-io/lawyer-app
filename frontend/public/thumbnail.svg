@@ -1,0 +1,65 @@
+<svg width="1200" height="630" viewBox="0 0 1200 630" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <pattern id="grid" width="48" height="48" patternUnits="userSpaceOnUse">
+      <path d="M 48 0 L 0 0 0 48" fill="none" stroke="#1C3766" stroke-width="0.8"/>
+    </pattern>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#2756D6" stop-opacity="0.15"/>
+      <stop offset="100%" stop-color="#0F1E4A" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1200" height="630" fill="#0F1E4A"/>
+  <!-- Subtle grid -->
+  <rect width="1200" height="630" fill="url(#grid)"/>
+  <!-- Radial glow center -->
+  <rect width="1200" height="630" fill="url(#glow)"/>
+
+  <!-- Gold accent line top -->
+  <line x1="0" y1="4" x2="1200" y2="4" stroke="#C9911A" stroke-width="4"/>
+  <!-- Gold accent line bottom -->
+  <line x1="0" y1="626" x2="1200" y2="626" stroke="#C9911A" stroke-width="4"/>
+
+  <!-- Icon — scales, centered, large -->
+  <!-- Central pillar -->
+  <line x1="600" y1="158" x2="600" y2="338" stroke="white" stroke-width="10" stroke-linecap="round"/>
+  <!-- Base -->
+  <line x1="560" y1="338" x2="640" y2="338" stroke="white" stroke-width="10" stroke-linecap="round"/>
+  <!-- Balance beam -->
+  <line x1="460" y1="220" x2="740" y2="220" stroke="white" stroke-width="10" stroke-linecap="round"/>
+  <!-- Pivot gem -->
+  <circle cx="600" cy="155" r="16" fill="#C9911A"/>
+  <!-- Left chain -->
+  <line x1="472" y1="220" x2="472" y2="278" stroke="white" stroke-width="7" stroke-linecap="round"/>
+  <!-- Right chain -->
+  <line x1="728" y1="220" x2="728" y2="278" stroke="white" stroke-width="7" stroke-linecap="round"/>
+  <!-- Left pan arc -->
+  <path d="M436 278 Q472 312 508 278" stroke="#C9911A" stroke-width="9" fill="none" stroke-linecap="round"/>
+  <!-- Right pan arc -->
+  <path d="M692 278 Q728 312 764 278" stroke="#C9911A" stroke-width="9" fill="none" stroke-linecap="round"/>
+
+  <!-- Brand name -->
+  <text
+    x="600" y="422"
+    font-family="system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif"
+    font-size="88"
+    font-weight="700"
+    fill="white"
+    text-anchor="middle"
+    letter-spacing="12"
+  >LEXORA</text>
+
+  <!-- Gold separator line -->
+  <line x1="500" y1="448" x2="700" y2="448" stroke="#C9911A" stroke-width="2"/>
+
+  <!-- Tagline line 1 -->
+  <text
+    x="600" y="484"
+    font-family="system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif"
+    font-size="22"
+    fill="#94A3B8"
+    text-anchor="middle"
+    letter-spacing="1"
+  >Ton legal-tech moderne · alliant crédibilité juridique, clarté et organisation</text>
+</svg>

@@ -1,7 +1,7 @@
 {
-  "name": "dossier",
+  "name": "lexora",
   "version": "1.0.0",
-  "description": "Dossier — document management vertical",
+  "description": "Lexora — Ton legal-tech moderne, alliant crédibilité juridique, clarté et organisation",
   "private": true,
   "workspaces": [
     "frontend",

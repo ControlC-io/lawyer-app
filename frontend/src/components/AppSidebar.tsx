@@ -29,7 +29,7 @@ import { Label } from "@/components/ui/label";
 import { LanguageSelector } from "@/components/LanguageSelector";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { cn } from "@/lib/utils";
-import { DossierLogo } from "@/components/DossierLogo";
+import { LexoraLogo } from "@/components/LexoraLogo";
 
 type MenuItem = { titleKey: string; url: string; icon: typeof FolderOpen; permission?: string };
 
@@ -86,7 +86,7 @@ export function AppSidebar() {
     companyBranding?.companyId === selectedCompanyId &&
     companyBranding.name
       ? companyBranding.name
-      : "Dossier";
+      : "Lexora";
   const brandSubtitle = shouldUseFallbackLogo ? t("sidebar.brandTagline") : null;
 
   const handleLogoError = () => {
@@ -111,7 +111,7 @@ export function AppSidebar() {
           title={brandTitle}
         >
           {shouldUseFallbackLogo ? (
-            <DossierLogo className={cn(isExpanded ? "h-8 w-8" : "h-6 w-6")} />
+            <LexoraLogo className={cn(isExpanded ? "h-8 w-8" : "h-6 w-6")} />
           ) : (
             <img
               src={customLogoSrc}

@@ -1,0 +1,142 @@
+# Docker Compose for Coolify deployment (2 GB RAM server).
+#
+# Key differences from docker-compose.yml:
+#   - Backend: runs compiled JS (node dist/index.js), not ts-node
+#   - Frontend: nginx:alpine serving static build, not Vite dev server (~390 MB saved)
+#   - MinIO: official image, not compiled from Go source
+#   - No source-code volume mounts
+#   - Memory limits on every service (prevents one OOM from killing all)
+#   - Postgres tuned for low memory
+#   - SSL is handled by Coolify/Traefik upstream; nginx here is HTTP only
+#
+# Usage in Coolify: point to this file as the compose file.
+# Set all required environment variables in the Coolify service settings.
+
+services:
+  nginx:
+    image: nginx:alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./infrastructure/nginx/nginx.coolify.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - frontend
+      - backend
+    networks:
+      - app-network
+    deploy:
+      resources:
+        limits:
+          memory: 32M
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - backend
+    networks:
+      - app-network
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    environment:
+      - PORT=${PORT:-3001}
+      - NODE_ENV=production
+      - DATABASE_URL=${DATABASE_URL}
+      - MINIO_ENDPOINT=${MINIO_ENDPOINT:-minio}
+      - MINIO_PORT=${MINIO_PORT:-9000}
+      - MINIO_USE_SSL=${MINIO_USE_SSL:-false}
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin}
+      - MINIO_BUCKET_NAME=${MINIO_BUCKET_NAME:-dossier-app}
+      - JWT_SECRET=${JWT_SECRET}
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY:-}
+      - SUPER_ADMIN_API_KEY=${SUPER_ADMIN_API_KEY:-}
+      - ENABLE_PUBLIC_SIGNUP=${ENABLE_PUBLIC_SIGNUP:-}
+      - SENDGRID_API_KEY=${SENDGRID_API_KEY:-}
+      - FROM_EMAIL=${FROM_EMAIL:-}
+      - APP_URL=${APP_URL:-}
+      - BACKEND_URL=${BACKEND_URL:-}
+      - OCR_PROVIDER=${OCR_PROVIDER:-mistral}
+      - OCR_API_KEY=${OCR_API_KEY:-}
+      - OCR_MODEL=${OCR_MODEL:-mistral-ocr-latest}
+      - OCR_API_URL=${OCR_API_URL:-https://api.mistral.ai/v1/ocr}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.0-flash}
+      # Cap V8 heap so Node stays within the container memory limit
+      - NODE_OPTIONS=--max-old-space-size=300
+    depends_on:
+      db:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    networks:
+      - app-network
+    deploy:
+      resources:
+        limits:
+          memory: 384M
+
+  db:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - POSTGRES_DB=${POSTGRES_DB:-dossier_app_db}
+    # Tune for 256 MB limit: small shared_buffers, low work_mem, capped connections
+    command: >
+      postgres
+        -c shared_buffers=64MB
+        -c effective_cache_size=128MB
+        -c work_mem=4MB
+        -c maintenance_work_mem=32MB
+        -c max_connections=30
+        -c wal_buffers=4MB
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-dossier_app_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - app-network
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: server /data --console-address :9001
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ACCESS_KEY:-minioadmin}
+      - MINIO_ROOT_PASSWORD=${MINIO_SECRET_KEY:-minioadmin}
+    volumes:
+      - minio_data:/data
+    networks:
+      - app-network
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  minio_data:

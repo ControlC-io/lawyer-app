@@ -1,4 +1,4 @@
-# Dossier — Document Management Platform
+# Lexora — Legal Document Management Platform
 
 A document management platform for legal administration, derived from [Floowly](https://github.com/ControlC-io/floowly). Focused on OCR, PDF splitting, metadata extraction, and person-centric document folders.
 
@@ -32,7 +32,7 @@ docker-compose exec backend npm run migrate:deploy
 ## Project Structure
 
 ```
-dossier/
+lexora/
 ├── backend/          # Express API, Prisma, OCR/split services
 ├── frontend/         # React app
 ├── shared/           # Shared types

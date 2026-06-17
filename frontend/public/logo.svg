@@ -1,0 +1,18 @@
+<svg width="200" height="200" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+  <!-- Central pillar -->
+  <line x1="100" y1="32" x2="100" y2="172" stroke="#1C3766" stroke-width="7" stroke-linecap="round"/>
+  <!-- Base -->
+  <line x1="68" y1="172" x2="132" y2="172" stroke="#1C3766" stroke-width="7" stroke-linecap="round"/>
+  <!-- Balance beam -->
+  <line x1="32" y1="78" x2="168" y2="78" stroke="#1C3766" stroke-width="7" stroke-linecap="round"/>
+  <!-- Pivot gem -->
+  <circle cx="100" cy="30" r="10" fill="#C9911A"/>
+  <!-- Left chain -->
+  <line x1="38" y1="78" x2="38" y2="118" stroke="#1C3766" stroke-width="4.5" stroke-linecap="round"/>
+  <!-- Right chain -->
+  <line x1="162" y1="78" x2="162" y2="118" stroke="#1C3766" stroke-width="4.5" stroke-linecap="round"/>
+  <!-- Left pan arc -->
+  <path d="M14 118 Q38 142 62 118" stroke="#C9911A" stroke-width="6" fill="none" stroke-linecap="round"/>
+  <!-- Right pan arc -->
+  <path d="M138 118 Q162 142 186 118" stroke="#C9911A" stroke-width="6" fill="none" stroke-linecap="round"/>
+</svg>

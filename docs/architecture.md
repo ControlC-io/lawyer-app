@@ -1,4 +1,4 @@
-# Dossier Monorepo Documentation
+# Lexora Monorepo Documentation
 
 ## Project Structure
 
@@ -46,7 +46,7 @@ The application will be available at:
 
 ## Database & Migrations
 
-Dossier uses **Prisma** as its ORM and migration management tool.
+Lexora uses **Prisma** as its ORM and migration management tool.
 
 ### Migration Flow
 
@@ -82,7 +82,7 @@ The split PDF feature processes a user-uploaded PDF into separate logical docume
 
 ## File Storage (MinIO)
 
-Dossier uses **MinIO** for S3-compatible object storage to manage file uploads and assets.
+Lexora uses **MinIO** for S3-compatible object storage to manage file uploads and assets.
 
 ## Get file dump through SCP
 

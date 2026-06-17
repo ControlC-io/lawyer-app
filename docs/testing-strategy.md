@@ -1,6 +1,6 @@
 # Testing Strategy
 
-This document describes the testing approach for the Dossier project. Backend and frontend testing are kept separate: each has its own stack, conventions, and location.
+This document describes the testing approach for the Lexora project. Backend and frontend testing are kept separate: each has its own stack, conventions, and location.
 
 ---
 

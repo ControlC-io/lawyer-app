@@ -1,8 +1,8 @@
-# Migración: PicoBello → Dossier
+# Migración: PicoBello → Lexora
 
 ## Contexto
 
-**Dossier** es un fork de **PicoBello** (plataforma genérica de gestión documental con OCR y workflows) recortado y reenfocado exclusivamente en gestión documental para despachos de abogados.
+**Lexora** es un fork de **PicoBello** (plataforma genérica de gestión documental con OCR y workflows) recortado y reenfocado exclusivamente en gestión documental para despachos de abogados.
 
 El tenant de referencia es **ControlC** (`company_id: d2b1b417-7748-43e3-828b-678f572f488b`).
 

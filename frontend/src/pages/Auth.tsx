@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
-import { DossierLogo } from "@/components/DossierLogo";
+import { LexoraLogo } from "@/components/LexoraLogo";
 import { useLanguage } from "@/contexts/LanguageContext";
 
 const Auth = () => {
@@ -87,7 +87,7 @@ const Auth = () => {
       <Card className="w-full max-w-md">
         <CardHeader>
           <div className="flex justify-center mb-4">
-            <DossierLogo className="h-14 w-14" />
+            <LexoraLogo className="h-14 w-14" />
           </div>
           <CardTitle className="text-center">{mode === "signin" ? t("auth.signIn") : t("auth.signUp")}</CardTitle>
           <CardDescription className="text-center">
