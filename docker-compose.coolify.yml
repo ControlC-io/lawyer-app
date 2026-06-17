@@ -14,12 +14,12 @@
 
 services:
   nginx:
-    image: nginx:alpine
+    build:
+      context: .
+      dockerfile: infrastructure/nginx/Dockerfile
     restart: unless-stopped
     ports:
       - "80:80"
-    volumes:
-      - ./infrastructure/nginx/nginx.coolify.conf:/etc/nginx/nginx.conf:ro
     depends_on:
       - frontend
       - backend
