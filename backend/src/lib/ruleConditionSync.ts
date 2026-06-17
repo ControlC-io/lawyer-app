@@ -13,7 +13,7 @@ interface Condition {
 
 function parseConditions(raw: Prisma.JsonValue): Condition[] {
   if (!Array.isArray(raw)) return [];
-  return raw.filter(
+  return (raw as unknown[]).filter(
     (c): c is Condition =>
       c != null &&
       typeof c === 'object' &&
@@ -56,7 +56,7 @@ export async function cascadeRuleConditionsOnValueRename(
     );
     await client.documentPermissionRule.update({
       where: { id: rule.id },
-      data: { conditions: updated as Prisma.InputJsonValue },
+      data: { conditions: updated as unknown as Prisma.InputJsonValue },
     });
   }
 }
@@ -99,7 +99,7 @@ export async function cascadeRuleConditionsOnValueDelete(
     } else {
       await client.documentPermissionRule.update({
         where: { id: rule.id },
-        data: { conditions: remaining as Prisma.InputJsonValue },
+        data: { conditions: remaining as unknown as Prisma.InputJsonValue },
       });
     }
   }
