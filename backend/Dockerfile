@@ -11,7 +11,7 @@ COPY package*.json ./
 COPY backend/package*.json ./backend/
 COPY shared/package*.json ./shared/
 COPY frontend/package*.json ./frontend/
-RUN --mount=type=cache,target=/root/.npm npm install
+RUN --mount=type=cache,id=npm-backend,target=/root/.npm npm install
 COPY . .
 RUN npm run build -w shared
 RUN npm run build -w backend

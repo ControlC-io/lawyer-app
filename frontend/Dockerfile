@@ -9,7 +9,7 @@ COPY frontend/package*.json ./frontend/
 COPY shared/package*.json ./shared/
 COPY backend/package*.json ./backend/
 # Workaround: lockfile from host platform can block linux-arm64-musl Rollup binary
-RUN --mount=type=cache,target=/root/.npm \
+RUN --mount=type=cache,id=npm-frontend,target=/root/.npm \
     rm -f package-lock.json && \
     npm install
 COPY . .
