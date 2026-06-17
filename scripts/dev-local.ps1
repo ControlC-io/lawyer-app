@@ -44,8 +44,8 @@ Write-Host "Starting backend on :3001..."
 $backendJob = Start-Process powershell -ArgumentList "-NoExit", "-Command", @"
 `$env:DATABASE_URL='$DB_URL'
 `$env:MINIO_ENDPOINT='127.0.0.1'
-Set-Location '$ROOT\backend'
-& '$NODE' 'C:\nvm4w\nodejs\node_modules\ts-node\dist\bin.js' --transpile-only src/index.ts
+Set-Location '$ROOT'
+& '$NODE' '$NPM_CLI' run dev -w backend
 "@ -PassThru
 
 Start-Sleep -Seconds 3
