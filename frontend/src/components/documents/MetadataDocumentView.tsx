@@ -73,7 +73,7 @@ import remarkGfm from "remark-gfm";
 import { useToast } from "@/hooks/use-toast";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useNavigate } from "react-router-dom";
-import { MetadataValueControl } from "@/components/documents/MetadataValueControl";
+import { MetadataValueControl, parseSystemOptions } from "@/components/documents/MetadataValueControl";
 import { MetadataFreeTextFilterCombobox } from "@/components/documents/MetadataFreeTextFilterCombobox";
 import { Progress } from "@/components/ui/progress";
 import { useDocumentImportJobs } from "@/contexts/DocumentImportJobsContext";
@@ -107,21 +107,36 @@ interface FileType {
     value: string;
     metadata?: { id: string; name: string };
   }>;
+  person?: { id: string; full_name: string } | null;
+  document_type?: { id: string; name: string } | null;
   ocr_status?: string | null;
   ocr_error?: string | null;
   ocr_processed_at?: string | null;
   ocrSnippet?: string;
 }
 
-function getFileMetadataDisplayEntries(file: FileType): Array<{ key: string; value: string }> {
+type MetadataDisplayEntry = { key: string; value: string; system?: boolean };
+
+/**
+ * Tags shown on a document row. System fields (Person, Document Type) are
+ * surfaced first as read-only chips, followed by regular metadata values.
+ */
+function getFileMetadataDisplayEntries(file: FileType): MetadataDisplayEntry[] {
+  const systemEntries: MetadataDisplayEntry[] = [];
+  if (file.person?.full_name?.trim()) {
+    systemEntries.push({ key: "Person", value: file.person.full_name.trim(), system: true });
+  }
+  if (file.document_type?.name?.trim()) {
+    systemEntries.push({ key: "Document Type", value: file.document_type.name.trim(), system: true });
+  }
   const rows = file.metadata_values || [];
-  if (rows.length === 0) return [];
-  return rows
+  const metaEntries = rows
     .map((mv) => ({
       key: (mv.metadata?.name || "").trim(),
       value: mv.value?.trim() || "",
     }))
     .filter((e) => e.value);
+  return [...systemEntries, ...metaEntries];
 }
 
 function splitFileName(fileName: string): { baseName: string; extension: string } {
@@ -155,9 +170,15 @@ interface FileHistoryApiEvent {
 interface MetadataKey {
   id: string;
   name: string;
-  value_kind: "free_text" | "predefined_list";
+  value_kind: "free_text" | "predefined_list" | "system_reference";
   allowed_values?: unknown;
+  /** True for system fields (Person, Document Type) backed by their own tables. */
+  system?: boolean;
 }
+
+/** System reference keys (Person, Document Type) edited via picker, not free text. */
+const SYSTEM_KEY_PERSON = "__person__";
+const SYSTEM_KEY_DOCUMENT_TYPE = "__document_type__";
 
 type FilterRow = {
   key_id: string;
@@ -230,7 +251,7 @@ function FileRowMetadataBadges({
   metadataTagColors,
 }: {
   fileId: string;
-  entries: Array<{ key: string; value: string }>;
+  entries: MetadataDisplayEntry[];
   metadataTagColors: TagColorSet | null;
 }) {
   const entriesRef = useRef(entries);
@@ -254,6 +275,13 @@ function FileRowMetadataBadges({
         borderColor: metadataTagColors.dot,
       }
     : undefined;
+
+  // System chips (Person, Document Type) get a distinct, fixed brand-secondary tint.
+  // Same dimensions as regular chips so width measurement stays valid.
+  const systemBadgeClass =
+    "min-w-0 max-w-[180px] shrink truncate text-[10px] font-normal px-1.5 py-0 h-5 border bg-[hsl(var(--brand-secondary)/0.15)] text-foreground border-[hsl(var(--brand-secondary)/0.45)]";
+  const classFor = (system?: boolean) => (system ? systemBadgeClass : badgeOutlineClass);
+  const styleFor = (system?: boolean) => (system ? undefined : badgeStyle);
 
   const entriesFingerprint = entries.map((e) => `${e.key}\u0000${e.value}`).join("\u0001");
 
@@ -349,8 +377,8 @@ function FileRowMetadataBadges({
             key={`measure-${fileId}-${i}`}
             data-metadata-measure="badge"
             variant="outline"
-            className={badgeOutlineClass}
-            style={badgeStyle}
+            className={classFor(e.system)}
+            style={styleFor(e.system)}
           >
             <span className="min-w-0 max-w-full truncate">{e.value}</span>
           </Badge>
@@ -363,13 +391,13 @@ function FileRowMetadataBadges({
       </div>
       <div ref={containerRef} className="min-w-0 w-full max-w-full" onClick={(e) => e.stopPropagation()}>
         <div className="flex min-w-0 flex-nowrap items-center gap-1 overflow-hidden">
-          {visibleEntries.map(({ key, value }, index) => (
+          {visibleEntries.map(({ key, value, system }, index) => (
             <Tooltip key={`${fileId}-metadata-${index}`}>
               <TooltipTrigger asChild>
                 <Badge
                   variant="outline"
-                  className={badgeOutlineClass}
-                  style={badgeStyle}
+                  className={classFor(system)}
+                  style={styleFor(system)}
                 >
                   <span className="min-w-0 max-w-full truncate">{value}</span>
                 </Badge>
@@ -460,6 +488,7 @@ export default function MetadataDocumentView({
   const [tree, setTree] = useState<TreeNode[]>([]);
   const [keyOrder, setKeyOrder] = useState<Array<{ id: string; name: string }>>([]);
   const [metadataKeys, setMetadataKeys] = useState<MetadataKey[]>([]);
+  const [systemKeys, setSystemKeys] = useState<MetadataKey[]>([]);
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
   const [selectedNodePath, setSelectedNodePath] = useState<Array<{ key: string; value: string; missing?: boolean }>>([]);
   const [filters, setFilters] = useState<Array<{ key_id: string; value?: string; missing?: boolean }>>([]);
@@ -472,6 +501,9 @@ export default function MetadataDocumentView({
   const [configHideKeyLabels, setConfigHideKeyLabels] = useState(false);
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [uploadFiles, setUploadFiles] = useState<File[]>([]);
+  // Document Type selection for the upload dialog ("" = none). Person is derived
+  // from the destination folder (see the existing person selector / uploadFolderId).
+  const [uploadDocTypeId, setUploadDocTypeId] = useState<string>("");
   const [uploadMetadata, setUploadMetadata] = useState<Array<{ key_id: string; value: string }>>([]);
   const [uploadDialogJobId, setUploadDialogJobId] = useState<string | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
@@ -480,6 +512,9 @@ export default function MetadataDocumentView({
   const [isMetadataDialogOpen, setIsMetadataDialogOpen] = useState(false);
   const [editingFile, setEditingFile] = useState<FileType | null>(null);
   const [metadataEntries, setMetadataEntries] = useState<Array<{ key: string; value: string }>>([]);
+  // System-field selections in the metadata editor ("" = none).
+  const [editPersonId, setEditPersonId] = useState<string>("");
+  const [editDocTypeId, setEditDocTypeId] = useState<string>("");
   const [renameDialogOpen, setRenameDialogOpen] = useState(false);
   const [renameTargetFile, setRenameTargetFile] = useState<FileType | null>(null);
   const [renameBaseName, setRenameBaseName] = useState("");
@@ -647,8 +682,18 @@ const { toast } = useToast();
     const data = await api.get<MetadataKey[]>(
       `/api/companies/${companyId}/files-metadata-keys`,
     );
-    setMetadataKeys(data || []);
+    const all = data || [];
+    // System fields (Person, Document Type) are kept separate from user-defined
+    // metadata keys: only display/filter/tree surfaces merge them in; AI-extraction
+    // and free-text authoring surfaces keep using regular keys only.
+    setSystemKeys(all.filter((k) => k.system));
+    setMetadataKeys(all.filter((k) => !k.system));
   }, [companyId]);
+
+  // Person + Document Type, merged in only where references should be shown.
+  const filterableKeys = useMemo(() => [...systemKeys, ...metadataKeys], [systemKeys, metadataKeys]);
+  const personKey = useMemo(() => systemKeys.find((k) => k.id === SYSTEM_KEY_PERSON), [systemKeys]);
+  const documentTypeKey = useMemo(() => systemKeys.find((k) => k.id === SYSTEM_KEY_DOCUMENT_TYPE), [systemKeys]);
 
   const fetchTree = useCallback(async () => {
     setLoading(true);
@@ -1053,6 +1098,9 @@ const { toast } = useToast();
     if (uploadFolderId) {
       formData.append("folderId", uploadFolderId);
     }
+    if (uploadDocTypeId) {
+      formData.append("documentTypeId", uploadDocTypeId);
+    }
     const wantsExtract =
       ocrAfterUpload && extractMetadataAfterOcr && geminiConfigured && selectedExtractMetadataKeyIds.length > 0;
 
@@ -1064,6 +1112,7 @@ const { toast } = useToast();
       onSuccess: async () => {
         setUploadFiles([]);
         setUploadMetadata([]);
+        setUploadDocTypeId("");
         setOcrAfterUpload(false);
         setExtractMetadataAfterOcr(false);
         setSelectedExtractMetadataKeyIds([]);
@@ -1085,6 +1134,8 @@ const { toast } = useToast();
       value: mv.value,
     }));
     setMetadataEntries(entries.length > 0 ? entries : [{ key: "", value: "" }]);
+    setEditPersonId(file.person?.id ?? "");
+    setEditDocTypeId(file.document_type?.id ?? "");
     setIsMetadataDialogOpen(true);
   };
 
@@ -1093,6 +1144,15 @@ const { toast } = useToast();
     try {
       const entries = metadataEntries.filter((e) => e.key.trim());
       await api.put(`/api/companies/${companyId}/files/${editingFile.id}/metadata`, { entries });
+
+      // Persist system fields (Person, Document Type) if they changed.
+      const systemPatch: { person_id?: string | null; document_type_id?: string | null } = {};
+      if (editPersonId !== (editingFile.person?.id ?? "")) systemPatch.person_id = editPersonId || null;
+      if (editDocTypeId !== (editingFile.document_type?.id ?? "")) systemPatch.document_type_id = editDocTypeId || null;
+      if (Object.keys(systemPatch).length > 0) {
+        await api.patch(`/api/companies/${companyId}/files/${editingFile.id}/system-fields`, systemPatch);
+      }
+
       toast({ title: "Success", description: "Metadata updated" });
       setIsMetadataDialogOpen(false);
       fetchFiles();
@@ -1837,7 +1897,7 @@ const { toast } = useToast();
                   All
                 </button>
                 {selectedNodePath.map((p, i) => {
-                  const keyName = metadataKeys.find((k) => k.id === p.key)?.name || p.key;
+                  const keyName = filterableKeys.find((k) => k.id === p.key)?.name || p.key;
                   return (
                     <span key={i} className="flex items-center gap-1 shrink-0">
                       <ChevronRight className="h-3 w-3 text-muted-foreground" />
@@ -1954,7 +2014,7 @@ const { toast } = useToast();
               {filterRows.map((row, i) => (
                 <div key={i} className="flex items-center gap-1.5">
                   {(() => {
-                    const rowMetaKey = metadataKeys.find((k) => k.id === row.key_id);
+                    const rowMetaKey = filterableKeys.find((k) => k.id === row.key_id);
                     const isFreeText = rowMetaKey?.value_kind === "free_text";
                     return (
                       <>
@@ -1971,7 +2031,7 @@ const { toast } = useToast();
                       <SelectValue placeholder={String(t("documentManagement.selectKey"))} />
                     </SelectTrigger>
                     <SelectContent>
-                      {metadataKeys.map((k) => (
+                      {filterableKeys.map((k) => (
                         <SelectItem key={k.id} value={k.id}>
                           {k.name}
                         </SelectItem>
@@ -2379,11 +2439,12 @@ const { toast } = useToast();
               <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Active fields (drag to reorder)</Label>
               <div className="mt-2 space-y-1">
                 {configKeyOrder.map((keyId, index) => {
-                  const key = metadataKeys.find((k) => k.id === keyId);
+                  const key = filterableKeys.find((k) => k.id === keyId);
+                  const displayName = key?.name ?? keyId;
                   return (
                     <div key={keyId} className="flex items-center gap-2 px-3 py-2 rounded-md border bg-card">
                       <GripVertical className="h-4 w-4 text-muted-foreground" />
-                      <span className="flex-1 text-sm">{key?.name || keyId}</span>
+                      <span className="flex-1 text-sm">{displayName}</span>
                       <div className="flex gap-1">
                         <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => moveKeyUp(index)} disabled={index === 0}>
                           <ChevronRight className="h-3 w-3 -rotate-90" />
@@ -2419,14 +2480,15 @@ const { toast } = useToast();
             <div>
               <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Available keys</Label>
               <div className="mt-2 flex flex-wrap gap-1.5">
-                {metadataKeys
+                {/* System fields (Person, Document Type) first, then regular keys */}
+                {filterableKeys
                   .filter((k) => !configKeyOrder.includes(k.id))
                   .map((key) => (
                     <Button key={key.id} variant="outline" size="sm" className="h-7 text-xs" onClick={() => toggleKeyInConfig(key.id)}>
                       + {key.name}
                     </Button>
                   ))}
-                {metadataKeys.filter((k) => !configKeyOrder.includes(k.id)).length === 0 && (
+                {filterableKeys.filter((k) => !configKeyOrder.includes(k.id)).length === 0 && (
                   <p className="text-xs text-muted-foreground">All keys are in use.</p>
                 )}
               </div>
@@ -2577,6 +2639,23 @@ const { toast } = useToast();
                     clearLabel={String(t("splitPdf.personSelectPlaceholder"))}
                   />
                 )}
+              </div>
+            )}
+
+            {documentTypeKey && (
+              <div className="space-y-1">
+                <Label>{documentTypeKey.name}</Label>
+                <SearchableSelect
+                  options={parseSystemOptions(documentTypeKey.allowed_values).map((o) => ({ value: o.value, label: o.label }))}
+                  value={uploadDocTypeId}
+                  onValueChange={setUploadDocTypeId}
+                  placeholder={String(t("splitPdf.documentTypePlaceholder"))}
+                  searchPlaceholder={String(t("common.search"))}
+                  emptyText={String(t("persons.noResults"))}
+                  disabled={isImportBusy}
+                  allowClear
+                  clearLabel={String(t("splitPdf.documentTypePlaceholder"))}
+                />
               </div>
             )}
 
@@ -2877,6 +2956,39 @@ const { toast } = useToast();
             <DialogDescription>Manage metadata for {editingFile?.name}</DialogDescription>
           </DialogHeader>
           <div className="space-y-3 max-h-[50vh] overflow-auto p-1 -m-1">
+            {/* System fields — Person and Document Type (picker, read-only by text) */}
+            {(personKey || documentTypeKey) && (
+              <div className="grid grid-cols-2 gap-2 rounded-md border bg-[hsl(var(--brand-secondary)/0.07)] p-2">
+                {personKey && (
+                  <div className="space-y-1 min-w-0">
+                    <Label className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">{personKey.name}</Label>
+                    <Select value={editPersonId || "__none__"} onValueChange={(v) => setEditPersonId(v === "__none__" ? "" : v)}>
+                      <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="—" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none__">—</SelectItem>
+                        {parseSystemOptions(personKey.allowed_values).map((o) => (
+                          <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+                {documentTypeKey && (
+                  <div className="space-y-1 min-w-0">
+                    <Label className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">{documentTypeKey.name}</Label>
+                    <Select value={editDocTypeId || "__none__"} onValueChange={(v) => setEditDocTypeId(v === "__none__" ? "" : v)}>
+                      <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="—" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none__">—</SelectItem>
+                        {parseSystemOptions(documentTypeKey.allowed_values).map((o) => (
+                          <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+              </div>
+            )}
             {metadataEntries.map((entry, i) => (
               <div key={i} className="flex gap-2 min-w-0">
                 <Select value={entry.key} onValueChange={(v) => {

@@ -4,6 +4,7 @@ import { FilesMetadataValueKind, Prisma } from '@prisma/client';
 import { AuthRequest, ALL_COMPANIES, companyFilter } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 import { getAccessibleFileIds, getAccessibleFileIdsWithLevels, buildVirtualTree, getAllowedMetadataValues, canUserAccessFileByMetadata } from '../lib/documentAccess';
+import { SYSTEM_METADATA_FIELDS, isSystemFieldId, getSystemFieldDef, resolveSystemFieldLabels } from '../lib/systemMetadataFields';
 import { getUserGroupIdsInCompany } from '../lib/folderAccess';
 import {
   assertMetadataValueAllowed,
@@ -321,6 +322,8 @@ export const documentsController = {
         orderBy: { name: 'asc' },
         include: {
           metadata_values: { include: { metadata: { select: { id: true, name: true } } } },
+          person: { select: { id: true, full_name: true } },
+          document_type: { select: { id: true, name: true } },
         },
       });
       const serialized = files.map((f) => ({
@@ -418,6 +421,8 @@ export const documentsController = {
               metadata_values: {
                 include: { metadata: { select: { id: true, name: true } } },
               },
+              person: { select: { id: true, full_name: true } },
+              document_type: { select: { id: true, name: true } },
             },
           })
         : [];
@@ -463,6 +468,8 @@ export const documentsController = {
         metadata_values: {
           include: { metadata: { select: { id: true, name: true } } },
         },
+        person: { select: { id: true, full_name: true } },
+        document_type: { select: { id: true, name: true } },
       },
     });
 
@@ -633,19 +640,49 @@ export const documentsController = {
 
     const keyIds: string[] = Array.isArray(treeConfig?.key_order) ? (treeConfig.key_order as string[]) : [];
 
-    // Only keep keys that actually appear on accessible files
-    const accessibleKeyIdSet = new Set(metadataRows.map((m) => m.metadata_id));
+    // Split system keys (Person, Document Type, …) from regular metadata keys
+    const regularKeyIds = keyIds.filter((id) => !isSystemFieldId(id));
+    const usedSystemKeyIds = keyIds.filter((id) => isSystemFieldId(id));
 
-    // Resolve key names (filtered to accessible keys only)
-    let keyOrder: Array<{ id: string; name: string }> = [];
-    const filteredKeyIds = keyIds.filter((id) => accessibleKeyIdSet.has(id));
+    // Only keep regular keys that actually appear on accessible files
+    const accessibleKeyIdSet = new Set(metadataRows.map((m) => m.metadata_id));
+    const filteredKeyIds = regularKeyIds.filter((id) => accessibleKeyIdSet.has(id));
+
+    // Resolve regular key names
+    const keyNameMap = new Map<string, string>();
     if (filteredKeyIds.length > 0) {
       const keys = await prisma.filesMetadataKey.findMany({
         where: { id: { in: filteredKeyIds }, ...companyFilter(companyId) },
         select: { id: true, name: true },
       });
-      const keyMap = new Map(keys.map((k) => [k.id, k.name || k.id]));
-      keyOrder = filteredKeyIds.filter((id) => keyMap.has(id)).map((id) => ({ id, name: keyMap.get(id)! }));
+      for (const k of keys) keyNameMap.set(k.id, k.name || k.id);
+    }
+
+    // Build final keyOrder preserving original config order; system keys always included
+    const keyOrder: Array<{ id: string; name: string }> = [];
+    for (const id of keyIds) {
+      const sysDef = getSystemFieldDef(id);
+      if (sysDef) {
+        keyOrder.push({ id, name: sysDef.name });
+      } else if (keyNameMap.has(id)) {
+        keyOrder.push({ id, name: keyNameMap.get(id)! });
+      }
+    }
+
+    // Inject system field labels (resolved from their own tables) as synthetic metadata
+    if (usedSystemKeyIds.length > 0) {
+      const filesExtended = await prisma.file.findMany({
+        where: { id: { in: accessibleIds }, ...companyFilter(companyId) },
+        select: { id: true, person_id: true, document_type_id: true },
+      });
+      const labelsByFile = await resolveSystemFieldLabels(companyId, filesExtended);
+      for (const [fid, keyLabels] of labelsByFile) {
+        for (const [keyId, label] of keyLabels) {
+          if (!usedSystemKeyIds.includes(keyId)) continue;
+          if (!metadata[fid]) metadata[fid] = {};
+          metadata[fid][keyId] = [label];
+        }
+      }
     }
 
     const tree = buildVirtualTree(files, metadata, keyOrder);
@@ -712,6 +749,87 @@ export const documentsController = {
     });
 
     return res.json(config);
+  },
+
+  // ─── System fields (Person, Document Type) ───
+
+  /**
+   * PATCH /api/companies/:companyId/files/:fileId/system-fields
+   * Update a file's system-reference fields (person_id, document_type_id).
+   * These live in their own tables but are edited via a picker, not free text.
+   * Pass `null` to clear a field; omit a field to leave it unchanged.
+   */
+  async updateFileSystemFields(req: AuthRequest, res: Response) {
+    const { companyId, fileId } = req.params;
+    if (!companyId || !fileId) return res.status(400).json({ error: 'Missing company ID or file ID' });
+    const access = await ensureCompanyAccess(req, companyId);
+    if (access.error) return res.status(access.error.status).json(access.error.body);
+
+    const file = await prisma.file.findFirst({
+      where: { id: fileId, company_id: companyId, is_archived: false },
+      select: { id: true, person_id: true, document_type_id: true },
+    });
+    if (!file) return res.status(404).json({ error: 'File not found' });
+
+    const body = (req.body || {}) as { person_id?: string | null; document_type_id?: string | null };
+    const data: Record<string, string | null> = {};
+
+    if ('person_id' in body) {
+      const pid = body.person_id;
+      if (pid === null || pid === '') {
+        data.person_id = null;
+      } else if (typeof pid === 'string') {
+        const person = await prisma.person.findFirst({ where: { id: pid, company_id: companyId }, select: { id: true } });
+        if (!person) return res.status(400).json({ error: 'Invalid person_id' });
+        data.person_id = pid;
+      }
+    }
+
+    if ('document_type_id' in body) {
+      const dtid = body.document_type_id;
+      if (dtid === null || dtid === '') {
+        data.document_type_id = null;
+      } else if (typeof dtid === 'string') {
+        const docType = await prisma.documentType.findFirst({ where: { id: dtid, company_id: companyId }, select: { id: true } });
+        if (!docType) return res.status(400).json({ error: 'Invalid document_type_id' });
+        data.document_type_id = dtid;
+      }
+    }
+
+    if (Object.keys(data).length === 0) {
+      return res.status(400).json({ error: 'Nothing to update', details: 'Provide person_id and/or document_type_id' });
+    }
+
+    const updated = await prisma.file.update({
+      where: { id: fileId },
+      data,
+      include: {
+        person: { select: { id: true, full_name: true } },
+        document_type: { select: { id: true, name: true } },
+      },
+    });
+
+    const changes = SYSTEM_METADATA_FIELDS
+      .filter((f) => f.fileColumn in data)
+      .map((f) => ({
+        key: f.name,
+        keyId: f.id,
+        previous: (file as Record<string, unknown>)[f.fileColumn] as string | null,
+        next: data[f.fileColumn] ?? null,
+      }));
+    await appendFileHistoryEvent({
+      companyId,
+      fileId,
+      eventType: FILE_HISTORY_EVENT_TYPE.METADATA_CHANGED,
+      actorId: normalizeFileHistoryActorId(req.user?.id ?? null),
+      details: { source: 'system_fields_update', changes },
+    });
+
+    return res.json({
+      id: updated.id,
+      person: updated.person,
+      document_type: updated.document_type,
+    });
   },
 
   // ─── Flat Upload (no folder required) ───
@@ -824,6 +942,25 @@ export const documentsController = {
     }
     const uploadFolderId = resolvedUploadFolder.folderId;
 
+    // Resolve optional person_id and document_type_id
+    let uploadPersonId: string | null = null;
+    if (req.body?.personId) {
+      const person = await prisma.person.findUnique({ where: { id: req.body.personId, company_id: companyId }, select: { id: true } });
+      if (!person) return res.status(400).json({ error: 'Invalid personId' });
+      uploadPersonId = person.id;
+    } else if (uploadFolderId) {
+      // Auto-derive person from folder if the folder is a person's root folder
+      const personByFolder = await prisma.person.findFirst({ where: { root_folder_id: uploadFolderId, company_id: companyId }, select: { id: true } });
+      if (personByFolder) uploadPersonId = personByFolder.id;
+    }
+
+    let uploadDocumentTypeId: string | null = null;
+    if (req.body?.documentTypeId) {
+      const docType = await prisma.documentType.findUnique({ where: { id: req.body.documentTypeId, company_id: companyId }, select: { id: true } });
+      if (!docType) return res.status(400).json({ error: 'Invalid documentTypeId' });
+      uploadDocumentTypeId = docType.id;
+    }
+
     const created: Array<{
       id: string;
       name: string;
@@ -862,6 +999,8 @@ export const documentsController = {
           size_bytes: BigInt(file.size),
           uploaded_by: userId,
           folder_id: uploadFolderId,
+          ...(uploadPersonId ? { person_id: uploadPersonId } : {}),
+          ...(uploadDocumentTypeId ? { document_type_id: uploadDocumentTypeId } : {}),
           ...(pendingExtractKeyIds && pendingExtractKeyIds.length > 0
             ? {
                 ocr_pending_metadata_key_ids: {
@@ -1387,9 +1526,16 @@ export const documentsController = {
         };
       });
 
+      const companyPersons = await prisma.person.findMany({
+        where: { company_id: companyId },
+        select: { id: true, full_name: true },
+        orderBy: { full_name: 'asc' },
+      });
+
       const segments = await proposeSplitWithGemini({
         ocrMarkdown,
         documentTypes,
+        persons: companyPersons.map((p) => ({ id: p.id, name: p.full_name })),
         currentDate: dateStr,
       });
       return res.json({ segments, pageCount });
@@ -1535,9 +1681,16 @@ export const documentsController = {
 
     let proposed;
     try {
+      const companyPersons = await prisma.person.findMany({
+        where: { company_id: companyId },
+        select: { id: true, full_name: true },
+        orderBy: { full_name: 'asc' },
+      });
+
       proposed = await proposeSplitWithGemini({
         ocrMarkdown: ocrMarkdown ?? '',
         documentTypes,
+        persons: companyPersons.map((p) => ({ id: p.id, name: p.full_name })),
         currentDate: dateStr,
       });
     } catch (e) {
@@ -1807,6 +1960,9 @@ export const documentsController = {
           size_bytes: BigInt(size),
           uploaded_by: userId,
           folder_id: segFolderId,
+          // Persist system fields: each split segment carries its person and document type.
+          ...(seg?.person_id ? { person_id: seg.person_id } : {}),
+          ...(seg?.document_type_id ? { document_type_id: seg.document_type_id } : {}),
         },
       });
       await appendFileHistoryEvent({

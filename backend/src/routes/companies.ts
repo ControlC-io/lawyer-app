@@ -108,6 +108,7 @@ router.get(
 );
 router.post('/:companyId/folders/:folderId/upload', filesController.uploadMiddleware, requirePermission('documents.view'), asyncHandler(filesController.uploadCompanyDocument));
 router.put('/:companyId/files/:fileId/metadata', requirePermission('documents.view'), asyncHandler(companiesController.updateFileMetadata));
+router.patch('/:companyId/files/:fileId/system-fields', requirePermission('documents.view'), asyncHandler(documentsController.updateFileSystemFields));
 router.delete('/:companyId/files/:fileId', requirePermission('documents.view'), asyncHandler(filesController.deleteCompanyFile));
 
 // ─── Flat Metadata Document Management ───

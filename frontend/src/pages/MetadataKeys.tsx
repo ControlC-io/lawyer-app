@@ -194,25 +194,29 @@ export default function MetadataKeys() {
               <div key={key.id} className="flex items-center justify-between gap-2 p-2 border rounded-md bg-muted/50">
                 <div className="min-w-0 flex flex-col gap-0.5">
                   <span className="text-sm font-medium truncate">{key.name}</span>
-                  <span className="text-xs text-muted-foreground">
-                    {key.value_kind === "predefined_list"
-                      ? String(t("organizationSettings.metadataTypePredefined"))
-                      : String(t("organizationSettings.metadataTypeFreeText"))}
-                  </span>
+                  {key.value_kind !== "system_reference" && (
+                    <span className="text-xs text-muted-foreground">
+                      {key.value_kind === "predefined_list"
+                        ? String(t("organizationSettings.metadataTypePredefined"))
+                        : String(t("organizationSettings.metadataTypeFreeText"))}
+                    </span>
+                  )}
                 </div>
-                <div className="flex items-center shrink-0 gap-1">
-                  <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => openEditKey(key)}>
-                    <Pencil className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive"
-                    onClick={() => void handleDeleteKey(key.id)}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </div>
+                {!key.system && (
+                  <div className="flex items-center shrink-0 gap-1">
+                    <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => openEditKey(key)}>
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive"
+                      onClick={() => void handleDeleteKey(key.id)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                )}
               </div>
             ))}
           </div>

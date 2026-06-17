@@ -1,4 +1,5 @@
 import { prisma } from './prisma';
+import { injectSystemFieldIds } from './systemMetadataFields';
 
 interface PermissionCondition {
   key_id: string;
@@ -157,7 +158,7 @@ export async function getAccessibleFileIds(params: {
   // Get all files in the company
   const allFiles = await prisma.file.findMany({
     where: { company_id: companyId },
-    select: { id: true },
+    select: { id: true, person_id: true, document_type_id: true },
   });
 
   if (allFiles.length === 0) return [];
@@ -185,6 +186,8 @@ export async function getAccessibleFileIds(params: {
       fileMap.set(m.metadata_id, [m.value]);
     }
   }
+  // System fields (person, document type) behave like metadata for filtering.
+  injectSystemFieldIds(metadataByFile, allFiles);
 
   // Apply user metadata filters first (narrows result set)
   let candidateFileIds = fileIds;
@@ -245,7 +248,7 @@ export async function getAccessibleFileIdsWithLevels(params: {
 
   const allFiles = await prisma.file.findMany({
     where: { company_id: companyId },
-    select: { id: true },
+    select: { id: true, person_id: true, document_type_id: true },
   });
 
   if (allFiles.length === 0) return { fileIds: [], writeFileIds: new Set(), hasAnyWriteRule: isCompanyAdmin };
@@ -268,6 +271,8 @@ export async function getAccessibleFileIdsWithLevels(params: {
     if (existing) existing.push(m.value);
     else fileMap.set(m.metadata_id, [m.value]);
   }
+  // System fields (person, document type) behave like metadata for filtering.
+  injectSystemFieldIds(metadataByFile, allFiles);
 
   let candidateFileIds = fileIds;
   if (metadataFilters && metadataFilters.length > 0) {

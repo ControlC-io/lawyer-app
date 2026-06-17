@@ -177,9 +177,15 @@ export interface DocumentTypeSpec {
   metadataKeys: ProposeMetadataKeySpec[];
 }
 
+export interface PersonSpec {
+  id: string;
+  name: string;
+}
+
 /**
  * Validate segments returned by Gemini when document types are known.
  * Requires document_type_id on each segment and validates metadata keys per type.
+ * person_id is optional — extracted if present, validated by the caller.
  */
 function validateSegmentsWithTypes(
   segments: unknown,
@@ -197,6 +203,8 @@ function validateSegmentsWithTypes(
     if (!document_type_id) throw new Error('Each segment must include a document_type_id');
     const docType = typeMap.get(document_type_id);
     if (!docType) throw new Error(`Unknown document_type_id in segment “${String(o.name)}”: ${document_type_id}`);
+
+    const person_id = typeof o.person_id === 'string' && o.person_id.trim() ? o.person_id.trim() : undefined;
 
     const startRaw = o.start_page;
     const endRaw = o.end_page;
@@ -216,6 +224,7 @@ function validateSegmentsWithTypes(
     out.push({
       name: o.name.trim(),
       document_type_id,
+      ...(person_id ? { person_id } : {}),
       ...(hasMeta ? { metadata } : {}),
       start_page: start,
       end_page: end,
@@ -256,6 +265,7 @@ function sanitizePredefinedMetadataWithTypes(
 export async function proposeSplitWithGemini(params: {
   ocrMarkdown: string;
   documentTypes: DocumentTypeSpec[];
+  persons?: PersonSpec[];
   currentDate: string;
 }): Promise<SplitSegment[]> {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -284,16 +294,29 @@ export async function proposeSplitWithGemini(params: {
     return lines.join('\n');
   });
 
+  const personsBlock =
+    params.persons && params.persons.length > 0
+      ? `\nAvailable persons (set “person_id” to the matching id if the document concerns that person):\n${params.persons.map((p) => `- ${JSON.stringify(p.name)} (id: ${JSON.stringify(p.id)})`).join('\n')}\n`
+      : '';
+
+  const personIdRule = params.persons?.length
+    ? '\n- “person_id” is optional. If the document clearly concerns one of the listed persons, set it to their id. Omit the field entirely if no person matches.'
+    : '';
+
+  const segmentShape = params.persons?.length
+    ? '{“name”:”string”,”document_type_id”:”uuid”,”person_id”:”uuid or omitted”,”metadata”:{...},”start_page”:number,”end_page”:number}'
+    : '{“name”:”string”,”document_type_id”:”uuid”,”metadata”:{...},”start_page”:number,”end_page”:number}';
+
   const prompt = `You are a data extraction agent. You analyze OCR text from a multi-page PDF and propose how to split it into separate logical documents.
 
 Available document types:
 
 ${typeBlocks.join('\n\n')}
-
+${personsBlock}
 Rules:
 - Answer with ONLY a JSON array. No markdown fences, no commentary.
-- Each element MUST have this shape: {“name”:”string”,”document_type_id”:”uuid”,”metadata”:{...},”start_page”:number,”end_page”:number}
-- “document_type_id” MUST be the id of one of the document types listed above.
+- Each element MUST have this shape: ${segmentShape}
+- “document_type_id” MUST be the id of one of the document types listed above.${personIdRule}
 - “name” is the suggested output PDF base name (no path; .pdf will be added). Follow the renaming instructions of the identified type, substituting extracted values into the placeholders.
 - “metadata” MUST include every field key listed for the identified type. Values are strings. Use empty string “” when a value cannot be determined.
 - “metadata” must NOT include keys belonging to other types.
@@ -310,6 +333,18 @@ ${ocrBody}`;
   const text = await generateContentWithRetry(model, prompt);
   const parsed = parseGeminiJsonArray(text);
   const segments = validateSegmentsWithTypes(parsed, params.documentTypes);
+
+  // Strip any person_id Gemini hallucinated (not in our known list)
+  if (params.persons?.length) {
+    const validPersonIds = new Set(params.persons.map((p) => p.id));
+    for (const seg of segments) {
+      if (seg.person_id && !validPersonIds.has(seg.person_id)) {
+        console.warn(`[pdf-split] Unknown person_id “${seg.person_id}” in segment “${seg.name}” — cleared`);
+        delete seg.person_id;
+      }
+    }
+  }
+
   return sanitizePredefinedMetadataWithTypes(segments, params.documentTypes);
 }
 

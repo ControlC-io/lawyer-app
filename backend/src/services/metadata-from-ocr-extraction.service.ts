@@ -6,6 +6,7 @@ import {
   validateMetadataValueForKey,
 } from './files-metadata-validation';
 import { extractMetadataFromOcrWithGemini, proposeFileNameFromOcrWithGemini } from './pdf-split.service';
+import { SYSTEM_METADATA_FIELDS } from '../lib/systemMetadataFields';
 
 export type ExtractMetadataFromOcrHttpError = {
   status: number;
@@ -143,6 +144,33 @@ export async function extractAndApplyMetadataFromOcr(params: {
     }
   }
 
+  // For each extracted value whose key name matches a system field name (e.g. "Person",
+  // "Document Type"), resolve the extracted text to the corresponding FK id and set it
+  // on the file. This ensures person_id / document_type_id are populated automatically
+  // after extraction — the same way the split-PDF flow handles them.
+  const systemFieldUpdates: { person_id?: string; document_type_id?: string } = {};
+  const systemFieldByName = new Map(SYSTEM_METADATA_FIELDS.map((f) => [f.name.toLowerCase(), f]));
+  for (const keyId of requestedIds) {
+    const row = companyMetaById.get(keyId);
+    const strVal = applied[keyId];
+    if (!row?.name || !strVal) continue;
+    const fieldDef = systemFieldByName.get(row.name.trim().toLowerCase());
+    if (!fieldDef) continue;
+    if (fieldDef.fileColumn === 'person_id') {
+      const match = await prisma.person.findFirst({
+        where: { company_id: params.companyId, full_name: { equals: strVal, mode: 'insensitive' } },
+        select: { id: true },
+      });
+      if (match) systemFieldUpdates.person_id = match.id;
+    } else if (fieldDef.fileColumn === 'document_type_id') {
+      const match = await prisma.documentType.findFirst({
+        where: { company_id: params.companyId, name: { equals: strVal, mode: 'insensitive' } },
+        select: { id: true },
+      });
+      if (match) systemFieldUpdates.document_type_id = match.id;
+    }
+  }
+
   const trimmedRenameInstructions =
     typeof params.renameInstructions === 'string' ? params.renameInstructions.trim() : '';
   let renamedTo: string | undefined;
@@ -163,6 +191,7 @@ export async function extractAndApplyMetadataFromOcr(params: {
     where: { id: params.fileId },
     data: {
       ...(renamedTo ? { name: renamedTo } : {}),
+      ...systemFieldUpdates,
       ocr_pending_metadata_key_ids: Prisma.DbNull,
       metadata_ai_extract_status: 'completed',
       metadata_ai_extract_error: null,

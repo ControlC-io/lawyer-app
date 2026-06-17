@@ -146,9 +146,14 @@ model File {
   metadata_ai_extract_status   String?
   metadata_ai_extract_error      String?   @db.Text
 
+  person_id        String?              @db.Uuid
+  document_type_id String?              @db.Uuid
+
   folder          Folder?              @relation(fields: [folder_id], references: [id])
   uploader        Profile?             @relation(fields: [uploaded_by], references: [id])
   company         Company?             @relation(fields: [company_id], references: [id])
+  person          Person?              @relation("PersonFiles", fields: [person_id], references: [id])
+  document_type   DocumentType?        @relation("DocumentTypeFiles", fields: [document_type_id], references: [id])
   metadata_values FilesMetadataValue[]
   history_events  FileHistoryEvent[]
 
@@ -216,6 +221,7 @@ model Person {
   updated_at     DateTime @default(now()) @updatedAt @db.Timestamptz(6)
   company        Company  @relation(fields: [company_id], references: [id])
   root_folder    Folder?  @relation("PersonRootFolder", fields: [root_folder_id], references: [id])
+  files          File[]   @relation("PersonFiles")
 
   @@index([company_id, created_at(sort: Desc)], map: "idx_persons_company_created")
   @@map("persons")
@@ -429,6 +435,7 @@ model DocumentType {
   created_at          DateTime @default(now()) @db.Timestamptz(6)
   updated_at          DateTime @default(now()) @updatedAt @db.Timestamptz(6)
   company             Company  @relation(fields: [company_id], references: [id])
+  files               File[]   @relation("DocumentTypeFiles")
 
   @@index([company_id, created_at], map: "idx_document_types_company_created_at")
   @@map("document_types")

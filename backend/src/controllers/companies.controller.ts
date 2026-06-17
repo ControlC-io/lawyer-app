@@ -13,6 +13,7 @@ import {
 } from '../services/files-metadata-validation';
 import { canUserAccessFolder, getUserGroupIdsInCompany } from '../lib/folderAccess';
 import { getAccessibleFileIds, canUserAccessFileByMetadata } from '../lib/documentAccess';
+import { getSystemMetadataKeys } from '../lib/systemMetadataFields';
 import { appendFileHistoryEvent, FILE_HISTORY_EVENT_TYPE, normalizeFileHistoryActorId } from '../lib/fileHistory';
 import { storageService } from '../services/storage.service';
 import bcrypt from 'bcryptjs';
@@ -652,13 +653,16 @@ export const companiesController = {
       const userId = req.user?.id;
       const isCompanyAdmin = access.userCompany?.role === 'company_admin' || !!req.user?.super_admin;
 
+      // System fields (Person, Document Type) are always available as reference keys.
+      const systemKeys = await getSystemMetadataKeys(companyId);
+
       // Admins see all keys; non-admins see only keys present on their accessible files
       if (isCompanyAdmin) {
         const keys = await prisma.filesMetadataKey.findMany({
           where: { ...companyFilter(companyId) },
           orderBy: { name: 'asc' },
         });
-        return res.json(keys);
+        return res.json([...systemKeys, ...keys]);
       }
 
       const userGroupIds = userId ? await getUserGroupIdsInCompany(userId, companyId) : [];
@@ -670,7 +674,7 @@ export const companiesController = {
       });
 
       if (accessibleFileIds.length === 0) {
-        return res.json([]);
+        return res.json(systemKeys);
       }
 
       // Get distinct metadata key IDs from accessible files
@@ -682,7 +686,7 @@ export const companiesController = {
 
       const accessibleKeyIds = metadataValues.map((m) => m.metadata_id);
       if (accessibleKeyIds.length === 0) {
-        return res.json([]);
+        return res.json(systemKeys);
       }
 
       const keys = await prisma.filesMetadataKey.findMany({
@@ -690,7 +694,7 @@ export const companiesController = {
         orderBy: { name: 'asc' },
       });
 
-      return res.json(keys);
+      return res.json([...systemKeys, ...keys]);
     } catch (error) {
       console.error('listFilesMetadataKeys error:', error);
       return res.status(500).json({
