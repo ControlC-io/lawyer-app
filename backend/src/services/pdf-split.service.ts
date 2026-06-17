@@ -137,9 +137,11 @@ export function validateSegments(segments: unknown, requiredMetadataKeyIds?: str
     const requireMeta = Boolean(requiredMetadataKeyIds?.length);
     const hasMeta = requireMeta || Object.keys(metadata).length > 0;
     const docTypeId = typeof o.document_type_id === 'string' && o.document_type_id.trim() ? o.document_type_id.trim() : undefined;
+    const personId = typeof o.person_id === 'string' && o.person_id.trim() ? o.person_id.trim() : undefined;
     out.push({
       name: o.name.trim(),
       ...(docTypeId ? { document_type_id: docTypeId } : {}),
+      ...(personId ? { person_id: personId } : {}),
       ...(hasMeta ? { metadata } : {}),
       start_page: start,
       end_page: end,
