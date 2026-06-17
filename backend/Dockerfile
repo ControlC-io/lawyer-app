@@ -4,6 +4,8 @@ FROM node:18-alpine AS builder
 RUN apk add --no-cache openssl libc6-compat
 ENV PRISMA_CLI_QUERY_ENGINE_TYPE=library
 ENV PRISMA_CLIENT_ENGINE_TYPE=library
+# Force development so Coolify's injected NODE_ENV=production ARG doesn't skip devDependencies
+ENV NODE_ENV=development
 WORKDIR /usr/src/app
 COPY package*.json ./
 COPY backend/package*.json ./backend/

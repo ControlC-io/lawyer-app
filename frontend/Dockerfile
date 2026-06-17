@@ -1,6 +1,8 @@
 # Frontend Dockerfile — multi-stage
 # Stage 1: build the Vite SPA
 FROM node:18-alpine AS builder
+# Force development so Coolify's injected NODE_ENV=production ARG doesn't skip devDependencies
+ENV NODE_ENV=development
 WORKDIR /usr/src/app
 COPY package*.json ./
 COPY frontend/package*.json ./frontend/
