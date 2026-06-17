@@ -1522,11 +1522,18 @@ const { toast } = useToast();
 
     const isExpanded = expandedNodes.has(node.id);
     const currentKeyId = keyOrder[depth]?.id;
+    // For system_reference keys (Person, Document Type), the tree stores the display label
+    // but the filter backend expects the FK UUID. Resolve label → UUID via allowed_values.
+    const currentMetaKey = currentKeyId ? metadataKeys.find((k) => k.id === currentKeyId) : undefined;
+    const nodeFilterValue =
+      currentMetaKey?.value_kind === "system_reference" && !node.isUncategorized
+        ? (parseSystemOptions(currentMetaKey.allowed_values).find((o) => o.label === node.name)?.value ?? node.name)
+        : node.name;
     // Uncategorized nodes add a "missing" filter for their key
     const currentPath = currentKeyId
       ? node.isUncategorized
         ? [...parentPath, { key: currentKeyId, value: node.name, missing: true }]
-        : [...parentPath, { key: currentKeyId, value: node.name }]
+        : [...parentPath, { key: currentKeyId, value: nodeFilterValue }]
       : parentPath;
     const isSelected =
       selectedNodePath.length > 0 &&

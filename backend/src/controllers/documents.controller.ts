@@ -361,6 +361,33 @@ export const documentsController = {
       }
     }
 
+    // Tree nodes use display labels (full_name / doc type name) as filter values, but the
+    // access-control layer matches against FK UUIDs injected by injectSystemFieldIds.
+    // Resolve any system-field filter value that is a label to its corresponding UUID.
+    const isUuidValue = (s: string) =>
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
+    if (metadataFilters) {
+      const resolved: typeof metadataFilters = [];
+      for (const f of metadataFilters) {
+        if (f.key_id === '__person__' && !isUuidValue(f.value)) {
+          const person = await prisma.person.findFirst({
+            where: { company_id: companyId, full_name: f.value },
+            select: { id: true },
+          });
+          resolved.push({ key_id: f.key_id, value: person?.id ?? f.value });
+        } else if (f.key_id === '__document_type__' && !isUuidValue(f.value)) {
+          const docType = await prisma.documentType.findFirst({
+            where: { company_id: companyId, name: f.value },
+            select: { id: true },
+          });
+          resolved.push({ key_id: f.key_id, value: docType?.id ?? f.value });
+        } else {
+          resolved.push(f);
+        }
+      }
+      metadataFilters = resolved;
+    }
+
     const { fileIds: accessibleIds, writeFileIds, hasAnyWriteRule } = await getAccessibleFileIdsWithLevels({
       userId,
       companyId,
