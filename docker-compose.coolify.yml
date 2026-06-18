@@ -1,4 +1,4 @@
-# Docker Compose for Coolify deployment (2 GB RAM server).
+# Docker Compose for Coolify deployment (4 GB RAM server).
 #
 # Key differences from docker-compose.yml:
 #   - Backend: runs compiled JS (node dist/index.js), not ts-node
@@ -6,7 +6,7 @@
 #   - MinIO: official image, not compiled from Go source
 #   - No source-code volume mounts
 #   - Memory limits on every service (prevents one OOM from killing all)
-#   - Postgres tuned for low memory
+#   - Postgres tuned for 4 GB server (shared_buffers=256MB)
 #   - SSL is handled by Coolify/Traefik upstream; nginx here is HTTP only
 #
 # Usage in Coolify: point to this file as the compose file.
@@ -72,7 +72,7 @@ services:
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.0-flash}
       # Cap V8 heap so Node stays within the container memory limit
-      - NODE_OPTIONS=--max-old-space-size=300
+      - NODE_OPTIONS=--max-old-space-size=600
     depends_on:
       db:
         condition: service_healthy
@@ -83,7 +83,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 384M
+          memory: 768M
 
   db:
     image: postgres:15-alpine
@@ -92,15 +92,15 @@ services:
       - POSTGRES_USER=${POSTGRES_USER:-postgres}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
       - POSTGRES_DB=${POSTGRES_DB:-dossier_app_db}
-    # Tune for 256 MB limit: small shared_buffers, low work_mem, capped connections
+    # Tune for 512 MB limit / 4 GB server: 25% RAM as shared_buffers
     command: >
       postgres
-        -c shared_buffers=64MB
-        -c effective_cache_size=128MB
-        -c work_mem=4MB
-        -c maintenance_work_mem=32MB
-        -c max_connections=30
-        -c wal_buffers=4MB
+        -c shared_buffers=256MB
+        -c effective_cache_size=1GB
+        -c work_mem=16MB
+        -c maintenance_work_mem=128MB
+        -c max_connections=50
+        -c wal_buffers=16MB
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -113,7 +113,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 256M
+          memory: 512M
 
   minio:
     image: minio/minio:latest
@@ -129,7 +129,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 256M
+          memory: 512M
 
 networks:
   app-network:
