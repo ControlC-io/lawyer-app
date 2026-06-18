@@ -1,68 +1,93 @@
 # Environment Variables
 
-This document explains how the `.env` file works in this project and how to set environment variables in production with Docker.
+## Files
 
-## Purpose of .env
+| File | Committed | Purpose |
+|---|---|---|
+| `.env.sample` | Yes | Local dev template — copy to `.env` and fill in values |
+| `.env` | No | Your local dev secrets |
+| `.env.production.sample` | Yes | Production template for Coolify — all variables with `CHANGE_ME` placeholders |
+| `.env.prod` | No | Your real production values — copy-paste into Coolify |
 
-The `.env` file holds local and environment-specific configuration (including secrets). **Never commit real secrets to the repository.** The `.env` file is listed in `.gitignore` and must stay out of version control.
+## Setup
 
-## .env vs .env.sample
-
-| File | Committed? | Purpose |
-|------|------------|---------|
-| **.env.sample** | Yes | Template listing all variables with safe placeholders. Copy it to create your local config. |
-| **.env** | No (gitignored) | Your actual config and secrets. Create it from the sample and edit with real values. |
-
-**Setup:** Copy the sample to `.env` and fill in values:
-
+**Local dev:**
 ```bash
 cp .env.sample .env
-# Edit .env with your real values (API keys, secrets, etc.)
+# edit .env with real values
 ```
 
-## How .env is used
+**Production (Coolify):**
+- Open `.env.production.sample`, fill in all `CHANGE_ME_*` values
+- Paste into Coolify → Environment Variables → Production
 
-### With Docker Compose (development)
+---
 
-Docker Compose automatically loads a **`.env`** file from the **project root** when you run `docker compose up`. It uses this file **only for variable substitution** in `docker-compose.yml`: any `${VAR}` or `${VAR:-default}` in the compose file is replaced with the value from `.env` (or the default). The backend and frontend containers receive environment variables from the `environment` block in `docker-compose.yml`; those values are either hardcoded there or substituted from your root `.env`. So placing variables in a root `.env` lets you drive what gets passed into the containers without editing `docker-compose.yml`.
+## Variable reference
 
-### Running the backend locally (no Docker)
+### Database
+| Variable | Example | Notes |
+|---|---|---|
+| `POSTGRES_USER` | `postgres` | |
+| `POSTGRES_PASSWORD` | `CHANGE_ME` | |
+| `POSTGRES_DB` | `lawyer_app_db` | |
+| `POSTGRES_PORT` | `5432` | Host port mapping |
+| `DATABASE_URL` | `postgresql://postgres:pw@db:5432/lawyer_app_db` | Use `@db:5432` inside Docker |
 
-The backend does not load a `.env` file by default. To use one when running the backend outside Docker (e.g. `npm run dev -w backend`), either:
+### Backend
+| Variable | Example | Notes |
+|---|---|---|
+| `PORT` | `3001` | |
+| `NODE_ENV` | `production` | Mark as **Runtime only** in Coolify |
+| `JWT_SECRET` | 32-byte hex | `openssl rand -hex 32` |
+| `INTERNAL_API_KEY` | random hex | Internal service-to-service auth |
+| `SUPER_ADMIN_API_KEY` | strong secret | Bootstrap API — keep secure |
+| `ENABLE_PUBLIC_SIGNUP` | `false` | Set `true` only if you want open registration |
+| `APP_URL` | `https://lexora.controlc.io` | Must be full HTTPS domain in prod |
+| `BACKEND_URL` | `https://lexora.controlc.io` | Same as APP_URL when behind a single domain |
 
-- **Export variables from .env before starting:**  
-  `export $(grep -v '^#' .env | xargs)` then start the backend, or
-- **Use your IDE/process runner** to load env from a file, or
-- **Add a loader** (e.g. `dotenv`) in the backend so it loads `.env` from the project root when the process starts (optional improvement).
+### OCR (Mistral)
+| Variable | Example |
+|---|---|
+| `OCR_PROVIDER` | `mistral` |
+| `OCR_API_KEY` | Mistral API key |
+| `OCR_MODEL` | `mistral-ocr-latest` |
+| `OCR_API_URL` | `https://api.mistral.ai/v1/ocr` |
 
-## Setting environment variables in production with Docker
+### AI / PDF split (Gemini)
+| Variable | Example |
+|---|---|
+| `GEMINI_API_KEY` | Google AI key |
+| `GEMINI_MODEL` | `gemini-2.5-flash` |
 
-In production, do not rely on a committed `.env` file. Set variables using one of these approaches.
+### MinIO
+| Variable | Example | Notes |
+|---|---|---|
+| `MINIO_ENDPOINT` | `minio` | Docker service name — do not use `localhost` inside Docker |
+| `MINIO_PORT` | `9000` | |
+| `MINIO_USE_SSL` | `false` | SSL terminated by Traefik upstream |
+| `MINIO_ACCESS_KEY` | `minioadmin` | Change in production |
+| `MINIO_SECRET_KEY` | `minioadmin` | Change in production |
+| `MINIO_BUCKET_NAME` | `lexora-app` | |
+| `MINIO_PUBLIC_URL` | *(empty)* | Leave empty unless MinIO is exposed on its own domain |
+| `MINIO_SIGNED_URL_MAX_AGE` | `604800` | 7 days in seconds |
 
-### Option A: env file on the server
+### Email (SendGrid)
+| Variable | Example |
+|---|---|
+| `SENDGRID_API_KEY` | SendGrid key (optional) |
+| `FROM_EMAIL` | `noreply@lexora.controlc.io` |
+| `APP_NAME` | `Lexora` |
 
-Create an env file on the server (e.g. from a secret manager or by hand, and keep it out of the repo). Then:
+### Frontend (build-time)
+| Variable | Value | Notes |
+|---|---|---|
+| `VITE_API_URL` | *(empty)* | **Must be empty in production.** Baked into bundle at build time. Empty = relative `/api` URLs proxied by nginx. Any non-empty value gets hardcoded into the JS. |
 
-- **docker run:**  
-  `docker run --env-file .env.production ... your-image`
-- **Docker Compose:** In your production compose file, add `env_file: .env.production` to the backend (and frontend if needed). Never commit `.env.production`.
+---
 
-### Option B: Explicit environment block
+## Coolify-specific notes
 
-Pass variables explicitly so they come from your deployment system (CI, vault, etc.):
-
-- **docker run:**  
-  `docker run -e JWT_SECRET=... -e DATABASE_URL=... ... your-image`
-- **Docker Compose:** In the service’s `environment` block, list each variable (values can be `${VAR}` from the host env or from a compose env file).
-
-### Option C: Docker secrets / orchestration
-
-With Docker Swarm or Kubernetes, use secrets and config maps and inject them as environment variables or files into the container. Refer to your platform’s docs for the exact syntax.
-
-## Frontend (Vite)
-
-Variables prefixed with **`VITE_`** (e.g. `VITE_API_URL`) are embedded at **build time**. For production Docker, pass `VITE_API_URL` (or equivalent) when building the frontend image (e.g. via build args or env when running `npm run build`) so the built assets use the correct API URL.
-
-## Full variable list and deployment steps
-
-For the complete list of environment variables and deployment instructions, see [deployment.md](deployment.md).
+- Coolify injects all env vars as Docker build ARGs. Mark `NODE_ENV` as **"Runtime only"** to prevent it from being passed at build time — `NODE_ENV=production` at buildtime causes npm to skip devDependencies and the TypeScript build fails.
+- `VITE_*` variables are baked into the frontend bundle at build time. Any change to them requires a full redeploy.
+- `SERVICE_FQDN_NGINX` and `SERVICE_URL_NGINX` are auto-generated by Coolify — do not set these manually.

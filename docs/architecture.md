@@ -1,104 +1,118 @@
-# Lexora Monorepo Documentation
+# Lexora — Architecture
 
-## Project Structure
+## Project structure
 
-- `frontend/`: React + Vite application.
-- `backend/`: Express.js server + Prisma ORM.
-- `shared/`: Shared TypeScript types and utilities.
-- `infrastructure/`: Docker, Nginx, and MinIO configurations.
-- `scripts/`: Helper scripts for development.
-- `docs/`: Project documentation.
-
-## Getting Started
-
-### Prerequisites
-
-- Node.js (v18+)
-- Docker and Docker Compose
-
-### Local Development
-
-1. Install dependencies:
-   ```bash
-   npm install
-   ```
-
-2. Run the development environment:
-   ```bash
-   npm run dev
-   ```
-
-### Running with Docker
-
-To start the entire stack using Docker Compose:
-
-```bash
-docker-compose up --build
+```
+lexora-app/
+├── frontend/        React 18 + Vite + TypeScript + shadcn/ui + Tailwind
+├── backend/         Express + Prisma + PostgreSQL
+├── shared/          TypeScript types/utilities shared between frontend and backend
+├── infrastructure/
+│   ├── nginx/       spa.conf (frontend static), nginx.coolify.conf (reverse proxy), Dockerfile
+│   └── minio/       Dockerfile (local dev only — builds MinIO from source)
+├── scripts/         migrate.js, dev-local.ps1
+└── docs/
 ```
 
-The application will be available at:
-- Frontend/Proxy: http://localhost
-- Backend API: http://localhost/api
-- MinIO Console: http://localhost:9001
-- Direct Frontend: http://localhost:3000
-- Direct Backend: http://localhost:3001
-- Direct MinIO API: http://localhost:9000
+npm workspaces monorepo. Import alias `@yourapp/shared` → `shared/src`.
 
-## Database & Migrations
+---
 
-Lexora uses **Prisma** as its ORM and migration management tool.
+## Data model (multi-tenancy)
 
-### Migration Flow
+Everything is scoped to a **Company**:
 
-The migration process is fully automated within the Docker lifecycle:
-
-1. **Startup**: When the `backend` container starts, it executes `backend/scripts/migrate.sh`.
-2. **Health Check**: The script waits for the PostgreSQL database (`db` service) to be ready using a Node.js-based port check.
-3. **Prisma Generation**: The Prisma Client is generated inside the container to ensure the application has access to the latest database types.
-4. **Migration Deployment**: 
-   - On a fresh install, Prisma runs the `0_init` migration to baseline the schema.
-   - On updates, Prisma detects new migration files in `backend/prisma/migrations/` and applies them automatically using `prisma migrate deploy`.
-
-### Key Benefits
-- **No Source Access Required**: Users running the container don't need to manually run SQL scripts or have Prisma installed locally.
-- **Data Safety**: `migrate deploy` is designed for production use; it only applies new changes and does not reset or delete existing data.
-- **Consistency**: Centralizing migrations in Prisma ensures the database schema always matches the application code version.
-
-## PDF Split Flow
-
-The split PDF feature processes a user-uploaded PDF into separate logical documents using OCR and AI.
-
-### Pipeline
-
-1. **Native text detection** — Before uploading, the browser uses `pdfjs-dist` to attempt text extraction from the PDF. If the average character count per page is ≥ 30 (native/digital PDF), the extracted text is sent directly to the propose endpoint and OCR is skipped entirely (~30–60 sec total). Scanned PDFs (< 30 chars/page) proceed to step 2.
-
-2. **Upload + OCR** — The PDF is uploaded to the backend. For scanned PDFs, OCR is queued (Mistral API via `services/ocr.service.ts`). The frontend polls `GET /api/files/:id/ocr` until `ocr_status === 'completed'`.
-
-3. **Propose** — `POST /api/companies/:id/documents/split-pdf/propose` accepts `{ fileId, nativeText? }`. If `nativeText` is provided it is used directly; otherwise `file.ocr_markdown` from the DB is used. The OCR markdown (capped at 900 000 chars) is sent to Gemini along with all configured Document Types. Gemini returns a JSON array of segments with `name`, `document_type_id`, `start_page`, `end_page`, and `metadata`.
-
-4. **Review** — The user sees page thumbnails and per-segment fields (name, document type, person, metadata). All fields are pre-filled by Gemini and editable.
-
-5. **Apply** — `POST /api/companies/:id/documents/split-pdf/apply` validates segments, uses `pdf-lib` to extract page ranges, stores each output PDF in MinIO, creates `file` DB rows, and writes metadata values. If `person_id` is set per segment, the file is placed in that person's root folder.
-
-## File Storage (MinIO)
-
-Lexora uses **MinIO** for S3-compatible object storage to manage file uploads and assets.
-
-## Get file dump through SCP
-
-```bash
-scp root@[SERVER_IP]:path/to/dump/dossier_app_dump.sql ./dumps/
+```
+Company
+  ├── Users (members, each with a role)
+  ├── Persons (people under administration)
+  ├── Document Types (Facture, Contrat, etc.)
+  ├── Metadata Keys (Année, Mois, etc.)
+  ├── Folders (person root folders + nested)
+  └── Files (PDFs, docs — linked to folders and optionally a person)
 ```
 
-### Integration Details
+Users belong to a company. All data queries are filtered by `company_id`. A user in company A cannot see data from company B.
 
-1. **Source Build**: Due to MinIO's source-only distribution for the community edition, the image is built from source using a multi-stage Dockerfile located at `infrastructure/minio/Dockerfile`.
-2. **Persistence**: Data is persisted using a Docker named volume `minio_data`, mapped to `/data` inside the container.
-3. **Backend Service**: The backend connects to MinIO using the official `minio` Node.js SDK.
-4. **Initialization**: On backend startup, the `StorageService` checks for the existence of the default bucket (defined by `MINIO_BUCKET_NAME`) and creates it if it doesn't exist.
+---
 
-### Accessing MinIO
+## Backend (`backend/src`)
 
-- **API Endpoint**: `http://localhost:9000` (Internal service name: `minio`)
-- **Web Console**: `http://localhost:9001`
-- **Default Credentials**: `minioadmin` / `minioadmin`
+Express + Prisma + PostgreSQL. Layering: `routes/` → `controllers/` → `services/`, with cross-cutting access-control in `lib/`.
+
+- `app.ts` builds the Express app (no `listen`); `index.ts` binds the port and starts background workers. Tests import `app.ts` directly via Supertest.
+- `routes/index.ts` is the API mount map.
+- All DB access goes through `lib/prisma.ts`.
+
+### Authentication (`middleware/auth.ts`)
+
+Three credential types checked in priority order:
+
+1. `x-super-admin-api-key` → synthetic super-admin user (server-side bootstrap only)
+2. `Authorization: Bearer <JWT>` → looked up in DB
+3. `x-api-key` → company-scoped API key
+
+### Authorization — two layers
+
+- **RBAC** (`lib/rbac.ts`): page/domain-level permissions (`documents.view`, `persons.manage`, etc.). Admins always pass.
+- **Document access rules** (`lib/documentAccess.ts`, `lib/folderAccess.ts`): fine-grained, metadata-condition-based access to individual files/folders.
+
+---
+
+## AI / document pipeline
+
+- **OCR** (`services/ocr.service.ts`): provider-abstracted, currently Mistral. `processDocumentOcr` runs OCR then chains into metadata extraction if configured.
+- **Metadata extraction** (`services/metadata-from-ocr-extraction.service.ts`): OCR text + metadata key IDs → Gemini → validated values written to `files_metadata_values`.
+- **PDF split** (`services/pdf-split.service.ts`): Gemini suggests page-range segments + metadata from OCR text; `pdf-lib` performs the actual split. Gemini responses are markdown-fenced JSON — use `parseGeminiJson*` helpers, never raw `JSON.parse`.
+
+### Split PDF flow
+
+1. Browser extracts native text (pdfjs-dist). If ≥ 30 chars/page → skip OCR, send text directly to propose.
+2. Scanned PDFs: upload → Mistral OCR → poll until `ocr_status === completed`.
+3. `POST /split-pdf/propose` → Gemini returns segments with name, document_type, page ranges, metadata.
+4. User reviews/edits in the UI (thumbnails rendered by pdfjs worker).
+5. `POST /split-pdf/apply` → pdf-lib splits pages → files stored in MinIO → DB rows created.
+
+---
+
+## Frontend (`frontend/src`)
+
+React 18 + Vite + TypeScript + shadcn/ui (Radix) + Tailwind. Routing: react-router-dom. Server state: @tanstack/react-query.
+
+Pages: DocumentManagement, Persons, DocumentTypes, MetadataKeys, SplitPdfPage, UsersGroups, OrganizationSettings, ArchivedRecords.
+
+PDF rendering uses `pdfjs-dist`. The worker file (`pdf.worker.min-*.mjs`) must be served with `Content-Type: application/javascript` — see `infrastructure/nginx/spa.conf` for the `.mjs` MIME type override.
+
+---
+
+## Storage (MinIO)
+
+S3-compatible via the `minio` Node.js SDK, wrapped by `services/storage.service.ts`. The default bucket is created on startup if missing.
+
+**Local dev**: image built from Go source (`infrastructure/minio/Dockerfile`) — community edition requires this.  
+**Production (Coolify)**: official `minio/minio:latest` image — simpler, smaller, no build time.
+
+---
+
+## Database migrations
+
+`backend/scripts/migrate.js` (cross-platform Node.js — replaces the old `migrate.sh`):
+1. Parses `DATABASE_URL`, waits for Postgres
+2. Runs `prisma generate`
+3. Runs `prisma migrate deploy` (applies new migrations, never resets data)
+
+Runs automatically on backend startup. To create a new migration locally: `npm run migrate:dev -w backend`.
+
+---
+
+## Docker services
+
+| Service | Dev image | Prod image (Coolify) | Notes |
+|---|---|---|---|
+| `frontend` | Vite dev server (`:3000`) | nginx:alpine serving static build (`:80`) | |
+| `backend` | ts-node + nodemon | compiled `node dist/index.js` | |
+| `db` | postgres:15-alpine | postgres:15-alpine | |
+| `minio` | Built from Go source | minio/minio:latest | |
+| `nginx` | nginx:alpine (reverse proxy) | Built from `infrastructure/nginx/Dockerfile` | Config baked in — no volume mount |
+
+Coolify/Traefik handles SSL termination upstream. All nginx configs are HTTP-only.

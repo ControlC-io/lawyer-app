@@ -1,332 +1,86 @@
 # Deployment Guide
 
-## Docker Deployment
+Lexora is deployed via **Coolify** using `docker-compose.coolify.yml`. For the complete step-by-step Coolify deployment guide see [coolify-deployment.md](coolify-deployment.md).
 
-### Prerequisites
+---
 
-- Docker and Docker Compose installed
-- MinIO access credentials
-- SendGrid API key (optional, for emails)
-- OpenAI API key (optional, for transcription)
-- Lovable API key (optional, for AI workflow creation)
+## Local development
 
-### Environment Configuration
-
-1. Create a `.env` file in the project root (or update `docker-compose.yml`):
-
-```env
-# Database
-DATABASE_URL=postgresql://postgres:postgres@db:5432/floowly_db
-
-# MinIO
-MINIO_ENDPOINT=minio
-MINIO_PORT=9000
-MINIO_USE_SSL=false
-MINIO_ACCESS_KEY=minioadmin
-MINIO_SECRET_KEY=minioadmin
-MINIO_BUCKET_NAME=floowly
-MINIO_PUBLIC_URL=http://localhost:9000
-MINIO_EXTERNAL_ENDPOINT=
-MINIO_SIGNED_URL_MAX_AGE=604800
-
-# Backend Authentication
-JWT_SECRET=your-jwt-secret-key-change-in-production
-INTERNAL_API_KEY=internal-trigger-key-change-in-production
-# Set to "true" to allow public signup (account creation without invitation); default off
-# ENABLE_PUBLIC_SIGNUP=false
-
-# Email (SendGrid)
-SENDGRID_API_KEY=your-sendgrid-api-key
-FROM_EMAIL=noreply@floowly.app
-
-# Application
-APP_URL=http://localhost
-NODE_ENV=production
-PORT=3001
-
-# AI Services (Optional)
-OCR_API_KEY=your-mistral-api-key
-GEMINI_API_KEY=your-gemini-api-key
-GEMINI_MODEL=gemini-2.0-flash
-```
-
-### Build and Run
+### Full Docker stack
 
 ```bash
-# Build all services
-docker-compose build
-
-# Start services
-docker-compose up -d
-
-# View logs
-docker-compose logs -f backend
-
-# Stop services
-docker-compose down
-
-# Reset everything (including data)
-docker-compose down -v
+cp .env.sample .env   # fill in real values
+docker compose up -d
+docker compose exec backend npm run migrate:deploy
 ```
 
-### Initial Setup
+Services: frontend `:3000`, backend `:3001`, MinIO API `:9000`, MinIO console `:9001`.
 
-After first deployment:
+### Host dev (recommended on Windows — faster HMR)
 
-1. **Run database migrations**:
-```bash
-docker-compose exec backend npm run migrate:deploy
-```
-
-2. **Verify services are healthy**:
-```bash
-curl http://localhost:3001/health
-```
-
-Expected response:
-```json
-{
-  "status": "ok",
-  "database": "connected",
-  "storage": "connected"
-}
-```
-
-3. **Verify MinIO is accessible**:
-- Console: http://localhost:9001
-- API: http://localhost:9000
-
-### Production with HTTPS (Droplet / DigitalOcean)
-
-For production with HTTPS (Let's Encrypt) on a single domain (e.g. `automate.floowly.app`):
-
-1. **First-time startup** (creates dummy cert, starts stack, optionally obtains real cert):
-
-   ```bash
-   # From project root. Ensure .env exists (copy from .env.sample and edit).
-   ./scripts/first-startup-prod.sh
-   ```
-
-   To obtain a real certificate in the same run, set your email:
-
-   ```bash
-   CERTBOT_EMAIL=your@email.com ./scripts/first-startup-prod.sh
-   ```
-
-2. **What the script does**: Runs `docker compose -f docker-compose.yml -f docker-compose.prod.yml` with the `init` profile to create a dummy SSL cert so nginx can start, then brings up all services. If `CERTBOT_EMAIL` is set, it runs Certbot to get a Let's Encrypt certificate and reloads nginx.
-
-3. **Manual certificate (if you didn't use CERTBOT_EMAIL)**:
-
-   ```bash
-   docker compose -f docker-compose.yml -f docker-compose.prod.yml run --rm certbot certonly --webroot -w /var/www/certbot -d automate.floowly.app --email your@email.com --agree-tos --no-eff-email
-   docker compose -f docker-compose.yml -f docker-compose.prod.yml exec nginx nginx -s reload
-   ```
-
-4. **Renewal (cron weekly)**:
-
-   Use the provided script (run from the droplet, or via cron):
-
-   ```bash
-   ./scripts/renew-cert.sh
-   ```
-
-   To run it weekly (Sundays at midnight), add to crontab (`crontab -e`). Replace `/path/to/Floowly` with the actual project path on the droplet (e.g. `/root/Floowly`):
-
-   ```cron
-   0 0 * * 0 /path/to/Floowly/scripts/renew-cert.sh >> /var/log/floowly-cert-renew.log 2>&1
-   ```
-
-   Create the log file (optional) so cron can append: `sudo touch /var/log/floowly-cert-renew.log`
-
-5. **Files used**: `docker-compose.prod.yml` (production overrides, SSL volumes, certbot), `infrastructure/nginx/nginx.prod.conf` (HTTP→HTTPS redirect, ACME challenge, HTTPS proxy). Domain is set to `automate.floowly.app` in both; for another domain, edit those files and set `DOMAIN=your.domain` when running the script.
-
-### Updating images on the Droplet
-
-After new code is pushed to `main` (or you push a version tag), images are built and pushed to GitHub Container Registry (GHCR). To run the new version on your DigitalOcean Droplet:
-
-**If the Droplet builds from the repo** (default: no `image:` for backend/frontend):
+Start only DB + MinIO in Docker, run app code on the host:
 
 ```bash
-# SSH into the droplet, then from the project root (e.g. /root/Floowly):
-git pull origin main
-
-# Rebuild and restart app services only (keeps db, nginx, minio as-is)
-docker compose -f docker-compose.yml -f docker-compose.prod.yml build --no-cache backend frontend
-docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d backend frontend
+docker compose up -d db minio
+.\scripts\dev-local.ps1
 ```
 
-**If the Droplet uses pre-built images from GHCR** (you have overridden `backend`/`frontend` with `image: ghcr.io/<owner>/floowly-backend:latest` and same for frontend):
+Frontend proxies `/api` → `http://127.0.0.1:3001` via Vite. Set `VITE_API_URL=http://127.0.0.1:3001` in `.env`.
 
-1. Ensure the Droplet can pull from GHCR. For a private repo, create a Personal Access Token (PAT) with `read:packages`, then on the droplet:
+---
 
-   ```bash
-   echo YOUR_GITHUB_PAT | docker login ghcr.io -u YOUR_GITHUB_USERNAME --password-stdin
-   ```
+## Production (Coolify)
 
-2. Pull and recreate:
+See [coolify-deployment.md](coolify-deployment.md) for full instructions including:
+- Creating the Coolify application
+- Environment variables (use `.env.production.sample` as reference)
+- First-deploy database bootstrap
+- Common gotchas
 
-   ```bash
-   docker compose -f docker-compose.yml -f docker-compose.prod.yml pull backend frontend
-   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d backend frontend
-   ```
+---
 
-Migrations run automatically when the backend container starts (`npm run start` runs `migrate:deploy` first).
+## Database
 
-### Production Deployment
+Migrations run automatically on backend startup via `backend/scripts/migrate.js` (cross-platform Node.js — replaces the old `migrate.sh`). It waits for Postgres, runs `prisma generate`, then `prisma migrate deploy`.
 
-#### Security Checklist
-
-- [ ] Change all default passwords and secrets
-- [ ] Use strong JWT_SECRET and INTERNAL_API_KEY
-- [ ] Configure HTTPS/TLS for all services
-- [ ] Use environment-specific `.env` files
-- [ ] Restrict database access to backend only
-- [ ] Enable MinIO SSL (`MINIO_USE_SSL=true`)
-- [ ] Configure proper CORS origins
-- [ ] Review and update Nginx configuration
-
-#### Recommended Production Setup
-
-```yaml
-# docker-compose.prod.yml
-services:
-  backend:
-    environment:
-      - NODE_ENV=production
-      - JWT_SECRET=${JWT_SECRET}  # From secure vault
-      - INTERNAL_API_KEY=${INTERNAL_API_KEY}  # From secure vault
-      - DATABASE_URL=${DATABASE_URL}  # Managed database
-      - SENDGRID_API_KEY=${SENDGRID_API_KEY}
-    restart: always
-    deploy:
-      replicas: 2
-      resources:
-        limits:
-          memory: 2G
-        reservations:
-          memory: 512M
+To author a new migration locally:
+```bash
+npm run migrate:dev -w backend
 ```
 
-#### Database Backup
+### Backup / restore
 
 ```bash
 # Backup
-docker-compose exec db pg_dump -U postgres floowly_db > backup.sql
+docker compose exec db pg_dump -U postgres lawyer_app_db > backup.sql
 
 # Restore
-docker-compose exec -T db psql -U postgres floowly_db < backup.sql
+docker compose exec -T db psql -U postgres lawyer_app_db < backup.sql
+
+# Copy dump from server
+scp root@SERVER_IP:/path/to/backup.sql ./dumps/
 ```
 
-#### MinIO Data Migration
+---
 
-If migrating files from Supabase Storage:
-
-1. Export files from Supabase Storage
-2. Upload to MinIO using `mc` (MinIO Client):
+## Health checks
 
 ```bash
-# Install mc
-brew install minio/stable/mc
-
-# Configure
-mc alias set myminio http://localhost:9000 minioadmin minioadmin
-
-# Upload files
-mc cp --recursive ./exported-files/ myminio/documents/
+curl http://localhost:3001/health          # backend
+docker compose exec db pg_isready         # postgres
+curl http://localhost:9000/minio/health/live  # minio
 ```
 
-## Service URLs
+---
 
-### Development
-- Frontend: http://localhost:3000
-- Backend API: http://localhost:3001
-- Database: localhost:5432
-- MinIO Console: http://localhost:9001
-- MinIO API: http://localhost:9000
-- Nginx: http://localhost:80
+## Security checklist (production)
 
-### Production
-Configure these in your production environment:
-- Frontend: https://app.yourdomain.com
-- Backend API: https://api.yourdomain.com
-- MinIO: https://storage.yourdomain.com (internal)
-
-## Monitoring
-
-### Health Checks
-
-```bash
-# Backend
-curl http://localhost:3001/health
-
-# Database
-docker-compose exec db pg_isready
-
-# MinIO
-curl http://localhost:9000/minio/health/live
-```
-
-### Logs
-
-```bash
-# All services
-docker-compose logs -f
-
-# Specific service
-docker-compose logs -f backend
-docker-compose logs -f db
-docker-compose logs -f minio
-```
-
-## Scaling
-
-### Horizontal Scaling
-
-To scale the backend:
-
-```bash
-docker-compose up -d --scale backend=3
-```
-
-Ensure:
-- Load balancer (Nginx) distributes requests
-- Database can handle connection pool from multiple backends
-- Session state is stateless (JWT-based)
-
-### Database Performance
-
-For production:
-- Use managed PostgreSQL (AWS RDS, Google Cloud SQL, etc.)
-- Configure connection pooling
-- Enable query logging for slow queries
-- Regular VACUUM and ANALYZE
-
-### Storage Performance
-
-For production:
-- Use managed S3-compatible storage
-- Configure CDN for file delivery
-- Implement caching for signed URLs
-
-## Troubleshooting
-
-### Backend won't start
-- Check DATABASE_URL is correct
-- Verify MinIO is running
-- Check logs: `docker-compose logs backend`
-
-### Triggers not working
-- Verify pg_net extension is installed
-- Check trigger_settings table configuration
-- Ensure INTERNAL_API_KEY matches between DB and backend
-- See [trigger-setup.md](./trigger-setup.md)
-
-### File uploads failing
-- Verify MinIO is running and accessible
-- Check bucket exists: `documents`
-- Verify MinIO credentials in environment
-
-### Emails not sending
-- Check SENDGRID_API_KEY is set
-- Verify FROM_EMAIL is authorized in SendGrid
-- Check backend logs for email errors
+- [ ] `JWT_SECRET` — random 32-byte hex (`openssl rand -hex 32`)
+- [ ] `INTERNAL_API_KEY` — random hex
+- [ ] `SUPER_ADMIN_API_KEY` — strong secret, stored securely
+- [ ] `POSTGRES_PASSWORD` — not the default `postgres`
+- [ ] `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` — not `minioadmin`
+- [ ] `NODE_ENV=production`
+- [ ] `ENABLE_PUBLIC_SIGNUP=false` unless intentionally open
+- [ ] `APP_URL` / `BACKEND_URL` point to the real HTTPS domain
+- [ ] `VITE_API_URL` is empty (relative API calls via nginx)
